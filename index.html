@@ -276,7 +276,7 @@ $('#loginForm').onsubmit = (e) => {
   e.preventDefault();
   run(async () => {
     const {error} = await db.auth.signInWithPassword({email: $('#email').value, password: $('#pass').value});
-    if (error) throw new Error('error.message');
+    if (error) throw new Error(error.message);
     await enter();
   });
 };
