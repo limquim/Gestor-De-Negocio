@@ -75,16 +75,15 @@ th.n{text-align:right}
   <nav id="tabs">
     <button data-tab="productos" class="on">Productos</button>
     <button data-tab="inventario">Inventario</button>
+    <button data-tab="compras">Compras</button>
     <button data-tab="tasa">Tasa</button>
   </nav>
   <main id="view"></main>
 </div>
 
+<script src="config.js"></script>
 <script>
-// ============ CONFIGURACIÓN: pega aquí los datos de tu proyecto Supabase ============
-const SUPABASE_URL = 'https://tzennwnijesnllmcqomm.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR6ZW5ud25pamVzbmxsbWNxb21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM4MzQ5MzEsImV4cCI6MjEwOTQxMDkzMX0.ru_lhpyKBhmng3bx17LNCjUZet7ellemyk4DRKp2ooI';
-// =====================================================================================
+// Las claves de Supabase están en config.js
 
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -276,7 +275,7 @@ $('#loginForm').onsubmit = (e) => {
   e.preventDefault();
   run(async () => {
     const {error} = await db.auth.signInWithPassword({email: $('#email').value, password: $('#pass').value});
-    if (error) throw new Error(error.message);
+    if (error) throw new Error(error.message === 'Invalid login credentials' ? 'Correo o contraseña incorrectos' : error.message);
     await enter();
   });
 };
@@ -298,5 +297,6 @@ run(async () => {
   session ? await enter() : showLogin();
 });
 </script>
+<script src="compras.js"></script>
 </body>
 </html>
