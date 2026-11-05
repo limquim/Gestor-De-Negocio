@@ -1,0 +1,302 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gestor de Limpieza</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<style>
+:root{--bg:#f1f6f7;--card:#fff;--ink:#12303a;--mut:#5f7983;--line:#d9e5e8;--pri:#0b7285;--pri-ink:#fff;--tag:#f4c430;--tag-ink:#3a2e00;--bad:#b4381a;--ok:#1b7f4b}
+@media(prefers-color-scheme:dark){:root{--bg:#0d1a1f;--card:#14262d;--ink:#e6f1f4;--mut:#8fa9b2;--line:#25404a;--pri:#3cb6cc;--pri-ink:#04222a;--tag:#f4c430;--tag-ink:#2a2100;--bad:#ff8a6b;--ok:#5fd394}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 Manrope,system-ui,-apple-system,"Segoe UI",sans-serif}
+.hidden{display:none!important}
+h1,h2{margin:0 0 .6rem;font-weight:800;letter-spacing:-.01em}
+h2{font-size:1.1rem}
+.mut{color:var(--mut)}.bad{color:var(--bad)}.n{text-align:right;font-variant-numeric:tabular-nums}
+label{display:block;font-weight:600;font-size:.85rem;color:var(--mut)}
+input,select{width:100%;margin-top:.25rem;padding:.55rem .65rem;border:1px solid var(--line);border-radius:8px;background:var(--bg);color:var(--ink);font:inherit}
+input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid var(--pri);outline-offset:1px}
+.btn{padding:.55rem 1rem;border:0;border-radius:8px;background:var(--pri);color:var(--pri-ink);font:inherit;font-weight:700;cursor:pointer}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.lnk{background:none;border:0;color:var(--pri);font:inherit;font-weight:600;cursor:pointer;padding:.2rem .4rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:1.1rem;margin-bottom:1rem}
+.login{min-height:100vh;display:grid;place-items:center;padding:1rem}
+.login .card{width:100%;max-width:360px;display:grid;gap:.8rem}
+header{display:flex;align-items:center;gap:.8rem;padding:.7rem 1rem;background:var(--card);border-bottom:1px solid var(--line);flex-wrap:wrap}
+header strong{font-size:1.05rem;font-weight:800;margin-right:auto}
+.price-tag{background:var(--tag);color:var(--tag-ink);padding:.3rem .8rem .3rem 1.1rem;border-radius:4px 14px 14px 4px;font-weight:600;position:relative}
+.price-tag::before{content:"";position:absolute;left:.4rem;top:50%;width:6px;height:6px;margin-top:-3px;border-radius:50%;background:var(--bg)}
+.price-tag small{opacity:.75;margin-left:.3rem}
+nav{display:flex;gap:.3rem;padding:.6rem 1rem 0;max-width:1000px;margin:auto}
+nav button{padding:.5rem 1rem;border:0;border-bottom:3px solid transparent;background:none;color:var(--mut);font:inherit;font-weight:700;cursor:pointer}
+nav button.on{color:var(--ink);border-color:var(--pri)}
+main{max-width:1000px;margin:auto;padding:1rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:.8rem;align-items:end}
+.row{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin-top:.8rem}
+.row input{width:auto;flex:1;min-width:140px;margin:0}
+.scroll{overflow-x:auto}
+table{width:100%;border-collapse:collapse;white-space:nowrap}
+th,td{padding:.55rem .6rem;border-bottom:1px solid var(--line);text-align:left}
+th{color:var(--mut);font-size:.82rem;font-weight:600}
+th.n{text-align:right}
+.badge{padding:.1rem .55rem;border-radius:99px;font-size:.8rem;font-weight:700;background:var(--line)}
+.badge.ok{color:var(--ok)}.badge.low{background:var(--tag);color:var(--tag-ink)}.badge.out{color:var(--bad)}
+.big{font-size:2rem;font-weight:800;margin:.2rem 0}
+.radios{display:flex;gap:1.2rem;flex-wrap:wrap}
+.radios label{display:flex;align-items:center;gap:.4rem;color:var(--ink)}
+.radios input{width:auto;margin:0}
+#toast{position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:.6rem 1rem;border-radius:10px;font-weight:600;max-width:90vw;z-index:9}
+#toast.err{background:var(--bad);color:#fff}
+</style>
+</head>
+<body>
+<div id="toast" class="hidden" role="status"></div>
+
+<section id="login" class="login hidden">
+  <form id="loginForm" class="card">
+    <h1>Gestor de Limpieza</h1>
+    <p class="mut" style="margin:0">Inicia sesión para entrar a tu negocio.</p>
+    <label>Correo<input type="email" id="email" required autocomplete="username"></label>
+    <label>Contraseña<input type="password" id="pass" required autocomplete="current-password"></label>
+    <button class="btn" type="submit">Entrar</button>
+  </form>
+</section>
+
+<div id="app" class="hidden">
+  <header>
+    <strong>Gestor de Limpieza</strong>
+    <div id="rateChip"></div>
+    <button class="btn ghost" id="logout">Salir</button>
+  </header>
+  <nav id="tabs">
+    <button data-tab="productos" class="on">Productos</button>
+    <button data-tab="inventario">Inventario</button>
+    <button data-tab="tasa">Tasa</button>
+  </nav>
+  <main id="view"></main>
+</div>
+
+<script>
+// ============ CONFIGURACIÓN: pega aquí los datos de tu proyecto Supabase ============
+const SUPABASE_URL = 'https://tzennwnijesnllmcqomm.supabase.co/rest/v1/';
+const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR6ZW5ud25pamVzbmxsbWNxb21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM4MzQ5MzEsImV4cCI6MjEwOTQxMDkzMX0.ru_lhpyKBhmng3bx17LNCjUZet7ellemyk4DRKp2ooI';
+// =====================================================================================
+
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const fmt = (n, d = 2) => Number(n || 0).toLocaleString('es-VE', {minimumFractionDigits: d, maximumFractionDigits: d});
+const qty = (n) => Number(n || 0).toLocaleString('es-VE', {maximumFractionDigits: 3});
+const caracasDate = () => new Date().toLocaleDateString('en-CA', {timeZone: 'America/Caracas'});
+const TIPOS = {materia_prima:'Materia prima', envase:'Envase', producto_terminado:'Producto terminado', reventa:'Reventa'};
+const MOV = {compra:'Compra', venta:'Venta', produccion_entrada:'Producción (entra)', produccion_consumo:'Producción (consumo)', ajuste:'Ajuste', merma:'Merma', devolucion:'Devolución'};
+
+let db, tab = 'productos';
+const S = {rate: null, mode: 'auto', rates: [], products: []};
+
+let toastTimer;
+function toast(msg, err) {
+  const t = $('#toast'); t.textContent = msg; t.className = err ? 'err' : '';
+  clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), 4000);
+}
+const run = async (fn) => { try { await fn(); } catch (e) { console.error(e); toast(e.message || 'Ocurrió un error inesperado', true); } };
+const q = async (p) => { const {data, error} = await p; if (error) throw error; return data; };
+
+// ---------- Tasa ----------
+async function loadRate() {
+  const [set, rate, hist] = await Promise.all([
+    q(db.from('settings').select('rate_mode').eq('id', 1).single()),
+    q(db.rpc('current_rate', {p_currency: 'USD'})),
+    q(db.from('exchange_rates').select('*').eq('currency', 'USD').order('rate_date', {ascending: false}).order('created_at', {ascending: false}).limit(10))
+  ]);
+  S.mode = set?.rate_mode || 'auto'; S.rate = rate ? Number(rate) : null; S.rates = hist || [];
+  $('#rateChip').innerHTML = S.rate
+    ? `<span class="price-tag">1 USD = <b>${fmt(S.rate, 4)} Bs</b><small>${S.mode === 'auto' ? 'BCV auto' : 'manual'}</small></span>`
+    : '<span class="bad">Sin tasa: configúrala en la pestaña Tasa</span>';
+}
+
+async function fetchBCV() {
+  const res = await fetch('https://ve.dolarapi.com/v1/dolares/oficial');
+  if (!res.ok) throw new Error('La fuente de la tasa BCV no respondió');
+  const j = await res.json();
+  const rate = Number(j.promedio ?? j.venta);
+  if (!(rate > 0)) throw new Error('La fuente devolvió una tasa inválida');
+  await q(db.from('exchange_rates').insert({currency: 'USD', rate, rate_date: caracasDate(), source: 'bcv_auto'}));
+  return rate;
+}
+
+async function autoRate() {
+  if (S.mode !== 'auto') return;
+  const last = await q(db.from('exchange_rates').select('rate_date').eq('currency', 'USD').eq('source', 'bcv_auto').order('rate_date', {ascending: false}).limit(1));
+  if (last[0]?.rate_date === caracasDate()) return;
+  try { await fetchBCV(); await loadRate(); }
+  catch (e) { toast('No se pudo traer la tasa BCV. Puedes cargarla en modo manual.', true); }
+}
+
+// ---------- Productos ----------
+async function viewProductos() {
+  S.products = await q(db.from('products').select('*').eq('active', true).order('name'));
+  const opts = Object.entries(TIPOS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
+  const rows = S.products.map(p => `<tr>
+    <td>${esc(p.sku)}</td><td>${esc(p.name)}</td><td>${TIPOS[p.type]}</td><td>${esc(p.unit)}</td>
+    <td class="n">${fmt(p.avg_cost_usd)}</td><td class="n">${fmt(p.sale_price_usd)}</td>
+    <td class="n">${S.rate ? fmt(p.sale_price_usd * S.rate) : '-'}</td>
+    <td><button class="lnk" data-act="edit" data-id="${p.id}">Editar</button><button class="lnk bad" data-act="del" data-id="${p.id}">Quitar</button></td></tr>`).join('');
+  $('#view').innerHTML = `
+  <div class="card"><h2 id="pTitle">Nuevo producto</h2>
+    <form id="pForm"><input type="hidden" name="pid">
+      <div class="grid">
+        <label>Código (SKU)<input name="sku"></label>
+        <label>Nombre<input name="name" required></label>
+        <label>Tipo<select name="type">${opts}</select></label>
+        <label>Unidad (und, kg, L)<input name="unit" value="und"></label>
+        <label>Costo en USD<input name="avg_cost_usd" type="number" step="0.0001" min="0" value="0"></label>
+        <label>Precio de venta en USD<input name="sale_price_usd" type="number" step="0.0001" min="0" value="0"></label>
+        <label>Stock mínimo<input name="min_stock" type="number" step="0.001" min="0" value="0"></label>
+      </div>
+      <div class="row"><button class="btn" type="submit">Guardar producto</button><button class="btn ghost" type="button" data-act="cancel">Limpiar</button></div>
+    </form></div>
+  <div class="card"><h2>Productos (${S.products.length})</h2>
+    ${S.products.length ? `<div class="scroll"><table><thead><tr><th>Código</th><th>Producto</th><th>Tipo</th><th>Unidad</th><th class="n">Costo USD</th><th class="n">Precio USD</th><th class="n">Precio Bs</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
+    : '<p class="mut">Aún no hay productos. Crea el primero con el formulario de arriba.</p>'}</div>`;
+  $('#pForm').onsubmit = (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target), id = f.get('pid');
+    const row = {sku: f.get('sku').trim() || null, name: f.get('name').trim(), type: f.get('type'), unit: f.get('unit').trim() || 'und',
+      avg_cost_usd: +f.get('avg_cost_usd') || 0, sale_price_usd: +f.get('sale_price_usd') || 0, min_stock: +f.get('min_stock') || 0};
+    run(async () => {
+      await q(id ? db.from('products').update(row).eq('id', id) : db.from('products').insert(row));
+      toast('Producto guardado'); render();
+    });
+  };
+}
+function editProduct(id) {
+  const p = S.products.find(x => x.id == id); if (!p) return;
+  const el = $('#pForm').elements;
+  el.pid.value = p.id; el.sku.value = p.sku || ''; el.name.value = p.name; el.type.value = p.type; el.unit.value = p.unit;
+  el.avg_cost_usd.value = p.avg_cost_usd; el.sale_price_usd.value = p.sale_price_usd; el.min_stock.value = p.min_stock;
+  $('#pTitle').textContent = 'Editar producto'; window.scrollTo({top: 0, behavior: 'smooth'});
+}
+
+// ---------- Inventario ----------
+async function viewInventario() {
+  const [stock, moves] = await Promise.all([
+    q(db.from('stock_actual').select('*').order('name')),
+    q(db.from('inventory_movements').select('id,movement_type,quantity,notes,created_at,products(name,unit)').order('created_at', {ascending: false}).limit(12))
+  ]);
+  const opts = stock.map(s => `<option value="${s.product_id}">${esc(s.name)} (${esc(s.unit)})</option>`).join('');
+  const rows = stock.map(s => {
+    const st = Number(s.stock);
+    const b = st <= 0 ? '<span class="badge out">Agotado</span>' : s.bajo_minimo ? '<span class="badge low">Bajo mínimo</span>' : '<span class="badge ok">Disponible</span>';
+    return `<tr><td>${esc(s.name)}</td><td>${TIPOS[s.type]}</td><td class="n">${qty(st)} ${esc(s.unit)}</td><td class="n">${qty(s.min_stock)}</td><td>${b}</td></tr>`;
+  }).join('');
+  const mrows = moves.map(m => `<tr><td>${new Date(m.created_at).toLocaleString('es-VE', {dateStyle: 'short', timeStyle: 'short'})}</td><td>${esc(m.products?.name)}</td><td>${MOV[m.movement_type]}</td><td class="n">${m.quantity > 0 ? '+' : ''}${qty(m.quantity)}</td><td>${esc(m.notes)}</td></tr>`).join('');
+  $('#view').innerHTML = `
+  <div class="card"><h2>Registrar movimiento</h2>
+    ${stock.length ? `<form id="mForm"><div class="grid">
+      <label>Producto<select name="product_id" required>${opts}</select></label>
+      <label>Movimiento<select name="kind"><option value="in">Entrada o carga inicial</option><option value="out">Salida o corrección</option><option value="merma">Merma o pérdida</option></select></label>
+      <label>Cantidad<input name="qty" type="number" step="0.001" min="0.001" required></label>
+      <label>Nota<input name="notes" placeholder="Ej: inventario inicial"></label></div>
+      <div class="row"><button class="btn" type="submit">Registrar movimiento</button></div></form>`
+    : '<p class="mut">Primero crea productos en la pestaña Productos.</p>'}</div>
+  <div class="card"><h2>Existencias</h2>
+    ${stock.length ? `<div class="scroll"><table><thead><tr><th>Producto</th><th>Tipo</th><th class="n">Stock</th><th class="n">Mínimo</th><th>Estado</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="mut">Sin productos todavía.</p>'}</div>
+  <div class="card"><h2>Últimos movimientos</h2>
+    ${moves.length ? `<div class="scroll"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th class="n">Cantidad</th><th>Nota</th></tr></thead><tbody>${mrows}</tbody></table></div>` : '<p class="mut">Aún no hay movimientos.</p>'}</div>`;
+  const form = $('#mForm');
+  if (form) form.onsubmit = (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target), kind = f.get('kind'), n = Math.abs(+f.get('qty'));
+    const row = {product_id: +f.get('product_id'), movement_type: kind === 'merma' ? 'merma' : 'ajuste', quantity: kind === 'in' ? n : -n, notes: f.get('notes').trim() || null};
+    run(async () => { await q(db.from('inventory_movements').insert(row)); toast('Movimiento registrado'); render(); });
+  };
+}
+
+// ---------- Tasa ----------
+async function viewTasa() {
+  await loadRate();
+  const rows = S.rates.map(r => `<tr><td>${r.rate_date}</td><td class="n">${fmt(r.rate, 4)}</td><td>${r.source === 'bcv_auto' ? 'BCV automática' : 'Manual'}</td></tr>`).join('');
+  $('#view').innerHTML = `
+  <div class="card"><h2>Tasa del dólar (Bs por 1 USD)</h2>
+    <p class="big">${S.rate ? fmt(S.rate, 4) + ' Bs' : 'Sin tasa'}</p>
+    <div class="radios">
+      <label><input type="radio" name="mode" value="auto" ${S.mode === 'auto' ? 'checked' : ''}> Automática (BCV)</label>
+      <label><input type="radio" name="mode" value="manual" ${S.mode === 'manual' ? 'checked' : ''}> Manual</label></div>
+    <div class="row"><button class="btn ghost" data-act="bcv">Traer tasa BCV ahora</button></div>
+    <form id="rForm" class="row"><input name="rate" type="number" step="0.0001" min="0.0001" placeholder="Escribe la tasa manual" required><button class="btn" type="submit">Guardar tasa manual</button></form>
+    <p class="mut">Al guardar una tasa manual, el sistema pasa a modo manual y la usa en todo.</p></div>
+  <div class="card"><h2>Historial</h2>
+    ${rows ? `<div class="scroll"><table><thead><tr><th>Fecha</th><th class="n">Tasa</th><th>Origen</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="mut">Aún no hay tasas guardadas.</p>'}</div>`;
+  $('#rForm').onsubmit = (e) => {
+    e.preventDefault();
+    const rate = +new FormData(e.target).get('rate');
+    run(async () => {
+      await q(db.from('exchange_rates').insert({currency: 'USD', rate, rate_date: caracasDate(), source: 'manual'}));
+      await q(db.from('settings').update({rate_mode: 'manual', updated_at: new Date().toISOString()}).eq('id', 1));
+      toast('Tasa manual guardada y activada'); render();
+    });
+  };
+}
+
+// ---------- Navegación y eventos ----------
+const views = {productos: viewProductos, inventario: viewInventario, tasa: viewTasa};
+const render = () => run(async () => { $('#view').innerHTML = '<p class="mut">Cargando...</p>'; await views[tab](); });
+
+$('#tabs').onclick = (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  tab = b.dataset.tab;
+  document.querySelectorAll('#tabs button').forEach(x => x.classList.toggle('on', x === b));
+  render();
+};
+$('#view').addEventListener('click', (e) => {
+  const t = e.target.closest('[data-act]'); if (!t) return;
+  const {act, id} = t.dataset;
+  run(async () => {
+    if (act === 'edit') editProduct(id);
+    if (act === 'cancel') render();
+    if (act === 'del') {
+      if (!confirm('¿Quitar este producto de la lista?')) return;
+      await q(db.from('products').update({active: false}).eq('id', id)); toast('Producto quitado'); render();
+    }
+    if (act === 'bcv') { const r = await fetchBCV(); await loadRate(); toast('Tasa BCV guardada: ' + fmt(r, 4) + ' Bs'); render(); }
+  });
+});
+$('#view').addEventListener('change', (e) => {
+  if (e.target.name !== 'mode') return;
+  run(async () => {
+    await q(db.from('settings').update({rate_mode: e.target.value, updated_at: new Date().toISOString()}).eq('id', 1));
+    await loadRate(); if (e.target.value === 'auto') await autoRate(); toast('Modo de tasa actualizado'); render();
+  });
+});
+$('#loginForm').onsubmit = (e) => {
+  e.preventDefault();
+  run(async () => {
+    const {error} = await db.auth.signInWithPassword({email: $('#email').value, password: $('#pass').value});
+    if (error) throw new Error('Correo o contraseña incorrectos');
+    await enter();
+  });
+};
+$('#logout').onclick = () => db.auth.signOut();
+
+async function enter() {
+  $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
+  await loadRate(); await autoRate(); render();
+}
+function showLogin() { $('#app').classList.add('hidden'); $('#login').classList.remove('hidden'); }
+
+run(async () => {
+  if (SUPABASE_URL.startsWith('PEGA')) {
+    document.body.innerHTML = '<p style="padding:2rem;font-family:sans-serif">Falta configurar SUPABASE_URL y SUPABASE_ANON_KEY dentro de index.html.</p>'; return;
+  }
+  db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  db.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') showLogin(); });
+  const {data: {session}} = await db.auth.getSession();
+  session ? await enter() : showLogin();
+});
+</script>
+</body>
+</html>
