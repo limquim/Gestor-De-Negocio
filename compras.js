@@ -2,12 +2,12 @@
 async function viewCompras() {
   const [prods, sups, buys] = await Promise.all([
     q(db.from('products').select('id,name,unit').eq('active', true).order('name')),
-    q(db.from('suppliers').select('id,name,phone').eq('active', true).order('name')),
-    q(db.from('purchases').select('id,purchase_date,currency,exchange_rate,total_usd,status,suppliers(name)').order('id', {ascending: false}).limit(15))
+    q(db.from('parties').select('id,name,phone').eq('is_supplier', true).eq('active', true).order('name')),
+    q(db.from('purchases').select('id,purchase_date,currency,exchange_rate,total_usd,status,parties(name)').order('id', {ascending: false}).limit(15))
   ]);
   const pOpts = prods.map(p => `<option value="${p.id}">${esc(p.name)} (${esc(p.unit)})</option>`).join('');
   const sOpts = sups.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
-  const rows = buys.map(b => `<tr><td>#${b.id}</td><td>${b.purchase_date}</td><td>${esc(b.suppliers?.name || 'Sin proveedor')}</td><td>${b.currency}</td>
+  const rows = buys.map(b => `<tr><td>#${b.id}</td><td>${b.purchase_date}</td><td>${esc(b.parties?.name || 'Sin proveedor')}</td><td>${b.currency}</td>
     <td class="n">${fmt(b.total_usd)}</td><td class="n">${fmt(b.total_usd * b.exchange_rate)}</td><td>${esc(b.status)}</td></tr>`).join('');
 
   $('#view').innerHTML = `
@@ -42,7 +42,7 @@ async function viewCompras() {
     e.preventDefault();
     const f = new FormData(e.target);
     run(async () => {
-      await q(db.from('suppliers').insert({name: f.get('name').trim(), rif: f.get('rif').trim() || null, phone: f.get('phone').trim() || null}));
+      await q(db.from('parties').insert({name: f.get('name').trim(), rif: f.get('rif').trim() || null, phone: f.get('phone').trim() || null, is_supplier: true, is_customer: false}));
       toast('Proveedor guardado'); render();
     });
   };

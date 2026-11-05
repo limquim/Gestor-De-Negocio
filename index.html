@@ -2,7 +2,7 @@
 <html lang="es">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Gestor de Limpieza</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -53,6 +53,7 @@ th.n{text-align:right}
 #toast.err{background:var(--bad);color:#fff}
 </style>
 <link rel="stylesheet" href="tema.css">
+<link rel="stylesheet" href="movil.css">
 </head>
 <body>
 <div id="toast" class="hidden" role="status"></div>
@@ -74,10 +75,11 @@ th.n{text-align:right}
     <button class="btn ghost" id="logout">Salir</button>
   </header>
   <nav id="tabs">
-    <button data-tab="productos" class="on">Productos</button>
-    <button data-tab="inventario">Inventario</button>
-    <button data-tab="compras">Compras</button>
-    <button data-tab="tasa">Tasa</button>
+    <button data-tab="inicio" class="on"><svg class="ic" viewBox="0 0 24 24"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg><span>Inicio</span></button>
+    <button data-tab="ventas"><svg class="ic" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg><span>Ventas</span></button>
+    <button data-tab="inventario"><svg class="ic" viewBox="0 0 24 24"><path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/></svg><span>Inventario</span></button>
+    <button data-tab="produccion"><svg class="ic" viewBox="0 0 24 24"><path d="M9 3h6M10 3v6L4.5 19a1.5 1.5 0 001.3 2h12.4a1.5 1.5 0 001.3-2L14 9V3"/><path d="M7.5 15h9"/></svg><span>Producción</span></button>
+    <button data-tab="mas"><svg class="ic" viewBox="0 0 24 24"><path d="M4 4h6v6H4zM14 4h6v6h-6zM4 14h6v6H4zM14 14h6v6h-6z"/></svg><span>Más</span></button>
   </nav>
   <main id="view"></main>
 </div>
@@ -94,7 +96,7 @@ const caracasDate = () => new Date().toLocaleDateString('en-CA', {timeZone: 'Ame
 const TIPOS = {materia_prima:'Materia prima', envase:'Envase', producto_terminado:'Producto terminado', reventa:'Reventa'};
 const MOV = {compra:'Compra', venta:'Venta', produccion_entrada:'Producción (entra)', produccion_consumo:'Producción (consumo)', ajuste:'Ajuste', merma:'Merma', devolucion:'Devolución'};
 
-let db, tab = 'productos';
+let db, tab = 'inicio';
 const S = {rate: null, mode: 'auto', rates: [], products: []};
 
 let toastTimer;
@@ -300,5 +302,7 @@ run(async () => {
 </script>
 <script src="compras.js"></script>
 <script src="inventario.js"></script>
+<script src="directorios.js"></script>
+<script src="shell.js"></script>
 </body>
 </html>
