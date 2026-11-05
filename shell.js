@@ -35,16 +35,29 @@ const soon = (note, items) => async () => {
   $('#view').innerHTML = `<div class="card"><h2>En construcción</h2><p class="mut">${note}</p><ul>${items.map(i => `<li>${i}</li>`).join('')}</ul></div>`;
 };
 
+const ico = (d) => `<svg class="ic" viewBox="0 0 24 24">${d}</svg>`;
 views.inicio = async () => {
-  const rows = await q(db.from('stock_actual').select('bajo_minimo,valor_usd'));
-  const valor = rows.reduce((a, x) => a + Number(x.valor_usd || 0), 0);
-  $('#view').innerHTML = `<h1 class="pt">Resumen</h1>
-    <div class="stats" style="margin-top:.8rem">
-      <div class="stat"><span>Tasa del día</span><b>${S.rate ? fmt(S.rate, 2) + ' Bs' : 'Sin tasa'}</b><span>por 1 USD</span></div>
+  const hoy = caracasDate();
+  const [stock, hoyV, pend] = await Promise.all([
+    q(db.from('stock_actual').select('bajo_minimo,valor_usd')),
+    q(db.from('ventas_resumen').select('total_usd,exchange_rate').eq('sale_date', hoy).neq('status', 'anulada')),
+    q(db.from('ventas_resumen').select('total_usd,paid_usd').eq('status', 'pendiente'))
+  ]);
+  const vendido = hoyV.reduce((a, r) => a + +r.total_usd, 0), vendidoBs = hoyV.reduce((a, r) => a + r.total_usd * r.exchange_rate, 0);
+  const cobrar = pend.reduce((a, r) => a + (r.total_usd - r.paid_usd), 0), valor = stock.reduce((a, x) => a + Number(x.valor_usd || 0), 0);
+  $('#view').innerHTML = `<div class="tiles">
+    <button class="tile main" data-go="ventas">${ico('<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>')}<span>Vender</span><small>Nueva venta</small></button>
+    <button class="tile" data-go="compras">${ico('<path d="M6 7h12l-1 13H7z"/><path d="M9 7a3 3 0 016 0"/>')}<span>Comprar</span><small>Registrar compra</small></button>
+    <button class="tile" data-go="produccion">${ico('<path d="M9 3h6M10 3v6L4.5 19a1.5 1.5 0 001.3 2h12.4a1.5 1.5 0 001.3-2L14 9V3"/><path d="M7.5 15h9"/>')}<span>Producir</span><small>Fabricar productos</small></button>
+    <button class="tile" data-go="inventario">${ico('<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>')}<span>Inventario</span><small>Existencias</small></button></div>
+    <h2 class="sec">Resumen de hoy</h2>
+    <div class="stats">
+      <div class="stat"><span>Vendido hoy</span><b>${fmt(vendido)} USD</b><span>${fmt(vendidoBs)} Bs | ${hoyV.length} ${hoyV.length === 1 ? 'venta' : 'ventas'}</span></div>
+      <button class="stat warn" id="stPend"><span>Por cobrar</span><b>${fmt(cobrar)} USD</b><span>${pend.length} ${pend.length === 1 ? 'venta pendiente' : 'ventas pendientes'}</span></button>
       <div class="stat"><span>Valor del inventario</span><b>${fmt(valor)} USD</b><span>${S.rate ? fmt(valor * S.rate) + ' Bs' : ''}</span></div>
-      <div class="stat warn"><span>Productos por reponer</span><b>${rows.filter(x => x.bajo_minimo).length}</b></div></div>
-    <div class="card"><h2>Acciones rápidas</h2><div class="quick">
-      <button class="btn" data-go="ventas">Vender</button><button class="btn" data-go="produccion">Producir</button><button class="btn" data-go="compras">Comprar</button></div></div>`;
+      <button class="stat bad" data-go="inventario"><span>Por reponer</span><b>${stock.filter(x => x.bajo_minimo).length}</b><span>en el mínimo o agotados</span></button></div>
+    <p class="mut">Tasa del día: ${S.rate ? fmt(S.rate, 2) + ' Bs por USD' : 'sin tasa, configúrala en Más > Configuración'}</p>`;
+  $('#stPend').onclick = () => { VH.f = 'pend'; SUB.ven = 'historial'; go('ventas'); };
 };
 
 const MODS = [['compras', 'Compras', 'Proveedores y entrada de mercancía'], ['marketing', 'Marketing', 'Clientes, ofertas y WhatsApp'],
@@ -66,3 +79,16 @@ views.contabilidad = page('Contabilidad', soon('Resultados del negocio:', ['Tota
 views.directorios = page('Directorios', withSubs('dir', DIR_LABELS, Object.fromEntries(Object.keys(DIRS).map(k => [k, () => viewDir(k)]))));
 views.configuracion = page('Configuración', withSubs('cfg', {tasa: 'Tasa', negocio: 'Negocio', ticket: 'Ticket'},
   {tasa: viewTasa, negocio: () => viewSettings('negocio'), ticket: () => viewSettings('ticket')}));
+
+// Fondo claro / oscuro (se recuerda la elección)
+const SUN = '<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+const MOON = '<svg class="ic" viewBox="0 0 24 24"><path d="M21 13A9 9 0 1111 3a7 7 0 0010 10z"/></svg>';
+const isDark = () => (document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')) === 'dark';
+const paintTheme = () => { $('#themeBtn').innerHTML = isDark() ? SUN : MOON; $('#themeBtn').title = isDark() ? 'Cambiar a fondo claro' : 'Cambiar a fondo oscuro'; };
+$('#themeBtn').onclick = () => {
+  const n = isDark() ? 'light' : 'dark';
+  document.documentElement.dataset.theme = n;
+  try { localStorage.setItem('tema', n); } catch (e) {}
+  paintTheme();
+};
+paintTheme();

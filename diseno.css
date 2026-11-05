@@ -1,0 +1,36 @@
+/* Diseño v3: temas claro/oscuro elegibles, jerarquía visual y uso cómodo en móvil */
+:root{color-scheme:light dark;--shadow:0 1px 2px rgba(18,48,58,.06),0 6px 16px rgba(18,48,58,.06)}
+@media(prefers-color-scheme:dark){:root:not([data-theme]){--shadow:none}}
+:root[data-theme="light"]{--bg:#f3f6f7;--card:#fff;--ink:#12303a;--mut:#5f7983;--line:#d9e5e8;--pri:#0b7285;--pri-ink:#fff;--tag:#f4c430;--tag-ink:#3a2e00;--bad:#b4381a;--ok:#1b7f4b;--shadow:0 1px 2px rgba(18,48,58,.06),0 6px 16px rgba(18,48,58,.06);color-scheme:light}
+:root[data-theme="dark"]{--bg:#0d1a1f;--card:#14262d;--ink:#e6f1f4;--mut:#8fa9b2;--line:#25404a;--pri:#3cb6cc;--pri-ink:#04222a;--tag:#f4c430;--tag-ink:#2a2100;--bad:#ff8a6b;--ok:#5fd394;--shadow:none;color-scheme:dark}
+
+body{-webkit-tap-highlight-color:transparent}
+h2.sec{font-size:.9rem;color:var(--mut);font-weight:700;margin:1.3rem 0 .6rem}
+#logout{display:none}
+header{gap:.6rem}
+#rateChip .price-tag{font-size:.8rem;padding:.25rem .7rem .25rem 1rem}
+.icon-btn{width:44px;height:44px;border-radius:12px;border:1px solid var(--line);background:var(--card);color:var(--ink);display:grid;place-items:center;cursor:pointer;flex:none}
+
+.card{border-radius:16px;box-shadow:var(--shadow)}
+input,select{min-height:46px;border-radius:10px}
+.btn{min-height:46px;border-radius:12px;font-size:1rem}
+.row>.btn{flex:1 1 9rem}
+
+nav#tabs{box-shadow:0 -4px 16px rgba(0,0,0,.07)}
+nav#tabs button{min-height:54px;justify-content:center;font-size:.72rem}
+nav#tabs .ic{width:24px;height:24px}
+
+.item{min-height:60px;box-shadow:var(--shadow)}
+.item:active,.tile:active,.menu button:active,button.stat:active{transform:scale(.985)}
+
+.tiles{display:grid;grid-template-columns:repeat(2,1fr);gap:.7rem}
+.tile{display:flex;flex-direction:column;align-items:flex-start;gap:.2rem;padding:1rem;border-radius:16px;border:1px solid var(--line);background:var(--card);color:var(--ink);font:inherit;font-weight:800;font-size:1.05rem;text-align:left;cursor:pointer;box-shadow:var(--shadow)}
+.tile .ic{width:30px;height:30px;color:var(--pri);margin-bottom:.4rem}
+.tile small{font-weight:500;color:var(--mut);font-size:.8rem}
+.tile.main{background:var(--pri);border-color:var(--pri);color:var(--pri-ink)}
+.tile.main .ic,.tile.main small{color:var(--pri-ink)}
+button.stat{text-align:left;font:inherit;color:var(--ink);cursor:pointer;width:100%}
+.stat{box-shadow:var(--shadow)}
+
+.sheet-box{box-shadow:0 -8px 30px rgba(0,0,0,.25)}
+.sheet-box::before{content:"";display:block;width:40px;height:4px;border-radius:2px;background:var(--line);margin:-.3rem auto .8rem}

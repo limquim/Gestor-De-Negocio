@@ -3,7 +3,8 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Gestor de Limpieza</title>
+<title>Gestor de Negocio</title>
+<script>try{var t=localStorage.getItem('tema');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&display=swap" rel="stylesheet">
@@ -54,13 +55,14 @@ th.n{text-align:right}
 </style>
 <link rel="stylesheet" href="tema.css">
 <link rel="stylesheet" href="movil.css">
+<link rel="stylesheet" href="diseno.css">
 </head>
 <body>
 <div id="toast" class="hidden" role="status"></div>
 
 <section id="login" class="login hidden">
   <form id="loginForm" class="card">
-    <h1>Gestor de Limpieza</h1>
+    <h1>Gestor de Negocio</h1>
     <p class="mut" style="margin:0">Inicia sesión para entrar a tu negocio.</p>
     <label>Correo<input type="email" id="email" required autocomplete="username"></label>
     <label>Contraseña<input type="password" id="pass" required autocomplete="current-password"></label>
@@ -70,8 +72,9 @@ th.n{text-align:right}
 
 <div id="app" class="hidden">
   <header>
-    <strong>Gestor de Limpieza</strong>
+    <strong>Gestor de Negocio</strong>
     <div id="rateChip"></div>
+    <button class="icon-btn" id="themeBtn" aria-label="Cambiar entre fondo claro y oscuro"></button>
     <button class="btn ghost" id="logout">Salir</button>
   </header>
   <nav id="tabs">
