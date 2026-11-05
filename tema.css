@@ -1,0 +1,36 @@
+/* Tema v2: mejoras de diseño (se carga después de los estilos base) */
+header{position:sticky;top:0;z-index:5}
+header strong::before{content:"";display:inline-block;width:.8rem;height:.8rem;border-radius:50%;background:var(--pri);margin-right:.7rem;box-shadow:.6rem -.4rem 0 -.15rem var(--tag)}
+nav{overflow-x:auto;scrollbar-width:none}
+nav button{white-space:nowrap}
+main{padding-top:1.2rem}
+tbody tr:hover{background:color-mix(in srgb,var(--pri) 8%,transparent)}
+td small{display:block;color:var(--mut);font-size:.78rem}
+
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.8rem;margin-bottom:1rem}
+.stat{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--pri);border-radius:12px;padding:.8rem 1rem}
+.stat b{display:block;font-size:1.45rem;font-weight:800;line-height:1.25}
+.stat span{color:var(--mut);font-size:.82rem}
+.stat.warn{border-left-color:var(--tag)}
+.stat.bad{border-left-color:var(--bad)}
+
+.toolbar{display:flex;gap:.7rem;flex-wrap:wrap;align-items:center;margin-bottom:.8rem}
+.toolbar input[type=search]{flex:1;min-width:180px;width:auto;margin:0}
+.chips{display:flex;gap:.35rem;flex-wrap:wrap}
+.chips button{padding:.35rem .8rem;border:1px solid var(--line);border-radius:99px;background:none;color:var(--mut);font:inherit;font-size:.85rem;font-weight:600;cursor:pointer}
+.chips button.on{background:var(--pri);border-color:var(--pri);color:var(--pri-ink)}
+.chk{display:flex;align-items:center;gap:.4rem;color:var(--ink);font-size:.9rem}
+.chk input{width:auto;margin:0}
+
+.bar{height:5px;width:90px;border-radius:3px;background:var(--line);margin-top:.3rem;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--ok)}
+.bar i.low{background:var(--tag)}
+.bar i.out{background:var(--bad)}
+.in{color:var(--ok)}
+.outq{color:var(--bad)}
+
+details.card summary{cursor:pointer;font-weight:800}
+details.card[open] summary{margin-bottom:.8rem}
+.title-row{display:flex;justify-content:space-between;align-items:center;gap:.6rem;flex-wrap:wrap}
+
+@media(max-width:640px){main{padding:.7rem}.big{font-size:1.6rem}}
