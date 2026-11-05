@@ -42,3 +42,9 @@ nav#tabs button.on{color:var(--pri);background:color-mix(in srgb,var(--pri) 12%,
 .pl small{display:block;color:var(--mut)}
 .pl .warn,.warn{color:var(--bad)}
 .pl label{margin:0}
+
+/* Productos */
+.row0{display:flex;align-items:center;gap:.7rem}
+.thumb{width:44px;height:44px;border-radius:8px;object-fit:cover;flex:none}
+.thumb.big{width:120px;height:120px;display:block}
+input:disabled{opacity:.7}

@@ -13,7 +13,8 @@ async function viewInventario2() {
   const valor = rows.reduce((a, x) => a + Number(x.valor_usd || 0), 0);
   const agotados = rows.filter(x => Number(x.stock) <= 0).length;
   const bajos = rows.filter(x => Number(x.stock) > 0 && x.bajo_minimo).length;
-  const chips = Object.entries(TIPOS).map(([k, v]) => `<button data-t="${k}">${v}</button>`).join('');
+  const cats = [...new Map(rows.filter(x => x.category_id).map(x => [x.category_id, x.category])).entries()];
+  const chips = cats.map(([k, v]) => `<button data-t="${k}">${esc(v)}</button>`).join('');
   const opts = rows.map(s => `<option value="${s.product_id}">${esc(s.name)} (${esc(s.unit)})</option>`).join('');
   const mrows = moves.map(m => `<tr><td>${fdate(m.created_at)}</td><td>${esc(m.products?.name)}</td><td>${MOV[m.movement_type]}</td>
     <td>${refLabel(m)}</td><td class="n ${m.quantity > 0 ? 'in' : 'outq'}">${m.quantity > 0 ? '+' : ''}${qty(m.quantity)}</td><td>${esc(m.notes)}</td></tr>`).join('');
@@ -85,14 +86,14 @@ async function viewInventario2() {
 
 function drawInvTable() {
   const t = INV.q.toLowerCase();
-  const rows = INV.rows.filter(x => (INV.type === 'all' || x.type === INV.type) && (!INV.low || x.bajo_minimo)
+  const rows = INV.rows.filter(x => (INV.type === 'all' || String(x.category_id) === INV.type) && (!INV.low || x.bajo_minimo)
     && (!t || (x.name + ' ' + (x.sku || '')).toLowerCase().includes(t)));
   const body = rows.map(x => {
     const st = Number(x.stock), mn = Number(x.min_stock);
     const state = st <= 0 ? 'out' : x.bajo_minimo ? 'low' : 'ok';
     const pct = st <= 0 ? 0 : mn > 0 ? Math.min(100, st / (mn * 2) * 100) : 100;
     const lbl = {out: 'Agotado', low: 'Bajo mínimo', ok: 'Disponible'}[state];
-    return `<tr><td>${esc(x.name)}<small>${esc(x.sku)}</small></td><td>${TIPOS[x.type]}</td>
+    return `<tr><td>${esc(x.name)}<small>${esc(x.sku)}</small></td><td>${esc(x.category || '-')}</td>
       <td class="n">${qty(st)} ${esc(x.unit)}<div class="bar"><i class="${state}" style="width:${pct}%"></i></div></td>
       <td class="n">${qty(mn)}</td><td class="n">${fmt(x.avg_cost_usd)}</td><td class="n">${fmt(x.valor_usd)}</td>
       <td class="n">${S.rate ? fmt(x.valor_usd * S.rate) : '-'}</td><td><span class="badge ${state === 'ok' ? 'ok' : state}">${lbl}</span></td>
@@ -120,3 +121,91 @@ async function showKardex(id) {
   k.scrollIntoView({behavior: 'smooth'});
 }
 views.inventario = viewInventario2;
+
+// ---------- Productos (formulario completo con categoría, impuesto y foto opcional) ----------
+const PR2 = {q: ''};
+function compressImage(file, max = 800) {
+  return new Promise((res, rej) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height)), c = document.createElement('canvas');
+      c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      c.getContext('2d').drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url);
+      c.toBlob(b => b ? res(b) : rej(new Error('No se pudo procesar la foto')), 'image/jpeg', 0.8);
+    };
+    img.onerror = () => rej(new Error('No se pudo leer la imagen'));
+    img.src = url;
+  });
+}
+
+async function viewProductos2() {
+  const [prods, cats, units, taxes, set] = await Promise.all([
+    q(db.from('products').select('*, product_categories(name), taxes(name)').eq('active', true).order('name')),
+    q(db.from('product_categories').select('id,name').eq('active', true).order('name')),
+    q(db.from('units').select('symbol,name').eq('active', true).order('name')),
+    q(db.from('taxes').select('id,name,percent,is_default').eq('active', true).order('name')),
+    q(db.from('settings').select('enable_product_photos').eq('id', 1).single())
+  ]);
+  const D = {cats, units, taxes, photos: !!set.enable_product_photos};
+  $('#view').innerHTML = `<input id="prQ" type="search" placeholder="Buscar producto o código" value="${esc(PR2.q)}" style="margin-bottom:.8rem">
+    <div class="list" id="prList"></div><button class="fab" id="prAdd" aria-label="Nuevo producto">+</button>`;
+  const draw = () => {
+    const t = PR2.q.toLowerCase();
+    $('#prList').innerHTML = prods.filter(p => !t || (p.name + ' ' + (p.sku || '')).toLowerCase().includes(t)).map(p => `<button class="item" data-id="${p.id}">
+      <span class="row0">${D.photos && p.image_url ? `<img class="thumb" src="${esc(p.image_url)}" alt="">` : ''}<span><b>${esc(p.name)}</b>
+      <small>${esc(p.sku || 'Sin código')} | ${esc(p.product_categories?.name || 'Sin categoría')} | ${esc(p.unit)}</small>
+      <small>Precio: ${fmt(p.sale_price_usd)} USD${S.rate ? ' (' + fmt(p.sale_price_usd * S.rate) + ' Bs)' : ''} | ${esc(p.taxes?.name || 'Sin impuesto')}</small></span></span>
+      <span class="mut">&rsaquo;</span></button>`).join('') || '<p class="mut">No hay productos. Pulsa + para crear el primero.</p>';
+  };
+  draw();
+  $('#prQ').oninput = (e) => { PR2.q = e.target.value; draw(); };
+  $('#prAdd').onclick = () => prodForm(null, D);
+  $('#prList').onclick = (e) => { const b = e.target.closest('[data-id]'); if (b) prodForm(prods.find(p => String(p.id) === b.dataset.id), D); };
+}
+
+function prodForm(p, D) {
+  const {cats, units, taxes, photos} = D, defTax = taxes.find(t => t.is_default)?.id;
+  const v = (k, d = '') => p ? (p[k] ?? d) : d;
+  const opt = (arr, val, key, label) => arr.map(o => `<option value="${o[key]}" ${String(o[key]) === String(val) ? 'selected' : ''}>${esc(label(o))}</option>`).join('');
+  openSheet(p ? 'Editar producto' : 'Nuevo producto', `<form id="pf" class="stack">
+    <label>Código<input name="sku" value="${esc(v('sku'))}"></label>
+    <label>Nombre<input name="pname" value="${esc(v('name'))}" required></label>
+    <label>Categoría<select name="category_id">${opt(cats, v('category_id'), 'id', c => c.name)}</select></label>
+    <label>Unidad de medida<select name="unit">${opt(units, v('unit', 'und'), 'symbol', u => `${u.name} (${u.symbol})`)}</select></label>
+    <label>Costo en USD<input name="cost" type="number" step="0.0001" min="0" value="${v('avg_cost_usd', 0)}"></label>
+    <label>Precio de venta en USD<input name="price" type="number" step="0.0001" min="0" value="${v('sale_price_usd', 0)}"></label>
+    <label>Precio de costo (automático)<input value="${fmt(v('last_cost_usd', 0), 4)} USD" disabled></label>
+    <p class="mut">El precio de costo se asigna solo con la última compra o producción. El costo en USD es el promedio y también se recalcula con ellas.</p>
+    <label>Stock mínimo<input name="min" type="number" step="0.001" min="0" value="${v('min_stock', 0)}"></label>
+    <label>Impuesto<select name="tax_id">${opt(taxes, v('tax_id', defTax), 'id', t => `${t.name} (${qty(t.percent)}%)`)}</select></label>
+    ${photos ? `<label>Foto<input name="photo" type="file" accept="image/*"></label>${p?.image_url ? `<img class="thumb big" src="${esc(p.image_url)}" alt=""><label class="chk"><input type="checkbox" name="rmphoto"> Quitar la foto actual</label>` : ''}` : ''}
+    <p id="pMargin" class="mut"></p>
+    <div class="row"><button class="btn" type="submit">Guardar producto</button>${p ? '<button type="button" class="btn ghost" id="pfDel">Desactivar</button>' : ''}</div></form>`);
+  const f = $('#pf'), el = f.elements;
+  const mg = () => { const c = +el.cost.value || 0, pr = +el.price.value || 0; $('#pMargin').textContent = pr > 0 ? `Margen sobre el costo: ${fmt((pr - c) / pr * 100, 0)}% (ganancia de ${fmt(pr - c)} USD por unidad)` : ''; };
+  f.addEventListener('input', mg); mg();
+  f.onsubmit = (e) => {
+    e.preventDefault();
+    run(async () => {
+      let image_url = p?.image_url || null;
+      if (photos) {
+        if (el.rmphoto?.checked) image_url = null;
+        const file = el.photo?.files[0];
+        if (file) {
+          const blob = await compressImage(file), path = `p/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+          const up = await db.storage.from('product-images').upload(path, blob, {contentType: 'image/jpeg'});
+          if (up.error) throw up.error;
+          image_url = db.storage.from('product-images').getPublicUrl(path).data.publicUrl;
+        }
+      }
+      const row = {sku: el.sku.value.trim() || null, name: el.pname.value.trim(), category_id: +el.category_id.value || null, unit: el.unit.value,
+        avg_cost_usd: +el.cost.value || 0, sale_price_usd: +el.price.value || 0, min_stock: +el.min.value || 0, tax_id: +el.tax_id.value || null, image_url};
+      await q(p ? db.from('products').update(row).eq('id', p.id) : db.from('products').insert(row));
+      closeSheet(); toast('Producto guardado'); render();
+    });
+  };
+  if (p) $('#pfDel').onclick = () => run(async () => {
+    if (!confirm('¿Desactivar este producto?')) return;
+    await q(db.from('products').update({active: false}).eq('id', p.id)); closeSheet(); toast('Producto desactivado'); render();
+  });
+}

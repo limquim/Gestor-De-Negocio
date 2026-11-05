@@ -69,47 +69,76 @@ function formulaForm(r, D) {
 
 // ---------- Producir ----------
 async function viewProducir() {
-  const {recipes, pm, st} = await prData();
+  const {products, recipes, pm, st} = await prData();
   $('#view').innerHTML = `<div class="card stack">
-    <label>Fórmula<select id="pRec"><option value="">Selecciona una fórmula</option>${recipes.map(r => `<option value="${r.id}">${esc(r.name)}</option>`).join('')}</select></label>
-    <label>Cantidad a producir <span id="pUnit" class="mut"></span><input id="pQty" type="number" step="0.001" min="0.001"></label>
-    ${recipes.length ? '' : '<p class="mut">Primero crea una fórmula en la pestaña Fórmulas.</p>'}</div>
-    <div class="card hidden" id="pBox"><h2>Materiales a consumir</h2>
-      <p class="mut">Si usaste más o menos que lo teórico, corrige la cantidad real.</p>
-      <div id="pLines"></div><p id="pSum"></p>
+    <label>Tipo de producción<select id="pRec"><option value="">Selecciona una opción</option><option value="free">Fórmula de una sola vez</option>${recipes.map(r => `<option value="${r.id}">${esc(r.name)}</option>`).join('')}</select></label>
+    <label id="pProdW" class="hidden">Producto que se fabrica<select id="pProd">${pOptions(products)}</select></label>
+    <label>Cantidad a producir <span id="pUnit" class="mut"></span><input id="pQty" type="number" step="0.001" min="0.001"></label></div>
+    <div class="card hidden" id="pBox"><h2>Materiales</h2><p class="mut" id="pHint"></p><div id="pLines"></div>
+      <button type="button" class="btn ghost hidden" id="pAdd">Agregar material</button><p id="pSum"></p>
+      <div id="pSaveW" class="stack hidden"><label class="chk"><input type="checkbox" id="pSave"> Guardar como fórmula para usarla otra vez</label>
+        <label id="pNameW" class="hidden">Nombre de la fórmula<input id="pName"></label></div>
       <label>Nota<input id="pNotes" placeholder="Ej: lote 12"></label>
       <div class="row"><button class="btn" id="pGo">Registrar producción</button></div></div>`;
-  let cur = null;
-  const rows = () => [...document.querySelectorAll('#pLines .pl')];
+  let cur = null, free = false;
+  const fin = () => pm[free ? +$('#pProd').value : cur?.product_id];
+  const items = () => [...document.querySelectorAll('#pLines > div')].map(l => free
+    ? {product_id: +l.querySelector('[name=mp]').value, planned: +l.querySelector('[name=mq]').value || 0, actual: +l.querySelector('[name=mq]').value || 0}
+    : {product_id: +l.dataset.pid, planned: +l.dataset.plan, actual: +l.querySelector('input').value || 0}).filter(i => i.actual > 0 || !free);
+  const addLine = () => {
+    const d = document.createElement('div'); d.className = 'ln';
+    d.innerHTML = `<label>Material<select name="mp">${pOptions(products)}</select></label><label>Cantidad usada<input name="mq" type="number" step="0.0001" min="0"></label><button type="button" class="btn ghost" data-rm="1">&times;</button>`;
+    $('#pLines').appendChild(d);
+  };
   const calc = () => {
-    let tot = 0, theo = 0, miss = false;
-    rows().forEach(l => {
-      const id = +l.dataset.pid, real = +l.querySelector('input').value || 0, c = costOf(pm, id), short = real - (st[id] || 0);
-      tot += real * c; theo += +l.dataset.plan * c; if (!c) miss = true;
-      l.querySelector('.sh').textContent = short > 0.0005 ? `Faltan ${qty(short)} en inventario` : '';
+    if (!fin()) return 0;
+    let tot = 0, theo = 0, miss = false; const lack = [];
+    items().forEach(i => {
+      const c = costOf(pm, i.product_id), sh = i.actual - (st[i.product_id] || 0);
+      tot += i.actual * c; theo += i.planned * c; if (!c) miss = true;
+      if (sh > 0.0005) lack.push(`${pm[i.product_id]?.name} (faltan ${qty(sh)})`);
     });
     const n = +$('#pQty').value || 1, diff = tot - theo;
-    $('#pSum').innerHTML = costLine(tot, tot / n, pm[cur.product_id], pm) + `<br><span class="mut">Según la fórmula: ${fmt(theo)} USD | Diferencia: ${diff >= 0 ? '+' : ''}${fmt(diff)} USD</span>`
-      + (miss ? '<br><span class="warn">Algún material no tiene costo: el costo puede estar incompleto.</span>' : '');
+    $('#pSum').innerHTML = costLine(tot, tot / n, fin(), pm)
+      + (free ? '' : `<br><span class="mut">Según la fórmula: ${fmt(theo)} USD | Diferencia: ${diff >= 0 ? '+' : ''}${fmt(diff)} USD</span>`)
+      + (miss ? '<br><span class="warn">Algún material no tiene costo: el costo puede estar incompleto.</span>' : '')
+      + (lack.length ? `<br><span class="warn">Inventario insuficiente: ${esc(lack.join(', '))}</span>` : '');
+    return lack.length;
   };
   const build = () => {
-    cur = recipes.find(x => String(x.id) === $('#pRec').value) || null;
-    const n = +$('#pQty').value;
-    $('#pUnit').textContent = cur ? '(' + (pm[cur.product_id]?.unit || '') + ')' : '';
-    $('#pBox').classList.toggle('hidden', !(cur && n > 0));
-    if (!(cur && n > 0)) return;
-    $('#pLines').innerHTML = cur.recipe_items.map(i => {
+    const v = $('#pRec').value, n = +$('#pQty').value;
+    free = v === 'free'; cur = free ? null : recipes.find(x => String(x.id) === v) || null;
+    $('#pProdW').classList.toggle('hidden', !free); $('#pSaveW').classList.toggle('hidden', !free); $('#pAdd').classList.toggle('hidden', !free);
+    $('#pUnit').textContent = fin() ? '(' + fin().unit + ')' : '';
+    const ok = (cur || free) && n > 0;
+    $('#pBox').classList.toggle('hidden', !ok);
+    if (!ok) return;
+    $('#pHint').textContent = free ? 'Agrega los materiales y la cantidad que usas de cada uno.' : 'Si usaste más o menos que lo teórico, corrige la cantidad real.';
+    if (free) { if (!document.querySelector('#pLines .ln')) { $('#pLines').innerHTML = ''; addLine(); } }
+    else $('#pLines').innerHTML = cur.recipe_items.map(i => {
       const p = pm[i.product_id], plan = Math.round(i.quantity * (n / cur.yield_qty) * 10000) / 10000;
-      return `<div class="pl" data-pid="${i.product_id}" data-plan="${plan}"><div><b>${esc(p?.name)}</b><small>Teórico: ${qty(plan)} ${esc(p?.unit)} | Disponible: ${qty(st[i.product_id] || 0)}</small><small class="warn sh"></small></div>
+      return `<div class="pl" data-pid="${i.product_id}" data-plan="${plan}"><div><b>${esc(p?.name)}</b><small>Teórico: ${qty(plan)} ${esc(p?.unit)} | Disponible: ${qty(st[i.product_id] || 0)}</small></div>
         <label>Real usado<input type="number" step="0.0001" min="0" value="${plan}"></label></div>`;
     }).join('');
     calc();
   };
-  $('#pRec').onchange = build; $('#pQty').oninput = build; $('#pLines').addEventListener('input', calc);
+  $('#pRec').onchange = build; $('#pProd').onchange = build; $('#pQty').oninput = build;
+  $('#pAdd').onclick = addLine;
+  $('#pLines').addEventListener('input', calc); $('#pLines').addEventListener('change', calc);
+  $('#pLines').addEventListener('click', (e) => { if (e.target.dataset.rm && document.querySelectorAll('#pLines .ln').length > 1) { e.target.closest('.ln').remove(); calc(); } });
+  $('#pSave').onchange = () => $('#pNameW').classList.toggle('hidden', !$('#pSave').checked);
   $('#pGo').onclick = () => run(async () => {
-    const items = rows().map(l => ({product_id: +l.dataset.pid, planned: +l.dataset.plan, actual: +l.querySelector('input').value || 0}));
-    if (rows().some(l => l.querySelector('.sh').textContent) && !confirm('Hay materiales con inventario insuficiente. ¿Registrar la producción de todos modos?')) return;
-    const id = await q(db.rpc('registrar_produccion', {p_recipe_id: cur.id, p_qty: +$('#pQty').value, p_notes: $('#pNotes').value.trim() || null, p_items: items}));
+    const it = items(), n = +$('#pQty').value, saveF = free && $('#pSave').checked;
+    if (!it.length) throw new Error('Agrega al menos un material con su cantidad');
+    if (saveF && !$('#pName').value.trim()) throw new Error('Escribe un nombre para la fórmula');
+    if (calc() && !confirm('Hay materiales con inventario insuficiente. ¿Registrar la producción de todos modos?')) return;
+    let rid = cur?.id;
+    if (free) {   // la fórmula de una sola vez se guarda oculta, solo para el historial
+      rid = await q(db.rpc('guardar_formula', {p_id: null, p_product_id: +$('#pProd').value, p_name: saveF ? $('#pName').value.trim() : 'Una sola vez ' + new Date().toLocaleDateString('es-VE'),
+        p_yield: n, p_notes: null, p_items: it.map(i => ({product_id: i.product_id, quantity: i.actual}))}));
+      if (!saveF) await q(db.from('recipes').update({active: false}).eq('id', rid));
+    }
+    const id = await q(db.rpc('registrar_produccion', {p_recipe_id: rid, p_qty: n, p_notes: $('#pNotes').value.trim() || null, p_items: it}));
     toast('Producción #' + id + ' registrada. Inventario y costos actualizados.'); render();
   });
 }

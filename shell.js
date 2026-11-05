@@ -56,7 +56,7 @@ views.mas = async () => {
   $('#mOut').onclick = () => db.auth.signOut();
 };
 
-views.inventario = page('Inventario', withSubs('inv', {stock: 'Existencias', productos: 'Productos'}, {stock: viewInventario2, productos: viewProductos}), false);
+views.inventario = page('Inventario', withSubs('inv', {stock: 'Existencias', productos: 'Productos'}, {stock: viewInventario2, productos: viewProductos2}), false);
 views.compras = page('Compras', views.compras);
 views.ventas = page('Ventas', soon('Aquí irá todo el proceso de venta:', ['Factura con IVA y nota de entrega sin IVA', 'Pago de contado, a crédito y pagos combinados', 'Historial de ventas con corrección posterior', 'Ticket de venta']), false);
 views.produccion = page('Producciones', withSubs('prod', {producir: 'Producir', formulas: 'Fórmulas', historial: 'Historial'}, {producir: viewProducir, formulas: viewFormulas, historial: viewHistorialProd}), false);
