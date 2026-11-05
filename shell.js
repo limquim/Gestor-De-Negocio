@@ -59,7 +59,7 @@ views.mas = async () => {
 views.inventario = page('Inventario', withSubs('inv', {stock: 'Existencias', productos: 'Productos'}, {stock: viewInventario2, productos: viewProductos}), false);
 views.compras = page('Compras', views.compras);
 views.ventas = page('Ventas', soon('Aquí irá todo el proceso de venta:', ['Factura con IVA y nota de entrega sin IVA', 'Pago de contado, a crédito y pagos combinados', 'Historial de ventas con corrección posterior', 'Ticket de venta']), false);
-views.produccion = page('Producciones', soon('Aquí transformaremos materiales en producto terminado:', ['Fórmulas (lista de materiales)', 'Orden de producción con costo', 'Ajuste de lo realmente usado', 'Entrada automática al inventario']), false);
+views.produccion = page('Producciones', withSubs('prod', {producir: 'Producir', formulas: 'Fórmulas', historial: 'Historial'}, {producir: viewProducir, formulas: viewFormulas, historial: viewHistorialProd}), false);
 views.marketing = page('Marketing', soon('Seguimiento de clientes:', ['Qué compra más cada cliente', 'Clientes con tiempo sin comprar', 'Mensajes y ofertas por WhatsApp']));
 views.finanzas = page('Finanzas', soon('Control del dinero:', ['Cuentas por moneda (caja, banco, billetera)', 'Cobros, pagos y transferencias', 'Registro de gastos']));
 views.contabilidad = page('Contabilidad', soon('Resultados del negocio:', ['Total vendido y total gastado', 'Rentabilidad', 'Gastos fijos y variables']));

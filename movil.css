@@ -34,3 +34,11 @@ nav#tabs button.on{color:var(--pri);background:color-mix(in srgb,var(--pri) 12%,
 .sheet-box{position:relative;width:100%;max-height:88vh;overflow:auto;background:var(--card);border-radius:18px 18px 0 0;
   padding:1rem 1rem calc(1rem + env(safe-area-inset-bottom))}
 @media(min-width:700px){#sheet{align-items:center;justify-content:center}.sheet-box{max-width:520px;border-radius:18px}}
+
+/* Producciones */
+.ln{display:grid;grid-template-columns:1fr 6.5rem auto;gap:.4rem;align-items:end}
+.ln label{margin:0}
+.pl{display:grid;grid-template-columns:1fr 7rem;gap:.6rem;align-items:center;padding:.6rem 0;border-bottom:1px solid var(--line)}
+.pl small{display:block;color:var(--mut)}
+.pl .warn,.warn{color:var(--bad)}
+.pl label{margin:0}
