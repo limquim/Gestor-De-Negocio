@@ -49,18 +49,23 @@ function printTicket(text, paper) {
 async function showTicket(id) {
   const [d, set] = await Promise.all([saleDetail(id), q(db.from('settings').select('*').eq('id', 1).single())]);
   const text = ticketText(d, set);
-  openSheet('Ticket de venta #' + id, `<pre class="ticket">${esc(text)}</pre><div class="row"><button class="btn" id="tP">Imprimir</button><button class="btn ghost" id="tW">Enviar por WhatsApp</button></div>`);
+  const blobP = ticketBlob(text, set).catch(() => null);
+  openSheet('Ticket de venta #' + id, `<pre class="ticket">${esc(text)}</pre><div class="row"><button class="btn" id="tI">Enviar como foto</button><button class="btn ghost" id="tD">Descargar foto</button></div>
+    <div class="row"><button class="btn ghost" id="tP">Imprimir</button><button class="btn ghost" id="tW">Enviar como texto</button></div>`);
+  $('#tI').onclick = () => run(async () => shareImage(await blobP, d.s.parties?.phone, 'ticket-' + id));
+  $('#tD').onclick = () => run(async () => { const b = await blobP; if (!b) throw new Error('No se pudo crear la imagen'); downloadBlob(b, 'ticket-' + id + '.png'); });
   $('#tP').onclick = () => printTicket(text, set.ticket_paper);
   $('#tW').onclick = () => window.open(`https://wa.me/${waDigits(d.s.parties?.phone)}?text=${encodeURIComponent(text)}`, '_blank');
 }
 
 // ---------- Nueva venta / corrección ----------
 async function viewVenta() {
-  const D = await vData(), old = V.edit ? await saleDetail(V.edit) : null;
+  const fq = V.fromQ; V.fromQ = null;
+  const D = await vData(), old = V.edit ? await saleDetail(V.edit) : null, qd = fq ? await quoteDetail(fq) : null;
   if (old) old.items.forEach(i => { D.st[i.product_id] = (D.st[i.product_id] || 0) + +i.quantity; });   // el stock vuelve a contar lo ya vendido
   const pm = Object.fromEntries(D.products.map(p => [p.id, p]));
   const line = (pid, qv, pr) => { const p = pm[pid]; return {pid, name: p?.name, unit: p?.unit, qty: qv, price: pr ?? +p?.sale_price_usd, pct: Number(p?.taxes?.percent || 0)}; };
-  V.cart = old ? old.items.map(i => line(i.product_id, +i.quantity, +i.unit_price_usd)) : [];
+  V.cart = (old || qd) ? (old || qd).items.map(i => line(i.product_id, +i.quantity, +i.unit_price_usd)) : [];
   V.pays = old ? old.pays.map(p => ({acc: p.account_id, method: p.method, amount: +p.amount, ref: p.reference || ''})) : [];
 
   $('#view').innerHTML = `${V.edit ? `<div class="card title-row"><b>Corrigiendo la venta #${V.edit}</b><button class="lnk" id="vCancel">Cancelar</button></div>` : ''}
@@ -77,6 +82,7 @@ async function viewVenta() {
   $('#vRate').value = old ? old.s.exchange_rate : (S.rate || '');
   if (old) { $('#vCust').value = old.s.customer_id || ''; $('#vDoc').value = old.s.doc_type; $('#vDisc').value = old.s.discount_usd; $('#vDue').value = old.s.due_date || ''; $('#vNotes').value = old.s.notes || ''; }
 
+  if (qd) { $('#vCust').value = qd.s.customer_id || ''; $('#vDoc').value = qd.s.doc_type; $('#vDisc').value = qd.s.discount_usd; }
   const calc = () => {
     const rate = +$('#vRate').value || 0, sub = V.cart.reduce((a, c) => a + c.qty * c.price, 0), disc = Math.min(+$('#vDisc').value || 0, sub);
     let tax = $('#vDoc').value === 'factura' ? V.cart.reduce((a, c) => a + c.qty * c.price * c.pct / 100, 0) : 0;
@@ -89,6 +95,7 @@ async function viewVenta() {
     $('#vTot').innerHTML = `Subtotal: ${fmt(t.sub)} USD${t.disc ? ' | Descuento: -' + fmt(t.disc) : ''}${t.tax ? ' | IVA: ' + fmt(t.tax) : ''}<br><span class="big">${fmt(t.total)} USD</span><br><span class="mut">${fmt(t.total * t.rate)} Bs</span>`;
     $('#vBal').innerHTML = `Pagado: <b>${fmt(paid)} USD</b> | ` + (bal > 0.01 ? `<span class="warn">Queda a crédito: <b>${fmt(bal)} USD</b> (${fmt(bal * t.rate)} Bs)</span>` : bal < -0.01 ? `Vuelto: <b>${fmt(-bal)} USD</b> (${fmt(-bal * t.rate)} Bs)` : 'Pago completo');
     $('#vDueW').classList.toggle('hidden', !(bal > 0.01));
+    document.querySelectorAll('#vPays .payl').forEach(l => { const u = payUsd(V.pays[+l.dataset.i], t.rate); l.querySelector('.eq').textContent = '≈ ' + fmt(u) + ' USD | ' + fmt(u * t.rate) + ' Bs'; });
     document.querySelectorAll('#vCart .pl').forEach(l => { const c = V.cart[+l.dataset.i]; l.querySelector('.lt').textContent = 'Total: ' + fmt(c.qty * c.price) + ' USD'; });
     return {...t, paid, bal};
   };
@@ -102,7 +109,7 @@ async function viewVenta() {
       <div class="ln2"><label>Cuenta<select data-f="acc">${D.accs.map(a => `<option value="${a.id}" ${a.id === +p.acc ? 'selected' : ''}>${esc(a.name)} (${a.currency})</option>`).join('')}</select></label>
         <label>Método<select data-f="method">${optList(METHODS, p.method)}</select></label></div>
       <div class="ln2"><label>Monto<input data-f="amount" type="number" step="0.01" min="0" value="${p.amount}"></label><label>Referencia<input data-f="ref" value="${esc(p.ref)}"></label></div>
-      <button class="lnk bad" data-rmp="${i}">Quitar pago</button></div>`).join('') || '<p class="mut">Sin pagos: la venta quedará a crédito.</p>';
+      <small class="mut eq"></small><button class="lnk bad" data-rmp="${i}">Quitar pago</button></div>`).join('') || '<p class="mut">Sin pagos: la venta quedará a crédito.</p>';
     totals();
   };
   drawCart(); drawPays();
@@ -118,7 +125,15 @@ async function viewVenta() {
   };
   $('#vCart').addEventListener('input', (e) => { const l = e.target.closest('.pl'); if (l && e.target.dataset.f) { V.cart[+l.dataset.i][e.target.dataset.f] = +e.target.value || 0; totals(); } });
   $('#vCart').addEventListener('click', (e) => { if (e.target.dataset.rm !== undefined) { V.cart.splice(+e.target.dataset.rm, 1); drawCart(); } });
-  $('#vPays').addEventListener('input', (e) => { const l = e.target.closest('.payl'), f = e.target.dataset.f; if (l && f) { V.pays[+l.dataset.i][f] = f === 'amount' ? +e.target.value || 0 : e.target.value; totals(); } });
+  $('#vPays').addEventListener('input', (e) => {
+    const l = e.target.closest('.payl'), f = e.target.dataset.f; if (!l || !f) return;
+    const p = V.pays[+l.dataset.i];
+    if (f === 'acc') {   // al cambiar de cuenta, el monto se convierte con la tasa (USD <-> Bs)
+      const t = calc(), usd = payUsd(p, t.rate), a = D.accs.find(x => x.id === +e.target.value);
+      p.acc = a.id; p.amount = Math.round(usd * (a.currency === 'USD' ? 1 : t.rate) * 100) / 100; drawPays(); return;
+    }
+    p[f] = f === 'amount' ? +e.target.value || 0 : e.target.value; totals();
+  });
   $('#vPays').addEventListener('click', (e) => { if (e.target.dataset.rmp !== undefined) { V.pays.splice(+e.target.dataset.rmp, 1); drawPays(); } });
   ['vRate', 'vDoc', 'vDisc'].forEach(id => $('#' + id).addEventListener('input', totals));
   $('#vAddPay').onclick = () => {
@@ -146,6 +161,7 @@ async function viewVenta() {
       p_due_date: $('#vDue').value || null, p_notes: $('#vNotes').value.trim() || null,
       p_items: V.cart.map(c => ({product_id: c.pid, quantity: c.qty, unit_price_usd: c.price})),
       p_payments: pays.map(p => ({account_id: +p.acc, method: p.method, amount: p.amount, reference: p.ref}))}));
+    if (fq) await q(db.from('quotes').update({status: 'convertida', sale_id: id}).eq('id', fq));
     toast(V.edit ? 'Venta corregida' : 'Venta registrada'); V.edit = null; await showTicket(id); render();
   });
 }
@@ -197,4 +213,37 @@ async function cobroForm(id, bal) {
       closeSheet(); toast('Cobro registrado'); render();
     });
   };
+}
+
+
+// ---------- Ticket como foto (se comparte por WhatsApp) y logo ----------
+async function ticketBlob(text, set) {
+  const wide = set.ticket_paper === '80mm', W = wide ? 576 : 384, ch = wide ? 42 : 32, sc = 2, pad = 16;
+  const lines = text.split('\n').flatMap(l => l.length > ch ? l.match(new RegExp('.{1,' + ch + '}', 'g')) : [l]);
+  const m = document.createElement('canvas').getContext('2d'); m.font = '20px "Courier New", monospace';
+  const fs = Math.floor(20 * (W - pad * 2) / (ch * m.measureText('M').width)), lh = Math.round(fs * 1.4);
+  const logo = set.ticket_show_logo && set.logo_data ? await new Promise(r => { const im = new Image(); im.onload = () => r(im); im.onerror = () => r(null); im.src = set.logo_data; }) : null;
+  const lw = logo ? Math.min(W * 0.6, logo.width) : 0, lg = logo ? lw * logo.height / logo.width : 0, H = pad * 2 + (logo ? lg + 12 : 0) + lines.length * lh;
+  const c = document.createElement('canvas'); c.width = W * sc; c.height = H * sc;
+  const g = c.getContext('2d'); g.scale(sc, sc); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); g.fillStyle = '#000'; g.font = fs + 'px "Courier New", monospace'; g.textBaseline = 'top';
+  let y = pad; if (logo) { g.drawImage(logo, (W - lw) / 2, y, lw, lg); y += lg + 12; }
+  lines.forEach(t => { g.fillText(t, pad, y); y += lh; });
+  return new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('No se pudo crear la imagen')), 'image/png'));
+}
+function downloadBlob(b, n) { const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = n; a.click(); setTimeout(() => URL.revokeObjectURL(a.href), 4000); }
+async function shareImage(blob, phone, name) {
+  if (!blob) throw new Error('No se pudo crear la imagen');
+  const file = new File([blob], name + '.png', {type: 'image/png'});
+  if (navigator.canShare && navigator.canShare({files: [file]})) { try { await navigator.share({files: [file]}); return; } catch (e) { if (e.name === 'AbortError') return; } }
+  downloadBlob(blob, name + '.png'); toast('Se descargó la foto. Adjúntala en el chat de WhatsApp.'); window.open('https://wa.me/' + waDigits(phone), '_blank');
+}
+function logoDataUrl(file, max = 360) {
+  return new Promise((res, rej) => {
+    const img = new Image(), url = URL.createObjectURL(file);
+    img.onload = () => {
+      const k = Math.min(1, max / Math.max(img.width, img.height)), c = document.createElement('canvas'); c.width = Math.round(img.width * k); c.height = Math.round(img.height * k);
+      const g = c.getContext('2d'); g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.drawImage(img, 0, 0, c.width, c.height); URL.revokeObjectURL(url); res(c.toDataURL('image/jpeg', 0.85));
+    };
+    img.onerror = () => rej(new Error('No se pudo leer el logo')); img.src = url;
+  });
 }

@@ -95,11 +95,16 @@ async function viewCompras() {
         p_currency: f.get('currency'), p_rate: +f.get('rate'), p_notes: f.get('notes').trim() || null, p_items: items
       }));
       const pa = f.get('pay_acc');
+      let perr = null;
       if (pa) {
-        const tot = await q(db.from('purchases').select('total_usd').eq('id', id).single()), ac = accs.find(x => String(x.id) === pa);
-        await q(db.rpc('registrar_pago_compra', {p_purchase_id: id, p_account_id: +pa, p_method: 'efectivo', p_amount: Math.round(tot.total_usd * (ac.currency === 'USD' ? 1 : +f.get('rate')) * 100) / 100, p_reference: null, p_rate: +f.get('rate')}));
+        try {
+          const tot = await q(db.from('purchases').select('total_usd').eq('id', id).single()), ac = accs.find(x => String(x.id) === pa);
+          await q(db.rpc('registrar_pago_compra', {p_purchase_id: id, p_account_id: +pa, p_method: 'efectivo', p_amount: Math.round(tot.total_usd * (ac.currency === 'USD' ? 1 : +f.get('rate')) * 100) / 100, p_reference: null, p_rate: +f.get('rate')}));
+        } catch (e) { perr = e.message || 'error desconocido'; }
       }
-      toast('Compra #' + id + ' registrada' + (pa ? ' y pagada' : ' (por pagar)') + '. Stock y costos actualizados.'); render();
+      if (perr) toast('Compra #' + id + ' registrada, pero el pago falló: ' + perr + '. Págala desde el historial.', true);
+      else toast('Compra #' + id + ' registrada' + (pa ? ' y pagada' : ' (por pagar)') + '. Stock y costos actualizados.');
+      render();
     });
   };
 }

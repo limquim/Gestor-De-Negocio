@@ -91,7 +91,12 @@ async function viewGastos() {
       <label>Pagado desde<select name="acc">${acctOpts(accs)}</select></label>
       <label>Monto (en la moneda de la cuenta)<input name="amount" type="number" step="0.01" min="0.01" required></label>
       <label>Fecha<input name="date" type="date" value="${caracasDate()}"></label><button class="btn" type="submit">Registrar gasto</button></form>`);
-    const el = $('#gF').elements;
+    const el = $('#gF').elements; let pc = accs[0]?.currency;
+    el.acc.onchange = () => {   // al cambiar de cuenta, el monto escrito se convierte con la tasa
+      const nc = accs.find(a => String(a.id) === el.acc.value)?.currency, v = num(el.amount.value);
+      if (v && nc !== pc) el.amount.value = (nc === 'VES' ? v * (S.rate || 0) : v / (S.rate || 1)).toFixed(2);
+      pc = nc;
+    };
     $('#gF').onsubmit = (e) => {
       e.preventDefault();
       run(async () => {

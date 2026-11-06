@@ -72,9 +72,9 @@ views.mas = async () => {
 
 views.inventario = page('Inventario', withSubs('inv', {stock: 'Existencias', productos: 'Productos'}, {stock: viewInventario2, productos: viewProductos2}), false);
 views.compras = page('Compras', views.compras);
-views.ventas = page('Ventas', withSubs('ven', {nueva: 'Nueva venta', historial: 'Historial'}, {nueva: viewVenta, historial: viewHistVentas}), false);
+views.ventas = page('Ventas', withSubs('ven', {nueva: 'Nueva venta', cotizaciones: 'Cotizaciones', historial: 'Historial'}, {nueva: viewVenta, cotizaciones: viewCotizaciones, historial: viewHistVentas}), false);
 views.produccion = page('Producciones', withSubs('prod', {producir: 'Producir', formulas: 'Fórmulas', historial: 'Historial'}, {producir: viewProducir, formulas: viewFormulas, historial: viewHistorialProd}), false);
-views.marketing = page('Marketing', soon('Seguimiento de clientes:', ['Qué compra más cada cliente', 'Clientes con tiempo sin comprar', 'Mensajes y ofertas por WhatsApp']));
+views.marketing = page('Marketing', viewMarketing);
 views.finanzas = page('Finanzas', withSubs('fin', {cuentas: 'Cuentas', gastos: 'Gastos'}, {cuentas: viewCuentas, gastos: viewGastos}));
 views.contabilidad = page('Reportes', viewReportes);
 views.directorios = page('Directorios', withSubs('dir', DIR_LABELS, Object.fromEntries(Object.keys(DIRS).map(k => [k, () => viewDir(k)]))));
