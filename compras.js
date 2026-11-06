@@ -1,14 +1,15 @@
 // Módulo de Compras y Proveedores (usa las funciones de index.html)
 async function viewCompras() {
-  const [prods, sups, buys] = await Promise.all([
+  const [prods, sups, buys, accs] = await Promise.all([
     q(db.from('products').select('id,name,unit').eq('active', true).order('name')),
     q(db.from('parties').select('id,name,phone').eq('is_supplier', true).eq('active', true).order('name')),
-    q(db.from('purchases').select('id,purchase_date,currency,exchange_rate,total_usd,status,parties(name)').order('id', {ascending: false}).limit(15))
+    q(db.from('purchases').select('id,purchase_date,currency,exchange_rate,total_usd,status,parties(name)').order('id', {ascending: false}).limit(15)),
+    q(db.from('accounts').select('id,name,currency').eq('active', true).order('id'))
   ]);
   const pOpts = prods.map(p => `<option value="${p.id}">${esc(p.name)} (${esc(p.unit)})</option>`).join('');
   const sOpts = sups.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
   const rows = buys.map(b => `<tr><td>#${b.id}</td><td>${b.purchase_date}</td><td>${esc(b.parties?.name || 'Sin proveedor')}</td><td>${b.currency}</td>
-    <td class="n">${fmt(b.total_usd)}</td><td class="n">${fmt(b.total_usd * b.exchange_rate)}</td><td>${esc(b.status)}</td></tr>`).join('');
+    <td class="n">${fmt(b.total_usd)}</td><td class="n">${fmt(b.total_usd * b.exchange_rate)}</td><td><button class="lnk" data-pid="${b.id}">${b.status === 'pagada' ? 'Pagada' : b.status === 'anulada' ? 'Anulada' : 'Por pagar'}</button></td></tr>`).join('');
 
   $('#view').innerHTML = `
   <div class="card"><h2>Nueva compra</h2>
@@ -18,6 +19,7 @@ async function viewCompras() {
         <label>Moneda de la factura<select name="currency"><option value="USD">Dólares (USD)</option><option value="VES">Bolívares (Bs)</option></select></label>
         <label>Tasa (Bs por 1 USD)<input name="rate" type="number" step="0.0001" min="0.0001" value="${S.rate || ''}" required></label>
         <label>Nota<input name="notes" placeholder="Ej: factura 0123"></label>
+        <label>Pagar ahora desde<select name="pay_acc"><option value="">No pagar todavía (queda por pagar)</option>${accs.map(a => `<option value="${a.id}">${esc(a.name)} (${a.currency})</option>`).join('')}</select></label>
       </div>
       <h2 style="margin-top:1rem">Productos comprados</h2>
       <div id="lines"></div>
@@ -37,6 +39,8 @@ async function viewCompras() {
   <div class="card"><h2>Últimas compras</h2>
     ${buys.length ? `<div class="scroll"><table><thead><tr><th>N.°</th><th>Fecha</th><th>Proveedor</th><th>Moneda</th><th class="n">Total USD</th><th class="n">Total Bs</th><th>Estado</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="mut">Aún no hay compras registradas.</p>'}</div>`;
 
+  const hs = document.querySelector('#view .scroll');
+  if (hs) hs.onclick = (e) => { const b = e.target.closest('[data-pid]'); if (b) run(() => purchaseSheet(+b.dataset.pid)); };
   // Proveedores
   $('#sForm').onsubmit = (e) => {
     e.preventDefault();
@@ -90,7 +94,12 @@ async function viewCompras() {
         p_supplier_id: f.get('supplier_id') ? +f.get('supplier_id') : null,
         p_currency: f.get('currency'), p_rate: +f.get('rate'), p_notes: f.get('notes').trim() || null, p_items: items
       }));
-      toast('Compra #' + id + ' registrada. Stock y costos actualizados.'); render();
+      const pa = f.get('pay_acc');
+      if (pa) {
+        const tot = await q(db.from('purchases').select('total_usd').eq('id', id).single()), ac = accs.find(x => String(x.id) === pa);
+        await q(db.rpc('registrar_pago_compra', {p_purchase_id: id, p_account_id: +pa, p_method: 'efectivo', p_amount: Math.round(tot.total_usd * (ac.currency === 'USD' ? 1 : +f.get('rate')) * 100) / 100, p_reference: null, p_rate: +f.get('rate')}));
+      }
+      toast('Compra #' + id + ' registrada' + (pa ? ' y pagada' : ' (por pagar)') + '. Stock y costos actualizados.'); render();
     });
   };
 }

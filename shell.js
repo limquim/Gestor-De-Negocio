@@ -45,23 +45,24 @@ views.inicio = async () => {
   ]);
   const vendido = hoyV.reduce((a, r) => a + +r.total_usd, 0), vendidoBs = hoyV.reduce((a, r) => a + r.total_usd * r.exchange_rate, 0);
   const cobrar = pend.reduce((a, r) => a + (r.total_usd - r.paid_usd), 0), valor = stock.reduce((a, x) => a + Number(x.valor_usd || 0), 0);
+  const [alertHtml, cajaHtml] = await Promise.all([alertasHtml(), cajaStat()]);
   $('#view').innerHTML = `<div class="tiles">
     <button class="tile main" data-go="ventas">${ico('<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>')}<span>Vender</span><small>Nueva venta</small></button>
     <button class="tile" data-go="compras">${ico('<path d="M6 7h12l-1 13H7z"/><path d="M9 7a3 3 0 016 0"/>')}<span>Comprar</span><small>Registrar compra</small></button>
     <button class="tile" data-go="produccion">${ico('<path d="M9 3h6M10 3v6L4.5 19a1.5 1.5 0 001.3 2h12.4a1.5 1.5 0 001.3-2L14 9V3"/><path d="M7.5 15h9"/>')}<span>Producir</span><small>Fabricar productos</small></button>
     <button class="tile" data-go="inventario">${ico('<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>')}<span>Inventario</span><small>Existencias</small></button></div>
-    <h2 class="sec">Resumen de hoy</h2>
+    ${alertHtml}<h2 class="sec">Resumen de hoy</h2>
     <div class="stats">
       <div class="stat"><span>Vendido hoy</span><b>${fmt(vendido)} USD</b><span>${fmt(vendidoBs)} Bs | ${hoyV.length} ${hoyV.length === 1 ? 'venta' : 'ventas'}</span></div>
       <button class="stat warn" id="stPend"><span>Por cobrar</span><b>${fmt(cobrar)} USD</b><span>${pend.length} ${pend.length === 1 ? 'venta pendiente' : 'ventas pendientes'}</span></button>
-      <div class="stat"><span>Valor del inventario</span><b>${fmt(valor)} USD</b><span>${S.rate ? fmt(valor * S.rate) + ' Bs' : ''}</span></div>
+      ${cajaHtml}<div class="stat"><span>Valor del inventario</span><b>${fmt(valor)} USD</b><span>${S.rate ? fmt(valor * S.rate) + ' Bs' : ''}</span></div>
       <button class="stat bad" data-go="inventario"><span>Por reponer</span><b>${stock.filter(x => x.bajo_minimo).length}</b><span>en el mínimo o agotados</span></button></div>
     <p class="mut">Tasa del día: ${S.rate ? fmt(S.rate, 2) + ' Bs por USD' : 'sin tasa, configúrala en Más > Configuración'}</p>`;
   $('#stPend').onclick = () => { VH.f = 'pend'; SUB.ven = 'historial'; go('ventas'); };
 };
 
 const MODS = [['compras', 'Compras', 'Proveedores y entrada de mercancía'], ['marketing', 'Marketing', 'Clientes, ofertas y WhatsApp'],
-  ['finanzas', 'Finanzas', 'Cajas, cuentas y gastos'], ['contabilidad', 'Contabilidad', 'Ventas, gastos y rentabilidad'],
+  ['finanzas', 'Finanzas', 'Cajas, cuentas y gastos'], ['contabilidad', 'Reportes', 'Rentabilidad, caja y resultados'],
   ['directorios', 'Directorios', 'Clientes, proveedores, unidades e impuestos'], ['configuracion', 'Configuración', 'Tasa, negocio y ticket']];
 views.mas = async () => {
   $('#view').innerHTML = `<h1 class="pt">Más módulos</h1><div class="menu" style="margin-top:.8rem">${MODS.map(([k, t, d]) => `<button data-go="${k}"><b>${t}</b><small>${d}</small></button>`).join('')}</div>
@@ -74,8 +75,8 @@ views.compras = page('Compras', views.compras);
 views.ventas = page('Ventas', withSubs('ven', {nueva: 'Nueva venta', historial: 'Historial'}, {nueva: viewVenta, historial: viewHistVentas}), false);
 views.produccion = page('Producciones', withSubs('prod', {producir: 'Producir', formulas: 'Fórmulas', historial: 'Historial'}, {producir: viewProducir, formulas: viewFormulas, historial: viewHistorialProd}), false);
 views.marketing = page('Marketing', soon('Seguimiento de clientes:', ['Qué compra más cada cliente', 'Clientes con tiempo sin comprar', 'Mensajes y ofertas por WhatsApp']));
-views.finanzas = page('Finanzas', soon('Control del dinero:', ['Cuentas por moneda (caja, banco, billetera)', 'Cobros, pagos y transferencias', 'Registro de gastos']));
-views.contabilidad = page('Contabilidad', soon('Resultados del negocio:', ['Total vendido y total gastado', 'Rentabilidad', 'Gastos fijos y variables']));
+views.finanzas = page('Finanzas', withSubs('fin', {cuentas: 'Cuentas', gastos: 'Gastos'}, {cuentas: viewCuentas, gastos: viewGastos}));
+views.contabilidad = page('Reportes', viewReportes);
 views.directorios = page('Directorios', withSubs('dir', DIR_LABELS, Object.fromEntries(Object.keys(DIRS).map(k => [k, () => viewDir(k)]))));
 views.configuracion = page('Configuración', withSubs('cfg', {tasa: 'Tasa', negocio: 'Negocio', ticket: 'Ticket'},
   {tasa: viewTasa, negocio: () => viewSettings('negocio'), ticket: () => viewSettings('ticket')}));
