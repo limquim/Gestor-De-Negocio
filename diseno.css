@@ -51,3 +51,6 @@ button.stat{text-align:left;font:inherit;color:var(--ink);cursor:pointer;width:1
 /* Marketing, cotizaciones y reportes */
 textarea{width:100%;margin-top:.25rem;padding:.55rem .65rem;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit;font-size:16px}
 .mvb{margin-bottom:1rem}
+
+.rimg{width:100%;height:auto;border-radius:12px;border:1px solid var(--line);display:block}
+input[type=color]{padding:.2rem;cursor:pointer}

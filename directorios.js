@@ -71,16 +71,33 @@ async function viewSettings(kind) {
   const inputs = F.map(([k, l]) => `<label>${l}<input name="${k}" value="${esc(s[k] ?? '')}"></label>`).join('');
   const extra = kind === 'negocio' ? `<label class="chk"><input type="checkbox" name="enable_product_photos" ${s.enable_product_photos ? 'checked' : ''}> Permitir fotos en los productos</label>
     <label>Logo del negocio<input name="logo" type="file" accept="image/*"></label>${s.logo_data ? `<img class="thumb big" src="${s.logo_data}" alt=""><label class="chk"><input type="checkbox" name="rmlogo"> Quitar el logo actual</label>` : ''}<label class="chk"><input type="checkbox" name="ticket_show_logo" ${s.ticket_show_logo ? 'checked' : ''}> Mostrar el logo en el ticket en foto</label>` : kind === 'ticket' ? `<label>Ancho del papel<select name="ticket_paper"><option value="58mm" ${s.ticket_paper === '58mm' ? 'selected' : ''}>58 mm</option><option value="80mm" ${s.ticket_paper === '80mm' ? 'selected' : ''}>80 mm</option></select></label>
-    <label class="chk"><input type="checkbox" name="ticket_show_rate" ${s.ticket_show_rate ? 'checked' : ''}> Mostrar la tasa del día en el ticket</label>` : '';
-  const prev = kind === 'ticket' ? `<div class="card"><h2>Vista previa</h2><pre class="ticket">${esc([s.business_name || 'Mi negocio', s.ticket_header, '----------------------------', 'Detergente 1L    2 x 3.00', 'Cloro 1L         1 x 2.00', '----------------------------', 'TOTAL USD             8.00',
-    s.ticket_show_rate && S.rate ? 'Tasa: ' + fmt(S.rate, 2) + ' Bs' : '', s.ticket_footer].filter(x => x !== '' && x != null).join('\n'))}</pre></div>` : '';
+    <label class="chk"><input type="checkbox" name="ticket_show_rate" ${s.ticket_show_rate ? 'checked' : ''}> Mostrar la tasa del día en el ticket</label>
+    <label>Estilo del ticket en foto<select name="ticket_style"><option value="moderno" ${s.ticket_style === 'clasico' ? '' : 'selected'}>Moderno (tarjeta con color)</option><option value="clasico" ${s.ticket_style === 'clasico' ? 'selected' : ''}>Clásico (tipo ticket)</option></select></label>
+    <label>Color principal<input name="ticket_color" type="color" value="${esc(s.ticket_color || '#0b7285')}"></label>
+    <label class="chk"><input type="checkbox" name="ticket_show_logo" ${s.ticket_show_logo ? 'checked' : ''}> Mostrar el logo</label>
+    <label class="chk"><input type="checkbox" name="ticket_show_info" ${s.ticket_show_info === false ? '' : 'checked'}> Mostrar RIF, teléfono y dirección</label>
+    <label class="chk"><input type="checkbox" name="ticket_show_customer" ${s.ticket_show_customer === false ? '' : 'checked'}> Mostrar los datos del cliente</label>
+    <label class="chk"><input type="checkbox" name="ticket_show_payments" ${s.ticket_show_payments === false ? '' : 'checked'}> Mostrar los pagos y el saldo pendiente</label>` : '';
+  const prev = kind === 'ticket' ? '<div class="card"><h2>Vista previa</h2><div id="tkPrev"><p class="mut">Generando vista previa...</p></div></div>' : '';
   $('#view').innerHTML = `<form id="sForm" class="card stack"><h2>${kind === 'negocio' ? 'Información del negocio' : 'Diseño del ticket de venta'}</h2>${inputs}${extra}<button class="btn" type="submit">Guardar</button></form>${prev}`;
+  if (kind === 'ticket') {   // vista previa en vivo con datos de ejemplo
+    const f = $('#sForm'), e0 = f.elements, rate = S.rate || 100;
+    const sample = {title: 'NOTA DE ENTREGA', number: 128, date: caracasDate(), customer: 'María Pérez', phone: '0414-0000000', items: [{name: 'Detergente líquido 1L', qty: 2, price: 3}, {name: 'Cloro 1L', qty: 1, price: 2}, {name: 'Jabón lavaplatos 500ml', qty: 3, price: 1.5}],
+      subtotal: 12.5, discount: 0, tax: 0, total: 12.5, rate, pays: [{label: 'Efectivo', amount: 8, cur: 'USD'}], balance: 4.5, status: 'POR COBRAR', notes: ''};
+    let tmr;
+    const paint = () => { clearTimeout(tmr); tmr = setTimeout(async () => {
+      const cur = {...s, ticket_header: e0.ticket_header.value, ticket_footer: e0.ticket_footer.value, ticket_style: e0.ticket_style.value, ticket_color: e0.ticket_color.value, ticket_paper: e0.ticket_paper.value,
+        ticket_show_rate: e0.ticket_show_rate.checked, ticket_show_logo: e0.ticket_show_logo.checked, ticket_show_info: e0.ticket_show_info.checked, ticket_show_customer: e0.ticket_show_customer.checked, ticket_show_payments: e0.ticket_show_payments.checked};
+      try { const b = await docBlob(sample, 'DETERGENTE LIQUIDO 1L\n2 x 3.00            6.00\n--------------------------------\nTOTAL USD          12.50', cur); $('#tkPrev').innerHTML = `<img class="rimg" src="${URL.createObjectURL(b)}" alt="Vista previa">`; } catch (err) { $('#tkPrev').innerHTML = '<p class="mut">No se pudo generar la vista previa.</p>'; }
+    }, 250); };
+    f.addEventListener('input', paint); f.addEventListener('change', paint); paint();
+  }
   $('#sForm').onsubmit = (e) => {
     e.preventDefault();
     const el = e.target.elements, obj = {updated_at: new Date().toISOString()};
     F.forEach(([k]) => obj[k] = el[k].value.trim() || null);
     if (kind === 'negocio') obj.enable_product_photos = el.enable_product_photos.checked;
-    if (kind === 'ticket') { obj.ticket_paper = el.ticket_paper.value; obj.ticket_show_rate = el.ticket_show_rate.checked; }
+    if (kind === 'ticket') { obj.ticket_paper = el.ticket_paper.value; obj.ticket_show_rate = el.ticket_show_rate.checked; obj.ticket_style = el.ticket_style.value; obj.ticket_color = el.ticket_color.value; obj.ticket_show_logo = el.ticket_show_logo.checked; obj.ticket_show_info = el.ticket_show_info.checked; obj.ticket_show_customer = el.ticket_show_customer.checked; obj.ticket_show_payments = el.ticket_show_payments.checked; }
     run(async () => {
       if (kind === 'negocio') {
         obj.ticket_show_logo = el.ticket_show_logo.checked;

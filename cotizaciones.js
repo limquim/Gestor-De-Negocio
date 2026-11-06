@@ -37,11 +37,12 @@ async function viewCotizaciones() {
 
 async function quoteSheet(id) {
   const [d, set] = await Promise.all([quoteDetail(id), q(db.from('settings').select('*').eq('id', 1).single())]);
-  const s = d.s, text = quoteText(d, set), blobP = ticketBlob(text, set).catch(() => null), open = s.status === 'abierta';
-  openSheet('Cotización #' + id, `<pre class="ticket">${esc(text)}</pre>
+  const s = d.s, text = quoteText(d, set), blobP = docBlob(quoteDoc(d), text, set).catch(() => null), open = s.status === 'abierta';
+  openSheet('Cotización #' + id, `<div id="tPrev"><pre class="ticket">${esc(text)}</pre></div>
     <div class="row"><button class="btn" id="qI">Enviar como foto</button><button class="btn ghost" id="qD">Descargar foto</button></div>
     ${open ? '<div class="row"><button class="btn" id="qV">Convertir en venta</button><button class="btn ghost" id="qE">Editar</button><button class="btn ghost" id="qA">Anular</button></div>'
       : `<p class="mut">Estado: ${s.status === 'convertida' ? 'convertida en la venta #' + s.sale_id : 'anulada'}</p>`}`);
+  showPrev(blobP, set);
   $('#qI').onclick = () => run(async () => shareImage(await blobP, s.parties?.phone, 'cotizacion-' + id));
   $('#qD').onclick = () => run(async () => { const b = await blobP; if (!b) throw new Error('No se pudo crear la imagen'); downloadBlob(b, 'cotizacion-' + id + '.png'); });
   if (!open) return;

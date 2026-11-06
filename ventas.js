@@ -49,9 +49,10 @@ function printTicket(text, paper) {
 async function showTicket(id) {
   const [d, set] = await Promise.all([saleDetail(id), q(db.from('settings').select('*').eq('id', 1).single())]);
   const text = ticketText(d, set);
-  const blobP = ticketBlob(text, set).catch(() => null);
-  openSheet('Ticket de venta #' + id, `<pre class="ticket">${esc(text)}</pre><div class="row"><button class="btn" id="tI">Enviar como foto</button><button class="btn ghost" id="tD">Descargar foto</button></div>
+  const blobP = docBlob(saleDoc(d), text, set).catch(() => null);
+  openSheet('Ticket de venta #' + id, `<div id="tPrev"><pre class="ticket">${esc(text)}</pre></div><div class="row"><button class="btn" id="tI">Enviar como foto</button><button class="btn ghost" id="tD">Descargar foto</button></div>
     <div class="row"><button class="btn ghost" id="tP">Imprimir</button><button class="btn ghost" id="tW">Enviar como texto</button></div>`);
+  showPrev(blobP, set);
   $('#tI').onclick = () => run(async () => shareImage(await blobP, d.s.parties?.phone, 'ticket-' + id));
   $('#tD').onclick = () => run(async () => { const b = await blobP; if (!b) throw new Error('No se pudo crear la imagen'); downloadBlob(b, 'ticket-' + id + '.png'); });
   $('#tP').onclick = () => printTicket(text, set.ticket_paper);
