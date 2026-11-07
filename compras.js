@@ -6,7 +6,7 @@ async function cData() {
   const [products, sups, accs] = await Promise.all([
     q(db.from('products').select('id,name,sku,unit,avg_cost_usd,last_cost_usd').eq('active', true).order('name')),
     q(db.from('parties').select('id,name,phone').eq('is_supplier', true).eq('active', true).order('name')),
-    q(db.from('accounts').select('id,name,currency').eq('active', true).order('id'))
+    q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id'))
   ]);
   return {products, sups, accs};
 }
@@ -47,7 +47,7 @@ async function viewCompra() {
   };
   const drawPays = () => {
     $('#cPays').innerHTML = CV.pays.map((p, i) => `<div class="stack payl" data-i="${i}">
-      <div class="ln2"><label>Cuenta<select data-f="acc">${acctOpts(D.accs, p.acc)}</select></label><label>Método<select data-f="method">${optList(METHODS, p.method)}</select></label></div>
+      <div class="ln2"><label>Cuenta<select data-f="acc">${acctOpts(D.accs, p.acc)}</select></label><label>Método<select data-f="method">${optList(accMethods(D.accs.find(x => x.id === +p.acc)), p.method)}</select></label></div>
       <div class="ln2"><label>Monto<input data-f="amount" type="number" step="0.01" min="0" value="${p.amount}"></label><label>Referencia<input data-f="ref" value="${esc(p.ref)}"></label></div>
       <small class="mut eq"></small><button class="lnk bad" data-rmp="${i}">Quitar pago</button></div>`).join('') || '<p class="mut">Sin pagos: la compra quedará por pagar.</p>';
     totals();
@@ -70,7 +70,7 @@ async function viewCompra() {
     const p = CV.pays[+l.dataset.i];
     if (f === 'acc') {   // al cambiar de cuenta, el monto se convierte con la tasa (USD <-> Bs)
       const usd = payUsd(p), a = D.accs.find(x => x.id === +e.target.value);
-      p.acc = a.id; p.amount = r2(usd * (a.currency === 'USD' ? 1 : rate())); drawPays(); return;
+      p.acc = a.id; p.amount = r2(usd * (a.currency === 'USD' ? 1 : rate())); const al = accMethods(a); if (!al[p.method]) p.method = Object.keys(al)[0]; drawPays(); return;
     }
     p[f] = f === 'amount' ? +e.target.value || 0 : e.target.value; totals();
   });
@@ -82,7 +82,7 @@ async function viewCompra() {
   $('#cRate').addEventListener('input', totals);
   $('#cAddPay').onclick = () => {
     const t = totals(), a = D.accs[0]; if (!a) return toast('No hay cuentas de pago configuradas', true);
-    CV.pays.push({acc: a.id, method: 'efectivo', amount: t.bal > 0 ? r2(t.bal * (a.currency === 'USD' ? 1 : rate())) : 0, ref: ''}); drawPays();
+    CV.pays.push({acc: a.id, method: Object.keys(accMethods(a))[0], amount: t.bal > 0 ? r2(t.bal * (a.currency === 'USD' ? 1 : rate())) : 0, ref: ''}); drawPays();
   };
   $('#cNewS').onclick = () => run(async () => {
     const name = prompt('Nombre del proveedor'); if (!name) return;
@@ -133,18 +133,19 @@ async function purchaseSheet(id) {
 
 // ---------- Cobro o pago de una deuda: queda en USD y se convierte con la tasa del día de pago ----------
 async function debtForm(cfg) {
-  const accs = await q(db.from('accounts').select('id,name,currency').eq('active', true).order('id')), bal = cfg.bal;
+  const accs = await q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id')), bal = cfg.bal;
   openSheet(cfg.title, `<form id="dF" class="stack"><p>${cfg.label}: <b>${fmt(bal)} USD</b> (${fmt(bal * (S.rate || 0))} Bs a la tasa de hoy)<br>
     <span class="mut">El precio en dólares no cambia. Lo que se paga en Bs depende de la tasa del día del pago; puedes modificarla.</span></p>
     <label>Cuenta<select name="acc">${acctOpts(accs)}</select></label>
     <label>Tasa de cambio (Bs por USD)<input name="rate" type="number" step="0.0001" min="0.0001" value="${S.rate || ''}"></label>
-    <label>Método<select name="method">${optList(METHODS)}</select></label>
+    <label>Método<select name="method"></select></label>
     <label>Monto<input name="amount" type="number" step="0.01" min="0.01" required></label><p class="mut" id="dEq"></p>
     <label>Referencia<input name="ref"></label><button class="btn" type="submit">${cfg.title}</button></form>`);
   const el = $('#dF').elements, cur = () => accs.find(a => String(a.id) === el.acc.value).currency;
   const eq = () => { const r = +el.rate.value || 0, a = num(el.amount.value) || 0, usd = cur() === 'USD' ? a : (r ? a / r : 0); $('#dEq').textContent = `Equivale a ${fmt(usd)} USD | quedaría debiendo ${fmt(Math.max(bal - usd, 0))} USD`; };
   const full = () => { el.amount.value = (bal * (cur() === 'USD' ? 1 : (+el.rate.value || 0))).toFixed(2); eq(); };
-  full(); el.acc.onchange = full; el.rate.oninput = full; el.amount.oninput = eq;
+  const fillM = () => { el.method.innerHTML = optList(accMethods(accs.find(a => String(a.id) === el.acc.value))); };
+  fillM(); full(); el.acc.onchange = () => { fillM(); full(); }; el.rate.oninput = full; el.amount.oninput = eq;
   $('#dF').onsubmit = (e) => {
     e.preventDefault();
     run(async () => {

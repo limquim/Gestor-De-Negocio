@@ -22,6 +22,7 @@ const DIRS = {
     {k: 'name', l: 'Nombre', req: 1}, {k: 'is_fixed', l: 'Es un gasto fijo', type: 'check'}],
     title: r => r.name, sub: r => r.is_fixed ? 'Gasto fijo' : 'Gasto variable'},
   plantillas: {label: 'Plantillas de mensajes', table: 'message_templates', order: 'name', fields: [{k: 'name', l: 'Nombre', req: 1}, {k: 'body', l: 'Mensaje (usa {nombre} {producto} {negocio} {dias} {saldo})', type: 'textarea', req: 1}], title: r => r.name, sub: r => r.body.slice(0, 60)},
+  listas: {label: 'Listas de precios', table: 'price_lists', order: 'name', fields: [{k: 'name', l: 'Nombre (ej: Mayor)', req: 1}, {k: 'adjust_percent', l: 'Ajuste sobre el precio de venta, en % (ej: -10 para 10% menos)', type: 'number', req: 1}], title: r => r.name, sub: r => (r.adjust_percent > 0 ? '+' : '') + qty(r.adjust_percent) + '% sobre el precio de venta'},
   categorias: {label: 'Categorías de producto', table: 'product_categories', order: 'name', fields: [{k: 'name', l: 'Nombre', req: 1}], title: r => r.name, sub: () => ''},
   usuarios: {label: 'Usuarios', table: 'profiles', order: 'created_at', all: 1, noAdd: 1, noDel: 1, fields: [
     {k: 'full_name', l: 'Nombre', req: 1}, {k: 'role', l: 'Rol', type: 'select', opts: ROLES}, {k: 'active', l: 'Usuario activo', type: 'check'}],

@@ -41,11 +41,14 @@ function accForm(a, D) {
     <label>Tipo<select name="type_id">${D.types.map(t => `<option value="${t.id}" ${t.id === a?.type_id ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label>
     <label>Moneda<select name="cur" ${a ? 'disabled' : ''}><option value="USD">Dólares (USD)</option><option value="VES">Bolívares (Bs)</option></select></label>
     <label>Saldo inicial<input name="open" type="number" step="0.01" value="${a ? a.opening_balance : 0}"></label>
+    <div class="stack"><b class="mut">Métodos de pago que acepta esta cuenta</b>${Object.entries(METHODS).map(([k, v]) => `<label class="chk"><input type="checkbox" name="m_${k}" ${(a?.methods?.length ? a.methods.includes(k) : k === 'efectivo') ? 'checked' : ''}> ${v}</label>`).join('')}</div>
     <div class="row"><button class="btn" type="submit">Guardar</button>${a ? '<button type="button" class="btn ghost" id="aDel">Desactivar</button>' : ''}</div></form>`);
   const el = $('#aF').elements; if (a) el.cur.value = a.currency;
   $('#aF').onsubmit = (e) => {
     e.preventDefault();
     const row = {name: el.aname.value.trim(), type_id: +el.type_id.value || null, opening_balance: +el.open.value || 0};
+    row.methods = Object.keys(METHODS).filter(k => el['m_' + k].checked);
+    if (!row.methods.length) return toast('Elige al menos un método de pago', true);
     if (!a) row.currency = el.cur.value;
     run(async () => { await q(a ? db.from('accounts').update(row).eq('id', a.id) : db.from('accounts').insert(row)); closeSheet(); toast('Cuenta guardada'); render(); });
   };
@@ -117,3 +120,6 @@ async function viewGastos() {
   };
 }
 
+
+// Métodos de pago que acepta una cuenta (si no tiene configurados, se muestran todos)
+const accMethods = (a) => { const l = a?.methods?.length ? a.methods : Object.keys(METHODS); return Object.fromEntries(l.filter(k => METHODS[k]).map(k => [k, METHODS[k]])); };

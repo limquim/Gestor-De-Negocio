@@ -10,7 +10,7 @@ async function vData() {
     q(db.from('products').select('id,name,sku,unit,sale_price_usd,taxes(percent)').eq('active', true).order('name')),
     q(db.from('stock_actual').select('product_id,stock')),
     q(db.from('parties').select('id,name,phone').eq('is_customer', true).eq('active', true).order('name')),
-    q(db.from('accounts').select('id,name,currency').eq('active', true).order('id'))
+    q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id'))
   ]);
   return {products, st: Object.fromEntries(stock.map(s => [s.product_id, Number(s.stock)])), custs, accs};
 }
@@ -109,7 +109,7 @@ async function viewVenta() {
   const drawPays = () => {
     $('#vPays').innerHTML = V.pays.map((p, i) => `<div class="stack payl" data-i="${i}">
       <div class="ln2"><label>Cuenta<select data-f="acc">${D.accs.map(a => `<option value="${a.id}" ${a.id === +p.acc ? 'selected' : ''}>${esc(a.name)} (${a.currency})</option>`).join('')}</select></label>
-        <label>Método<select data-f="method">${optList(METHODS, p.method)}</select></label></div>
+        <label>Método<select data-f="method">${optList(accMethods(D.accs.find(x => x.id === +p.acc)), p.method)}</select></label></div>
       <div class="ln2"><label>Monto<input data-f="amount" type="number" step="0.01" min="0" value="${p.amount}"></label><label>Referencia<input data-f="ref" value="${esc(p.ref)}"></label></div>
       <small class="mut eq"></small><button class="lnk bad" data-rmp="${i}">Quitar pago</button></div>`).join('') || '<p class="mut">Sin pagos: la venta quedará a crédito.</p>';
     totals();
@@ -132,7 +132,7 @@ async function viewVenta() {
     const p = V.pays[+l.dataset.i];
     if (f === 'acc') {   // al cambiar de cuenta, el monto se convierte con la tasa (USD <-> Bs)
       const t = calc(), usd = payUsd(p, t.rate), a = D.accs.find(x => x.id === +e.target.value);
-      p.acc = a.id; p.amount = Math.round(usd * (a.currency === 'USD' ? 1 : t.rate) * 100) / 100; drawPays(); return;
+      p.acc = a.id; p.amount = Math.round(usd * (a.currency === 'USD' ? 1 : t.rate) * 100) / 100; const al = accMethods(a); if (!al[p.method]) p.method = Object.keys(al)[0]; drawPays(); return;
     }
     p[f] = f === 'amount' ? +e.target.value || 0 : e.target.value; totals();
   });
@@ -140,7 +140,7 @@ async function viewVenta() {
   ['vRate', 'vDoc', 'vDisc'].forEach(id => $('#' + id).addEventListener('input', totals));
   $('#vAddPay').onclick = () => {
     const t = totals(), a = D.accs[0]; if (!a) return toast('No hay cuentas de pago configuradas', true);
-    V.pays.push({acc: a.id, method: 'efectivo', amount: t.bal > 0 ? Math.round(t.bal * (a.currency === 'USD' ? 1 : t.rate) * 100) / 100 : 0, ref: ''}); drawPays();
+    V.pays.push({acc: a.id, method: Object.keys(accMethods(a))[0], amount: t.bal > 0 ? Math.round(t.bal * (a.currency === 'USD' ? 1 : t.rate) * 100) / 100 : 0, ref: ''}); drawPays();
   };
   if ($('#vCancel')) $('#vCancel').onclick = () => { V.edit = null; render(); };
   $('#vNewC').onclick = () => run(async () => {
