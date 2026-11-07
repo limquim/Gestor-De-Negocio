@@ -71,7 +71,7 @@ views.mas = async () => {
 };
 
 views.inventario = page('Inventario', withSubs('inv', {stock: 'Existencias', productos: 'Productos'}, {stock: viewInventario2, productos: viewProductos2}), false);
-views.compras = page('Compras', views.compras);
+views.compras = page('Compras', withSubs('com', {nueva: 'Nueva compra', historial: 'Historial'}, {nueva: viewCompra, historial: viewHistCompras}));
 views.ventas = page('Ventas', withSubs('ven', {nueva: 'Nueva venta', cotizaciones: 'Cotizaciones', historial: 'Historial'}, {nueva: viewVenta, cotizaciones: viewCotizaciones, historial: viewHistVentas}), false);
 views.produccion = page('Producciones', withSubs('prod', {producir: 'Producir', formulas: 'Fórmulas', historial: 'Historial'}, {producir: viewProducir, formulas: viewFormulas, historial: viewHistorialProd}), false);
 views.marketing = page('Marketing', viewMarketing);

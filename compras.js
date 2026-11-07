@@ -154,4 +154,3 @@ async function debtForm(cfg) {
   };
 }
 
-views.compras = withSubs('com', {nueva: 'Nueva compra', historial: 'Historial'}, {nueva: viewCompra, historial: viewHistCompras});
