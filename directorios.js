@@ -72,6 +72,7 @@ async function viewSettings(kind) {
   const extra = kind === 'negocio' ? `<label class="chk"><input type="checkbox" name="enable_product_photos" ${s.enable_product_photos ? 'checked' : ''}> Permitir fotos en los productos</label>
     <label>Logo del negocio<input name="logo" type="file" accept="image/*"></label>${s.logo_data ? `<img class="thumb big" src="${s.logo_data}" alt=""><label class="chk"><input type="checkbox" name="rmlogo"> Quitar el logo actual</label>` : ''}<label class="chk"><input type="checkbox" name="ticket_show_logo" ${s.ticket_show_logo ? 'checked' : ''}> Mostrar el logo en el ticket en foto</label>` : kind === 'ticket' ? `<label>Ancho del papel<select name="ticket_paper"><option value="58mm" ${s.ticket_paper === '58mm' ? 'selected' : ''}>58 mm</option><option value="80mm" ${s.ticket_paper === '80mm' ? 'selected' : ''}>80 mm</option></select></label>
     <label class="chk"><input type="checkbox" name="ticket_show_rate" ${s.ticket_show_rate ? 'checked' : ''}> Mostrar la tasa del día en el ticket</label>
+    <label class="chk"><input type="checkbox" name="ticket_show_bs" ${s.ticket_show_bs === false ? '' : 'checked'}> Mostrar el monto en bolívares</label>
     <label>Estilo del ticket en foto<select name="ticket_style"><option value="moderno" ${s.ticket_style === 'clasico' ? '' : 'selected'}>Moderno (tarjeta con color)</option><option value="clasico" ${s.ticket_style === 'clasico' ? 'selected' : ''}>Clásico (tipo ticket)</option></select></label>
     <label>Color principal<input name="ticket_color" type="color" value="${esc(s.ticket_color || '#0b7285')}"></label>
     <label class="chk"><input type="checkbox" name="ticket_show_logo" ${s.ticket_show_logo ? 'checked' : ''}> Mostrar el logo</label>
@@ -87,7 +88,7 @@ async function viewSettings(kind) {
     let tmr;
     const paint = () => { clearTimeout(tmr); tmr = setTimeout(async () => {
       const cur = {...s, ticket_header: e0.ticket_header.value, ticket_footer: e0.ticket_footer.value, ticket_style: e0.ticket_style.value, ticket_color: e0.ticket_color.value, ticket_paper: e0.ticket_paper.value,
-        ticket_show_rate: e0.ticket_show_rate.checked, ticket_show_logo: e0.ticket_show_logo.checked, ticket_show_info: e0.ticket_show_info.checked, ticket_show_customer: e0.ticket_show_customer.checked, ticket_show_payments: e0.ticket_show_payments.checked};
+        ticket_show_rate: e0.ticket_show_rate.checked, ticket_show_bs: e0.ticket_show_bs.checked, ticket_show_logo: e0.ticket_show_logo.checked, ticket_show_info: e0.ticket_show_info.checked, ticket_show_customer: e0.ticket_show_customer.checked, ticket_show_payments: e0.ticket_show_payments.checked};
       try { const b = await docBlob(sample, 'DETERGENTE LIQUIDO 1L\n2 x 3.00            6.00\n--------------------------------\nTOTAL USD          12.50', cur); $('#tkPrev').innerHTML = `<img class="rimg" src="${URL.createObjectURL(b)}" alt="Vista previa">`; } catch (err) { $('#tkPrev').innerHTML = '<p class="mut">No se pudo generar la vista previa.</p>'; }
     }, 250); };
     f.addEventListener('input', paint); f.addEventListener('change', paint); paint();
@@ -97,7 +98,7 @@ async function viewSettings(kind) {
     const el = e.target.elements, obj = {updated_at: new Date().toISOString()};
     F.forEach(([k]) => obj[k] = el[k].value.trim() || null);
     if (kind === 'negocio') obj.enable_product_photos = el.enable_product_photos.checked;
-    if (kind === 'ticket') { obj.ticket_paper = el.ticket_paper.value; obj.ticket_show_rate = el.ticket_show_rate.checked; obj.ticket_style = el.ticket_style.value; obj.ticket_color = el.ticket_color.value; obj.ticket_show_logo = el.ticket_show_logo.checked; obj.ticket_show_info = el.ticket_show_info.checked; obj.ticket_show_customer = el.ticket_show_customer.checked; obj.ticket_show_payments = el.ticket_show_payments.checked; }
+    if (kind === 'ticket') { obj.ticket_paper = el.ticket_paper.value; obj.ticket_show_rate = el.ticket_show_rate.checked; obj.ticket_show_bs = el.ticket_show_bs.checked; obj.ticket_style = el.ticket_style.value; obj.ticket_color = el.ticket_color.value; obj.ticket_show_logo = el.ticket_show_logo.checked; obj.ticket_show_info = el.ticket_show_info.checked; obj.ticket_show_customer = el.ticket_show_customer.checked; obj.ticket_show_payments = el.ticket_show_payments.checked; }
     run(async () => {
       if (kind === 'negocio') {
         obj.ticket_show_logo = el.ticket_show_logo.checked;

@@ -15,7 +15,9 @@ function quoteText(d, set) {
   o.push(ln, two('Subtotal USD', fmt(s.subtotal_usd)));
   if (+s.discount_usd) o.push(two('Descuento', '-' + fmt(s.discount_usd)));
   if (+s.tax_usd) o.push(two('IVA', fmt(s.tax_usd)));
-  o.push(two('TOTAL USD', fmt(s.total_usd)), two('TOTAL Bs', fmt(s.total_usd * s.exchange_rate)), 'Tasa: ' + fmt(s.exchange_rate, 4) + ' Bs/USD');
+  o.push(two('TOTAL USD', fmt(s.total_usd)));
+  if (set.ticket_show_bs !== false) o.push(two('TOTAL Bs', fmt(s.total_usd * s.exchange_rate)));
+  o.push('Tasa: ' + fmt(s.exchange_rate, 4) + ' Bs/USD');
   if (s.notes) o.push(ln, s.notes);
   o.push(ln, 'Precios sujetos a cambio según la tasa del día.');
   return o.filter(Boolean).join('\n');

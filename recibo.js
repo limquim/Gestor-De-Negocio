@@ -72,10 +72,10 @@ async function receiptBlob(doc, set) {
     if (doc.discount) row('Descuento', '-' + fmt(doc.discount) + ' USD', '#b4381a');
     if (doc.tax) row('IVA', fmt(doc.tax) + ' USD');
     // total
-    y += 24; const bh = set.ticket_show_rate === false ? 92 : 116; R(P - 12, y, W - P * 2 + 24, bh, 20, acc);
+    y += 24; const sb = set.ticket_show_bs !== false, bh = 66 + (sb ? 26 : 0) + (set.ticket_show_rate === false ? 0 : 24); R(P - 12, y, W - P * 2 + 24, bh, 20, acc);
     T(doc.quote ? 'TOTAL' : 'TOTAL A PAGAR', P + 10, y + 40, 15, 700, 'rgba(255,255,255,.85)'); T(fmt(doc.total) + ' USD', ct - 8, y + 48, 38, 800, '#fff', 'right');
-    T(fmt(doc.total * doc.rate) + ' Bs', ct - 8, y + 80, 21, 600, 'rgba(255,255,255,.92)', 'right');
-    if (set.ticket_show_rate !== false) T('Tasa: ' + fmt(doc.rate, 2) + ' Bs por USD', ct - 8, y + 104, 14, 400, 'rgba(255,255,255,.75)', 'right');
+    if (sb) T(fmt(doc.total * doc.rate) + ' Bs', ct - 8, y + 80, 21, 600, 'rgba(255,255,255,.92)', 'right');
+    if (set.ticket_show_rate !== false) T('Tasa: ' + fmt(doc.rate, 2) + ' Bs por USD', ct - 8, y + (sb ? 104 : 80), 14, 400, 'rgba(255,255,255,.75)', 'right');
     y += bh;
     // pagos
     if (set.ticket_show_payments !== false && (doc.pays.length || doc.balance)) {

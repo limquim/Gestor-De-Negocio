@@ -117,30 +117,3 @@ async function viewGastos() {
   };
 }
 
-// ---------- Detalle y pago de una compra ----------
-async function purchaseSheet(id) {
-  const [b, items, pays, accs] = await Promise.all([
-    q(db.from('purchases').select('*, parties(name)').eq('id', id).single()),
-    q(db.from('purchase_items').select('quantity,unit_cost_usd,products(name)').eq('purchase_id', id)),
-    q(db.from('payments').select('method,currency,amount,amount_usd,accounts(name)').eq('purchase_id', id).order('id')),
-    q(db.from('accounts').select('id,name,currency').eq('active', true).order('id'))
-  ]);
-  const paid = pays.reduce((a, p) => a + +p.amount_usd, 0), bal = b.total_usd - paid, open = b.status !== 'anulada' && bal > 0.01;
-  openSheet('Compra #' + id, `<p>${esc(b.parties?.name || 'Sin proveedor')} | ${b.purchase_date}</p>
-    <div class="scroll"><table><thead><tr><th>Producto</th><th class="n">Cant.</th><th class="n">Costo USD</th></tr></thead><tbody>${items.map(i => `<tr><td>${esc(i.products?.name)}</td><td class="n">${qty(i.quantity)}</td><td class="n">${fmt(i.unit_cost_usd)}</td></tr>`).join('')}</tbody></table></div>
-    <p><b>Total ${fmt(b.total_usd)} USD</b> (${fmt(b.total_usd * b.exchange_rate)} Bs)<br>Pagado ${fmt(paid)} USD${open ? ` | <span class="warn">Debes ${fmt(bal)} USD</span>` : ''}</p>
-    ${pays.length ? `<p class="mut">${pays.map(p => `${METHODS[p.method] || p.method} (${esc(p.accounts?.name)}): ${fmt(p.amount)} ${p.currency}`).join('<br>')}</p>` : ''}
-    ${open ? `<form id="pcF" class="stack"><h2>Registrar pago</h2><label>Pagar desde<select name="acc">${acctOpts(accs)}</select></label>
-      <label>Método<select name="method">${optList(METHODS)}</select></label><label>Monto<input name="amount" type="number" step="0.01" min="0.01" required></label>
-      <label>Referencia<input name="ref"></label><button class="btn" type="submit">Registrar pago</button></form>` : ''}`);
-  if (!open) return;
-  const el = $('#pcF').elements, amt = () => { const a = accs.find(x => String(x.id) === el.acc.value); el.amount.value = (bal * (a.currency === 'USD' ? 1 : (S.rate || 0))).toFixed(2); };
-  amt(); el.acc.onchange = amt;
-  $('#pcF').onsubmit = (e) => {
-    e.preventDefault();
-    run(async () => {
-      await q(db.rpc('registrar_pago_compra', {p_purchase_id: id, p_account_id: +el.acc.value, p_method: el.method.value, p_amount: num(el.amount.value), p_reference: el.ref.value.trim() || null, p_rate: S.rate}));
-      closeSheet(); toast('Pago registrado'); render();
-    });
-  };
-}

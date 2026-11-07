@@ -34,7 +34,8 @@ function ticketText(d, set) {
   o.push(ln, two('Subtotal USD', fmt(s.subtotal_usd)));
   if (+s.discount_usd) o.push(two('Descuento', '-' + fmt(s.discount_usd)));
   if (+s.tax_usd) o.push(two('IVA', fmt(s.tax_usd)));
-  o.push(two('TOTAL USD', fmt(s.total_usd)), two('TOTAL Bs', fmt(s.total_usd * s.exchange_rate)));
+  o.push(two('TOTAL USD', fmt(s.total_usd)));
+  if (set.ticket_show_bs !== false) o.push(two('TOTAL Bs', fmt(s.total_usd * s.exchange_rate)));
   if (set.ticket_show_rate) o.push('Tasa: ' + fmt(s.exchange_rate, 4) + ' Bs/USD');
   if (d.pays.length) { o.push(ln, 'PAGOS'); d.pays.forEach(p => o.push(two(METHODS[p.method] || p.method, fmt(p.amount) + ' ' + p.currency))); }
   if (bal > 0.01) o.push(two('POR PAGAR USD', fmt(bal)));
@@ -174,7 +175,7 @@ async function viewHistVentas() {
   $('#view').innerHTML = `<div class="chips sub" id="hF"><button data-f="all" class="${VH.f === 'all' ? 'on' : ''}">Todas</button><button data-f="pend" class="${VH.f === 'pend' ? 'on' : ''}">Por cobrar</button></div>
     <div class="list" id="hL">${list.map(r => `<button class="item" data-id="${r.id}"><span><b>#${r.id} ${esc(r.customer || 'Cliente general')}</b>
       <small>${r.sale_date} | ${r.doc_type === 'factura' ? 'Factura' : 'Nota de entrega'}</small>
-      <small>${fmt(r.total_usd)} USD (${fmt(r.total_usd * r.exchange_rate)} Bs)${r.status === 'pendiente' ? ' | Debe ' + fmt(r.total_usd - r.paid_usd) + ' USD' : ''}</small></span>
+      <small>${r.status === 'pendiente' ? 'Debe ' + fmt(r.total_usd - r.paid_usd) + ' USD (' + fmt((r.total_usd - r.paid_usd) * (S.rate || r.exchange_rate)) + ' Bs hoy)' : fmt(r.total_usd) + ' USD (' + fmt(r.total_usd * r.exchange_rate) + ' Bs)'}</small></span>
       <span class="badge ${r.status === 'pagada' ? 'ok' : r.status === 'pendiente' ? 'low' : 'out'}">${ST[r.status] || r.status}</span></button>`).join('') || '<p class="mut">No hay ventas en esta lista.</p>'}</div>`;
   $('#hF').onclick = (e) => { const b = e.target.closest('button'); if (b) { VH.f = b.dataset.f; render(); } };
   $('#hL').onclick = (e) => { const b = e.target.closest('[data-id]'); if (b) run(() => saleSheet(+b.dataset.id)); };
@@ -184,7 +185,7 @@ async function saleSheet(id) {
   const d = await saleDetail(id), s = d.s, paid = d.pays.reduce((a, p) => a + +p.amount_usd, 0), bal = s.total_usd - paid, anul = s.status === 'anulada';
   openSheet('Venta #' + id, `<p>${esc(s.parties?.name || 'Cliente general')} | ${s.sale_date} | ${s.doc_type === 'factura' ? 'Factura' : 'Nota de entrega'}${anul ? ' | <b class="warn">ANULADA</b>' : ''}</p>
     <div class="scroll"><table><thead><tr><th>Producto</th><th class="n">Cant.</th><th class="n">Precio</th><th class="n">Total</th></tr></thead><tbody>${d.items.map(i => `<tr><td>${esc(i.name)}</td><td class="n">${qty(i.quantity)}</td><td class="n">${fmt(i.unit_price_usd)}</td><td class="n">${fmt(i.quantity * i.unit_price_usd)}</td></tr>`).join('')}</tbody></table></div>
-    <p>Subtotal ${fmt(s.subtotal_usd)} | Desc. ${fmt(s.discount_usd)} | IVA ${fmt(s.tax_usd)}<br><b>Total ${fmt(s.total_usd)} USD</b> (${fmt(s.total_usd * s.exchange_rate)} Bs)<br>Pagado ${fmt(paid)} USD${!anul && bal > 0.01 ? ` | <span class="warn">Debe ${fmt(bal)} USD</span>` : ''}</p>
+    <p>Subtotal ${fmt(s.subtotal_usd)} | Desc. ${fmt(s.discount_usd)} | IVA ${fmt(s.tax_usd)}<br><b>Total ${fmt(s.total_usd)} USD</b> (${fmt(s.total_usd * s.exchange_rate)} Bs)<br>Pagado ${fmt(paid)} USD${!anul && bal > 0.01 ? ` | <span class="warn">Debe ${fmt(bal)} USD (${fmt(bal * (S.rate || s.exchange_rate))} Bs a la tasa de hoy)</span>` : ''}</p>
     ${d.pays.length ? `<p class="mut">${d.pays.map(p => `${METHODS[p.method] || p.method} (${esc(p.accounts?.name || '')}): ${fmt(p.amount)} ${p.currency}`).join('<br>')}</p>` : ''}
     <div class="row"><button class="btn" id="sT">Ticket</button>${anul ? '' : '<button class="btn ghost" id="sE">Corregir</button><button class="btn ghost" id="sA">Anular</button>'}${!anul && bal > 0.01 ? '<button class="btn" id="sC">Registrar cobro</button>' : ''}</div>`);
   $('#sT').onclick = () => run(() => showTicket(id));
@@ -198,22 +199,7 @@ async function saleSheet(id) {
 }
 
 async function cobroForm(id, bal) {
-  const accs = await q(db.from('accounts').select('id,name,currency').eq('active', true).order('id')), rate = S.rate || 0;
-  const amt = (a) => Math.round(bal * (a.currency === 'USD' ? 1 : rate) * 100) / 100;
-  openSheet('Registrar cobro', `<form id="cF" class="stack"><p class="mut">Pendiente: ${fmt(bal)} USD. Si cobras en Bs se convierte con la tasa de hoy.</p>
-    <label>Cuenta<select name="acc">${accs.map(a => `<option value="${a.id}">${esc(a.name)} (${a.currency})</option>`).join('')}</select></label>
-    <label>Método<select name="method">${optList(METHODS)}</select></label>
-    <label>Monto<input name="amount" type="number" step="0.01" min="0.01" value="${amt(accs[0])}" required></label>
-    <label>Referencia<input name="ref"></label><button class="btn" type="submit">Registrar cobro</button></form>`);
-  const el = $('#cF').elements;
-  el.acc.onchange = () => { el.amount.value = amt(accs.find(a => String(a.id) === el.acc.value)); };
-  $('#cF').onsubmit = (e) => {
-    e.preventDefault();
-    run(async () => {
-      await q(db.rpc('registrar_cobro', {p_sale_id: id, p_account_id: +el.acc.value, p_method: el.method.value, p_amount: +el.amount.value, p_reference: el.ref.value.trim() || null}));
-      closeSheet(); toast('Cobro registrado'); render();
-    });
-  };
+  return debtForm({title: 'Registrar cobro', label: 'Debe el cliente', rpc: 'registrar_cobro', args: {p_sale_id: id}, bal});
 }
 
 
