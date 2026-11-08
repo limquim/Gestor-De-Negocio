@@ -289,7 +289,7 @@ $('#logout').onclick = () => db.auth.signOut();
 
 async function enter() {
   $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
-  await loadRate(); await autoRate(); render();
+  await loadRate(); await autoRate(); await loadMethods(); render();
 }
 function showLogin() { $('#app').classList.add('hidden'); $('#login').classList.remove('hidden'); }
 
@@ -314,6 +314,8 @@ run(async () => {
 <script src="marketing.js"></script>
 <script src="recibo.js"></script>
 <script src="catalogo.js"></script>
+<script src="devoluciones.js"></script>
+<script src="panel.js"></script>
 <script src="shell.js"></script>
 </body>
 </html>

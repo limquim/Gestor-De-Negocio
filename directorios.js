@@ -19,9 +19,10 @@ const DIRS = {
     title: r => r.name, sub: r => `${qty(r.percent)}%${r.is_default ? ' | por defecto' : ''}`},
   cuentas: {label: 'Tipos de cuenta', table: 'account_types', order: 'name', fields: [{k: 'name', l: 'Nombre', req: 1}], title: r => r.name, sub: () => ''},
   gastos: {label: 'Tipos de gasto', table: 'expense_types', order: 'name', fields: [
-    {k: 'name', l: 'Nombre', req: 1}, {k: 'is_fixed', l: 'Es un gasto fijo', type: 'check'}],
+    {k: 'name', l: 'Nombre', req: 1}, {k: 'is_fixed', l: 'Es un gasto fijo', type: 'check'}, {k: 'in_sales_cost', l: 'Es costo de servicios de ventas (ej: delivery). Ya está en el costo de lo vendido, no se cuenta otra vez como gasto', type: 'check'}],
     title: r => r.name, sub: r => r.is_fixed ? 'Gasto fijo' : 'Gasto variable'},
   plantillas: {label: 'Plantillas de mensajes', table: 'message_templates', order: 'name', fields: [{k: 'name', l: 'Nombre', req: 1}, {k: 'body', l: 'Mensaje (usa {nombre} {producto} {negocio} {dias} {saldo})', type: 'textarea', req: 1}], title: r => r.name, sub: r => r.body.slice(0, 60)},
+  metodos: {label: 'Métodos de pago', table: 'payment_methods', order: 'name', fields: [{k: 'name', l: 'Nombre (ej: Pago móvil, Binance, Cheque)', req: 1}], title: r => r.name, sub: () => 'Se asigna a cada cuenta en Finanzas > Cuentas'},
   listas: {label: 'Listas de precios', table: 'price_lists', order: 'name', fields: [{k: 'name', l: 'Nombre (ej: Mayor)', req: 1}, {k: 'adjust_percent', l: 'Ajuste sobre el precio de venta, en % (ej: -10 para 10% menos)', type: 'number', req: 1}], title: r => r.name, sub: r => (r.adjust_percent > 0 ? '+' : '') + qty(r.adjust_percent) + '% sobre el precio de venta'},
   categorias: {label: 'Categorías de producto', table: 'product_categories', order: 'name', fields: [{k: 'name', l: 'Nombre', req: 1}], title: r => r.name, sub: () => ''},
   usuarios: {label: 'Usuarios', table: 'profiles', order: 'created_at', all: 1, noAdd: 1, noDel: 1, fields: [
@@ -55,11 +56,11 @@ function dirForm(c, row) {
     e.preventDefault();
     const el = e.target.elements, obj = {};
     c.fields.forEach(f => { const x = el[f.k]; obj[f.k] = f.type === 'check' ? x.checked : f.type === 'number' ? +x.value : (x.value.trim() || null); });
-    run(async () => { await q(row ? db.from(c.table).update(obj).eq('id', row.id) : db.from(c.table).insert(obj)); closeSheet(); toast('Guardado'); render(); });
+    run(async () => { await q(row ? db.from(c.table).update(obj).eq('id', row.id) : db.from(c.table).insert(obj)); if (c.table === 'payment_methods') await loadMethods(); closeSheet(); toast('Guardado'); render(); });
   };
   if (row && !c.noDel) $('#dDel').onclick = () => run(async () => {
     if (!confirm('¿Desactivar este registro?')) return;
-    await q(db.from(c.table).update({active: false}).eq('id', row.id)); closeSheet(); toast('Desactivado'); render();
+    await q(db.from(c.table).update({active: false}).eq('id', row.id)); if (c.table === 'payment_methods') await loadMethods(); closeSheet(); toast('Desactivado'); render();
   });
 }
 

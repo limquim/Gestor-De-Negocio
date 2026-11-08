@@ -54,3 +54,18 @@ textarea{width:100%;margin-top:.25rem;padding:.55rem .65rem;border:1px solid var
 
 .rimg{width:100%;height:auto;border-radius:12px;border:1px solid var(--line);display:block}
 input[type=color]{padding:.2rem;cursor:pointer}
+
+/* Panel del dueño y ganancia por venta */
+.hero{background:var(--pri);color:var(--pri-ink);border-radius:18px;padding:1.1rem 1.1rem 1rem;margin-bottom:1rem;display:grid;gap:.15rem}
+.hero>span{font-weight:600;opacity:.9}
+.hero>b{font-size:2.1rem;font-weight:800;line-height:1.15}
+.hero b.neg2{color:#ffd7cc}
+.hero small{opacity:.85}
+.hero3{display:grid;grid-template-columns:repeat(3,1fr);gap:.6rem;margin-top:.8rem;padding-top:.8rem;border-top:1px solid rgba(255,255,255,.28)}
+.hero3 span{font-size:.78rem;opacity:.85;display:block}
+.hero3 b{font-size:1.02rem;font-weight:800}
+.gain{border-radius:14px;padding:.9rem 1rem;margin:.8rem 0;background:var(--bg);border-left:5px solid var(--ok);display:grid;gap:.1rem}
+.gain.neg{border-left-color:var(--bad)}
+.gain b{font-size:1.6rem;font-weight:800}
+.gain.pos b{color:var(--ok)}
+.gain.neg b{color:var(--bad)}

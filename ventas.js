@@ -7,7 +7,7 @@ const optList = (obj, sel) => Object.entries(obj).map(([k, v]) => `<option value
 
 async function vData() {
   const [products, stock, custs, accs] = await Promise.all([
-    q(db.from('products').select('id,name,sku,unit,sale_price_usd,taxes(percent)').eq('active', true).order('name')),
+    q(db.from('products').select('id,name,sku,unit,sale_price_usd,is_service,taxes(percent)').eq('active', true).order('name')),
     q(db.from('stock_actual').select('product_id,stock')),
     q(db.from('parties').select('id,name,phone').eq('is_customer', true).eq('active', true).order('name')),
     q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id'))
@@ -15,19 +15,21 @@ async function vData() {
   return {products, st: Object.fromEntries(stock.map(s => [s.product_id, Number(s.stock)])), custs, accs};
 }
 async function saleDetail(id) {
-  const [s, items, pays] = await Promise.all([
+  const [s, items, pays, ret, rit] = await Promise.all([
     q(db.from('sales').select('*, parties(name,phone)').eq('id', id).single()),
-    q(db.from('sale_items').select('product_id,quantity,unit_price_usd,products(name)').eq('sale_id', id).order('id')),
-    q(db.from('payments').select('method,currency,amount,amount_usd,reference,account_id,accounts(name)').eq('sale_id', id).order('id'))
+    q(db.from('sale_items').select('product_id,quantity,unit_price_usd,unit_cost_usd,tax_percent,products(name)').eq('sale_id', id).order('id')),
+    q(db.from('payments').select('method,currency,amount,amount_usd,reference,account_id,accounts(name)').eq('sale_id', id).order('id')),
+    q(db.from('sale_returns').select('total_usd,refund_usd').eq('sale_id', id).eq('status', 'activa')),
+    q(db.from('sale_return_items').select('quantity,unit_price_usd,unit_cost_usd,restock,sale_returns!inner(sale_id,status)').eq('sale_returns.sale_id', id).eq('sale_returns.status', 'activa'))
   ]);
-  return {s, items: items.map(i => ({...i, name: i.products?.name})), pays};
+  return {s, items: items.map(i => ({...i, name: i.products?.name})), pays, ret, rit};
 }
 
 // ---------- Ticket ----------
 function ticketText(d, set) {
   const s = d.s, w = set.ticket_paper === '80mm' ? 42 : 32, ln = '-'.repeat(w);
   const two = (a, b) => a + ' '.repeat(Math.max(1, w - a.length - b.length)) + b;
-  const paid = d.pays.reduce((a, p) => a + +p.amount_usd, 0), bal = s.total_usd - paid;
+  const paid = covered(d), bal = s.total_usd - paid;
   const o = [(set.business_name || 'Mi negocio').toUpperCase(), set.business_rif && 'RIF: ' + set.business_rif, set.business_phone, set.business_address, set.ticket_header].filter(Boolean);
   o.push(ln, (s.doc_type === 'factura' ? 'FACTURA' : 'NOTA DE ENTREGA') + ' #' + s.id, fdate(s.created_at), 'Cliente: ' + (s.parties?.name || 'Cliente general'), ln);
   d.items.forEach(i => o.push(i.name, two(`${qty(i.quantity)} x ${fmt(i.unit_price_usd)}`, fmt(i.quantity * i.unit_price_usd))));
@@ -66,7 +68,7 @@ async function viewVenta() {
   const D = await vData(), old = V.edit ? await saleDetail(V.edit) : null, qd = fq ? await quoteDetail(fq) : null;
   if (old) old.items.forEach(i => { D.st[i.product_id] = (D.st[i.product_id] || 0) + +i.quantity; });   // el stock vuelve a contar lo ya vendido
   const pm = Object.fromEntries(D.products.map(p => [p.id, p]));
-  const line = (pid, qv, pr) => { const p = pm[pid]; return {pid, name: p?.name, unit: p?.unit, qty: qv, price: pr ?? +p?.sale_price_usd, pct: Number(p?.taxes?.percent || 0)}; };
+  const line = (pid, qv, pr) => { const p = pm[pid]; return {pid, name: p?.name, unit: p?.unit, qty: qv, price: pr ?? +p?.sale_price_usd, price0: +p?.sale_price_usd, svc: !!p?.is_service, pct: Number(p?.taxes?.percent || 0)}; };
   V.cart = (old || qd) ? (old || qd).items.map(i => line(i.product_id, +i.quantity, +i.unit_price_usd)) : [];
   V.pays = old ? old.pays.map(p => ({acc: p.account_id, method: p.method, amount: +p.amount, ref: p.reference || ''})) : [];
 
@@ -102,7 +104,7 @@ async function viewVenta() {
     return {...t, paid, bal};
   };
   const drawCart = () => {
-    $('#vCart').innerHTML = V.cart.map((c, i) => `<div class="pl" data-i="${i}"><div><b>${esc(c.name)}</b><small>Disponible: ${qty(D.st[c.pid] || 0)} ${esc(c.unit)}</small><small class="lt"></small><button class="lnk bad" data-rm="${i}">Quitar</button></div>
+    $('#vCart').innerHTML = V.cart.map((c, i) => `<div class="pl" data-i="${i}"><div><b>${esc(c.name)}</b><small>${c.svc ? 'Servicio (sin inventario)' : 'Disponible: ' + qty(D.st[c.pid] || 0) + ' ' + esc(c.unit)}</small><small class="lt"></small>${c.svc ? `<button class="lnk" data-free="${i}">${c.price > 0 ? 'Asumirlo yo (no cobrar)' : 'Cobrarlo al cliente'}</button>` : ''}<button class="lnk bad" data-rm="${i}">Quitar</button></div>
       <div class="stack" style="gap:.3rem"><label>Cant.<input data-f="qty" type="number" step="0.001" min="0.001" value="${c.qty}"></label><label>Precio USD<input data-f="price" type="number" step="0.01" min="0" value="${c.price}"></label></div></div>`).join('') || '<p class="mut">Busca y agrega productos.</p>';
     totals();
   };
@@ -118,7 +120,7 @@ async function viewVenta() {
 
   $('#vSearch').oninput = (e) => {
     const t = e.target.value.trim().toLowerCase();
-    $('#vRes').innerHTML = t ? (D.products.filter(p => (p.name + ' ' + (p.sku || '')).toLowerCase().includes(t)).slice(0, 6).map(p => `<button class="item" data-add="${p.id}"><span><b>${esc(p.name)}</b><small>${fmt(p.sale_price_usd)} USD | Disponible: ${qty(D.st[p.id] || 0)} ${esc(p.unit)}</small></span><span class="mut">+</span></button>`).join('') || '<p class="mut">Sin resultados.</p>') : '';
+    $('#vRes').innerHTML = t ? (D.products.filter(p => (p.name + ' ' + (p.sku || '')).toLowerCase().includes(t)).slice(0, 6).map(p => `<button class="item" data-add="${p.id}"><span><b>${esc(p.name)}</b><small>${fmt(p.sale_price_usd)} USD | ${p.is_service ? 'Servicio' : 'Disponible: ' + qty(D.st[p.id] || 0) + ' ' + esc(p.unit)}</small></span><span class="mut">+</span></button>`).join('') || '<p class="mut">Sin resultados.</p>') : '';
   };
   $('#vRes').onclick = (e) => {
     const b = e.target.closest('[data-add]'); if (!b) return;
@@ -126,7 +128,10 @@ async function viewVenta() {
     $('#vSearch').value = ''; $('#vRes').innerHTML = ''; drawCart();
   };
   $('#vCart').addEventListener('input', (e) => { const l = e.target.closest('.pl'); if (l && e.target.dataset.f) { V.cart[+l.dataset.i][e.target.dataset.f] = +e.target.value || 0; totals(); } });
-  $('#vCart').addEventListener('click', (e) => { if (e.target.dataset.rm !== undefined) { V.cart.splice(+e.target.dataset.rm, 1); drawCart(); } });
+  $('#vCart').addEventListener('click', (e) => {
+    if (e.target.dataset.rm !== undefined) { V.cart.splice(+e.target.dataset.rm, 1); drawCart(); }
+    if (e.target.dataset.free !== undefined) { const c = V.cart[+e.target.dataset.free]; c.price = c.price > 0 ? 0 : (c.price0 || 0); drawCart(); }
+  });
   $('#vPays').addEventListener('input', (e) => {
     const l = e.target.closest('.payl'), f = e.target.dataset.f; if (!l || !f) return;
     const p = V.pays[+l.dataset.i];
@@ -158,7 +163,7 @@ async function viewVenta() {
       if (ch > cash.amount + 0.005) throw new Error('El pago supera el total. Ajusta los montos.');
       cash.amount = Math.round((cash.amount - ch) * 100) / 100;
     }
-    if (V.cart.some(c => c.qty > (D.st[c.pid] || 0)) && !confirm('Hay productos con inventario insuficiente. ¿Registrar la venta de todos modos?')) return;
+    if (V.cart.some(c => !c.svc && c.qty > (D.st[c.pid] || 0)) && !confirm('Hay productos con inventario insuficiente. ¿Registrar la venta de todos modos?')) return;
     const id = await q(db.rpc('registrar_venta', {p_id: V.edit, p_customer_id: +$('#vCust').value || null, p_doc_type: $('#vDoc').value, p_rate: t.rate, p_discount_usd: t.disc,
       p_due_date: $('#vDue').value || null, p_notes: $('#vNotes').value.trim() || null,
       p_items: V.cart.map(c => ({product_id: c.pid, quantity: c.qty, unit_price_usd: c.price})),
@@ -182,14 +187,15 @@ async function viewHistVentas() {
 }
 
 async function saleSheet(id) {
-  const d = await saleDetail(id), s = d.s, paid = d.pays.reduce((a, p) => a + +p.amount_usd, 0), bal = s.total_usd - paid, anul = s.status === 'anulada';
+  const d = await saleDetail(id), s = d.s, paid = covered(d), bal = s.total_usd - paid, anul = s.status === 'anulada';
   openSheet('Venta #' + id, `<p>${esc(s.parties?.name || 'Cliente general')} | ${s.sale_date} | ${s.doc_type === 'factura' ? 'Factura' : 'Nota de entrega'}${anul ? ' | <b class="warn">ANULADA</b>' : ''}</p>
     <div class="scroll"><table><thead><tr><th>Producto</th><th class="n">Cant.</th><th class="n">Precio</th><th class="n">Total</th></tr></thead><tbody>${d.items.map(i => `<tr><td>${esc(i.name)}</td><td class="n">${qty(i.quantity)}</td><td class="n">${fmt(i.unit_price_usd)}</td><td class="n">${fmt(i.quantity * i.unit_price_usd)}</td></tr>`).join('')}</tbody></table></div>
     <p>Subtotal ${fmt(s.subtotal_usd)} | Desc. ${fmt(s.discount_usd)} | IVA ${fmt(s.tax_usd)}<br><b>Total ${fmt(s.total_usd)} USD</b> (${fmt(s.total_usd * s.exchange_rate)} Bs)<br>Pagado ${fmt(paid)} USD${!anul && bal > 0.01 ? ` | <span class="warn">Debe ${fmt(bal)} USD (${fmt(bal * (S.rate || s.exchange_rate))} Bs a la tasa de hoy)</span>` : ''}</p>
     ${d.pays.length ? `<p class="mut">${d.pays.map(p => `${METHODS[p.method] || p.method} (${esc(p.accounts?.name || '')}): ${fmt(p.amount)} ${p.currency}`).join('<br>')}</p>` : ''}
-    <div class="row"><button class="btn" id="sT">Ticket</button>${anul ? '' : '<button class="btn ghost" id="sE">Corregir</button><button class="btn ghost" id="sA">Anular</button>'}${!anul && bal > 0.01 ? '<button class="btn" id="sC">Registrar cobro</button>' : ''}</div>`);
+    ${profitHtml(d)}<div class="row"><button class="btn" id="sT">Ticket</button>${anul ? '' : '<button class="btn ghost" id="sE">Corregir</button><button class="btn ghost" id="sA">Anular</button><button class="btn ghost" id="sR">Devolución</button>'}${!anul && bal > 0.01 ? '<button class="btn" id="sC">Registrar cobro</button>' : ''}</div>`);
   $('#sT').onclick = () => run(() => showTicket(id));
   if (anul) return;
+  $('#sR').onclick = () => run(() => returnForm(id));
   $('#sE').onclick = () => { V.edit = id; SUB.ven = 'nueva'; closeSheet(); go('ventas'); };
   $('#sA').onclick = () => run(async () => {
     if (!confirm('¿Anular esta venta? Se devuelve el inventario y se revierten los cobros.')) return;

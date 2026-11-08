@@ -57,7 +57,7 @@ async function alertasHtml() {
   const hoy = caracasDate();
   const [venc, prods, stock, rate, accs] = await Promise.all([
     q(db.from('ventas_resumen').select('id').eq('status', 'pendiente').lt('due_date', hoy)),
-    q(db.from('products').select('sale_price_usd,avg_cost_usd').eq('active', true)),
+    q(db.from('products').select('sale_price_usd,avg_cost_usd').eq('active', true).eq('is_service', false)),
     q(db.from('stock_actual').select('bajo_minimo')),
     q(db.from('exchange_rates').select('rate_date').eq('currency', 'USD').order('rate_date', {ascending: false}).limit(1)),
     q(db.from('cuentas_saldo').select('name,balance').eq('active', true))

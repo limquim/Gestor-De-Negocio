@@ -35,31 +35,7 @@ const soon = (note, items) => async () => {
   $('#view').innerHTML = `<div class="card"><h2>En construcción</h2><p class="mut">${note}</p><ul>${items.map(i => `<li>${i}</li>`).join('')}</ul></div>`;
 };
 
-const ico = (d) => `<svg class="ic" viewBox="0 0 24 24">${d}</svg>`;
-views.inicio = async () => {
-  const hoy = caracasDate();
-  const [stock, hoyV, pend] = await Promise.all([
-    q(db.from('stock_actual').select('bajo_minimo,valor_usd')),
-    q(db.from('ventas_resumen').select('total_usd,exchange_rate').eq('sale_date', hoy).neq('status', 'anulada')),
-    q(db.from('ventas_resumen').select('total_usd,paid_usd').eq('status', 'pendiente'))
-  ]);
-  const vendido = hoyV.reduce((a, r) => a + +r.total_usd, 0), vendidoBs = hoyV.reduce((a, r) => a + r.total_usd * r.exchange_rate, 0);
-  const cobrar = pend.reduce((a, r) => a + (r.total_usd - r.paid_usd), 0), valor = stock.reduce((a, x) => a + Number(x.valor_usd || 0), 0);
-  const [alertHtml, cajaHtml] = await Promise.all([alertasHtml(), cajaStat()]);
-  $('#view').innerHTML = `<div class="tiles">
-    <button class="tile main" data-go="ventas">${ico('<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>')}<span>Vender</span><small>Nueva venta</small></button>
-    <button class="tile" data-go="compras">${ico('<path d="M6 7h12l-1 13H7z"/><path d="M9 7a3 3 0 016 0"/>')}<span>Comprar</span><small>Registrar compra</small></button>
-    <button class="tile" data-go="produccion">${ico('<path d="M9 3h6M10 3v6L4.5 19a1.5 1.5 0 001.3 2h12.4a1.5 1.5 0 001.3-2L14 9V3"/><path d="M7.5 15h9"/>')}<span>Producir</span><small>Fabricar productos</small></button>
-    <button class="tile" data-go="inventario">${ico('<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>')}<span>Inventario</span><small>Existencias</small></button></div>
-    ${alertHtml}<h2 class="sec">Resumen de hoy</h2>
-    <div class="stats">
-      <div class="stat"><span>Vendido hoy</span><b>${fmt(vendido)} USD</b><span>${fmt(vendidoBs)} Bs | ${hoyV.length} ${hoyV.length === 1 ? 'venta' : 'ventas'}</span></div>
-      <button class="stat warn" id="stPend"><span>Por cobrar</span><b>${fmt(cobrar)} USD</b><span>${pend.length} ${pend.length === 1 ? 'venta pendiente' : 'ventas pendientes'}</span></button>
-      ${cajaHtml}<div class="stat"><span>Valor del inventario</span><b>${fmt(valor)} USD</b><span>${S.rate ? fmt(valor * S.rate) + ' Bs' : ''}</span></div>
-      <button class="stat bad" data-go="inventario"><span>Por reponer</span><b>${stock.filter(x => x.bajo_minimo).length}</b><span>en el mínimo o agotados</span></button></div>
-    <p class="mut">Tasa del día: ${S.rate ? fmt(S.rate, 2) + ' Bs por USD' : 'sin tasa, configúrala en Más > Configuración'}</p>`;
-  $('#stPend').onclick = () => { VH.f = 'pend'; SUB.ven = 'historial'; go('ventas'); };
-};
+views.inicio = viewInicio;
 
 const MODS = [['compras', 'Compras', 'Proveedores y entrada de mercancía'], ['marketing', 'Marketing', 'Clientes, ofertas y WhatsApp'],
   ['finanzas', 'Finanzas', 'Cajas, cuentas y gastos'], ['contabilidad', 'Reportes', 'Rentabilidad, caja y resultados'],
@@ -72,7 +48,7 @@ views.mas = async () => {
 
 views.inventario = page('Inventario', withSubs('inv', {stock: 'Existencias', productos: 'Productos', catalogo: 'Catálogo'}, {stock: viewInventario2, productos: viewProductos2, catalogo: viewCatalogo}), false);
 views.compras = page('Compras', withSubs('com', {nueva: 'Nueva compra', historial: 'Historial'}, {nueva: viewCompra, historial: viewHistCompras}));
-views.ventas = page('Ventas', withSubs('ven', {nueva: 'Nueva venta', cotizaciones: 'Cotizaciones', historial: 'Historial'}, {nueva: viewVenta, cotizaciones: viewCotizaciones, historial: viewHistVentas}), false);
+views.ventas = page('Ventas', withSubs('ven', {nueva: 'Nueva venta', cotizaciones: 'Cotizaciones', historial: 'Historial', devoluciones: 'Devoluciones'}, {nueva: viewVenta, cotizaciones: viewCotizaciones, historial: viewHistVentas, devoluciones: viewDevoluciones}), false);
 views.produccion = page('Producciones', withSubs('prod', {producir: 'Producir', formulas: 'Fórmulas', historial: 'Historial'}, {producir: viewProducir, formulas: viewFormulas, historial: viewHistorialProd}), false);
 views.marketing = page('Marketing', viewMarketing);
 views.finanzas = page('Finanzas', withSubs('fin', {cuentas: 'Cuentas', gastos: 'Gastos'}, {cuentas: viewCuentas, gastos: viewGastos}));
