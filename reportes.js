@@ -55,12 +55,13 @@ async function viewReportes() {
 // Tarjeta "Requiere atención" para la pantalla de inicio
 async function alertasHtml() {
   const hoy = caracasDate();
-  const [venc, prods, stock, rate, accs] = await Promise.all([
+  const [venc, prods, stock, rate, accs, enp] = await Promise.all([
     q(db.from('ventas_resumen').select('id').eq('status', 'pendiente').lt('due_date', hoy)),
     q(db.from('products').select('sale_price_usd,avg_cost_usd').eq('active', true).eq('is_service', false)),
     q(db.from('stock_actual').select('bajo_minimo')),
     q(db.from('exchange_rates').select('rate_date').eq('currency', 'USD').order('rate_date', {ascending: false}).limit(1)),
-    q(db.from('cuentas_saldo').select('name,balance').eq('active', true))
+    q(db.from('cuentas_saldo').select('name,balance').eq('active', true)),
+    q(db.from('production_orders').select('id').eq('status', 'en_proceso'))
   ]);
   const A = [], bajos = stock.filter(x => x.bajo_minimo).length, sc = prods.filter(p => !+p.avg_cost_usd).length;
   const ng = prods.filter(p => +p.avg_cost_usd > 0 && +p.sale_price_usd < +p.avg_cost_usd).length, neg = accs.filter(a => +a.balance < 0);
@@ -70,5 +71,6 @@ async function alertasHtml() {
   if (ng) A.push(['inventario', `${ng} ${ng === 1 ? 'producto' : 'productos'} con precio menor al costo`]);
   if (!rate[0] || rate[0].rate_date < hoy) A.push(['configuracion', 'La tasa de cambio no se ha actualizado hoy']);
   if (neg.length) A.push(['finanzas', 'Saldo negativo en: ' + neg.map(a => a.name).join(', ')]);
+  if (enp.length) A.push(['produccion', `${enp.length} ${enp.length === 1 ? 'orden de producción en proceso' : 'órdenes de producción en proceso'}`]);
   return `<div class="card"><h2>${A.length ? 'Requiere atención' : 'Todo en orden'}</h2>${A.length ? A.map(([g, t]) => `<button class="alert" data-go="${g}"><span>${esc(t)}</span><span>&rsaquo;</span></button>`).join('') : '<p class="mut">No hay alertas por ahora.</p>'}</div>`;
 }

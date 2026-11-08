@@ -79,7 +79,7 @@ async function viewProducir() {
       <div id="pSaveW" class="stack hidden"><label class="chk"><input type="checkbox" id="pSave"> Guardar como fórmula para usarla otra vez</label>
         <label id="pNameW" class="hidden">Nombre de la fórmula<input id="pName"></label></div>
       <label>Nota<input id="pNotes" placeholder="Ej: lote 12"></label>
-      <div class="row"><button class="btn" id="pGo">Registrar producción</button></div></div>`;
+      <div class="row"><button class="btn" id="pDraft">Crear orden (en proceso)</button><button class="btn ghost" id="pGo">Producir y finalizar</button></div></div>`;
   let cur = null, free = false;
   const fin = () => pm[free ? +$('#pProd').value : cur?.product_id];
   const items = () => [...document.querySelectorAll('#pLines > div')].map(l => free
@@ -127,7 +127,7 @@ async function viewProducir() {
   $('#pLines').addEventListener('input', calc); $('#pLines').addEventListener('change', calc);
   $('#pLines').addEventListener('click', (e) => { if (e.target.dataset.rm && document.querySelectorAll('#pLines .ln').length > 1) { e.target.closest('.ln').remove(); calc(); } });
   $('#pSave').onchange = () => $('#pNameW').classList.toggle('hidden', !$('#pSave').checked);
-  $('#pGo').onclick = () => run(async () => {
+  const goProd = (finish) => run(async () => {
     const it = items(), n = +$('#pQty').value, saveF = free && $('#pSave').checked;
     if (!it.length) throw new Error('Agrega al menos un material con su cantidad');
     if (saveF && !$('#pName').value.trim()) throw new Error('Escribe un nombre para la fórmula');
@@ -138,29 +138,53 @@ async function viewProducir() {
         p_yield: n, p_notes: null, p_items: it.map(i => ({product_id: i.product_id, quantity: i.actual}))}));
       if (!saveF) await q(db.from('recipes').update({active: false}).eq('id', rid));
     }
-    const id = await q(db.rpc('registrar_produccion', {p_recipe_id: rid, p_qty: n, p_notes: $('#pNotes').value.trim() || null, p_items: it}));
-    toast('Producción #' + id + ' registrada. Inventario y costos actualizados.'); render();
+    const id = await q(db.rpc('crear_orden_produccion', {p_recipe_id: rid, p_qty: n, p_notes: $('#pNotes').value.trim() || null, p_items: it, p_finish: finish}));
+    toast(finish ? 'Producción #' + id + ' finalizada. Inventario y costos actualizados.' : 'Orden #' + id + ' creada en proceso. Puedes modificarla en Historial.'); render();
   });
+  $('#pGo').onclick = () => goProd(true); $('#pDraft').onclick = () => goProd(false);
 }
 
-// ---------- Historial ----------
+// ---------- Historial y edición de órdenes ----------
+const PST = {en_proceso: ['En proceso', 'low'], completada: ['Completada', 'ok'], anulada: ['Anulada', 'out'], borrador: ['Borrador', 'low']};
 async function viewHistorialProd() {
-  const rows = await q(db.from('production_orders').select('id,qty_produced,status,total_cost_usd,notes,produced_at,created_at,products(name,unit)').order('id', {ascending: false}).limit(30));
-  $('#view').innerHTML = `<div class="list" id="hList">${rows.map(o => `<button class="item" data-id="${o.id}"><span><b>#${o.id} ${esc(o.products?.name)}</b>
+  const rows = await q(db.from('production_orders').select('id,qty_produced,status,total_cost_usd,notes,produced_at,created_at,products(name,unit)').order('id', {ascending: false}).limit(40));
+  rows.sort((a, b) => (b.status === 'en_proceso') - (a.status === 'en_proceso'));
+  $('#view').innerHTML = `<div class="list" id="hList">${rows.map(o => { const st = PST[o.status] || [o.status, 'low']; return `<button class="item" data-id="${o.id}"><span><b>#${o.id} ${esc(o.products?.name)}</b>
     <small>${qty(o.qty_produced)} ${esc(o.products?.unit)} | ${fdate(o.produced_at || o.created_at)}</small>
-    <small>Costo: ${fmt(o.total_cost_usd)} USD (${fmt(o.total_cost_usd / o.qty_produced)} por unidad)</small></span>
-    <span class="badge ${o.status === 'completada' ? 'ok' : 'out'}">${o.status === 'completada' ? 'Completada' : 'Anulada'}</span></button>`).join('') || '<p class="mut">Aún no hay producciones registradas.</p>'}</div>`;
+    <small>${o.status === 'en_proceso' ? 'Orden abierta: puedes seguir modificando el consumo' : 'Costo: ' + fmt(o.total_cost_usd) + ' USD (' + fmt(o.total_cost_usd / o.qty_produced) + ' por unidad)'}</small></span>
+    <span class="badge ${st[1]}">${st[0]}</span></button>`; }).join('') || '<p class="mut">Aún no hay producciones registradas.</p>'}</div>`;
   $('#hList').onclick = (e) => { const b = e.target.closest('[data-id]'); if (b) run(() => prDetail(rows.find(o => String(o.id) === b.dataset.id))); };
 }
 async function prDetail(o) {
-  const items = await q(db.from('production_items').select('planned_qty,actual_qty,unit_cost_usd,products(name)').eq('production_id', o.id));
-  const body = items.map(i => `<tr><td>${esc(i.products?.name)}</td><td class="n">${qty(i.planned_qty)}</td><td class="n">${qty(i.actual_qty)}</td><td class="n">${fmt(i.actual_qty * i.unit_cost_usd)}</td></tr>`).join('');
-  openSheet('Producción #' + o.id, `<p><b>${esc(o.products?.name)}</b>: ${qty(o.qty_produced)} ${esc(o.products?.unit)}<br>Costo total: ${fmt(o.total_cost_usd)} USD${S.rate ? ' (' + fmt(o.total_cost_usd * S.rate) + ' Bs)' : ''}</p>
-    <div class="scroll"><table><thead><tr><th>Material</th><th class="n">Teórico</th><th class="n">Real</th><th class="n">Costo USD</th></tr></thead><tbody>${body}</tbody></table></div>
-    ${o.notes ? `<p class="mut">${esc(o.notes)}</p>` : ''}${o.status === 'completada' ? '<div class="row"><button class="btn ghost" id="pAnu">Anular producción</button></div>' : ''}`);
-  const a = $('#pAnu');
-  if (a) a.onclick = () => run(async () => {
-    if (!confirm('¿Anular esta producción? Se devuelven los materiales y se descuenta el producto terminado.')) return;
+  const [items, D] = await Promise.all([q(db.from('production_items').select('product_id,planned_qty,actual_qty').eq('production_id', o.id).order('id')), prData()]);
+  const {products, pm, st} = D, off = o.status === 'anulada', L = items.map(i => ({pid: i.product_id, plan: +i.planned_qty, act: +i.actual_qty})), ps = PST[o.status] || [o.status, 'low'];
+  openSheet('Producción #' + o.id, `<p><b>${esc(o.products?.name)}</b> | <span class="badge ${ps[1]}">${ps[0]}</span></p><div class="stack">
+    <label>Cantidad producida (${esc(o.products?.unit)})<input id="oQty" type="number" step="0.001" min="0.001" value="${o.qty_produced}" ${off ? 'disabled' : ''}></label>
+    <h2>Materiales usados</h2><div id="oL"></div>
+    ${off ? '' : `<div class="ln"><label>Agregar material<select id="oAddS">${pOptions(products)}</select></label><label>Cant.<input id="oAddQ" type="number" step="0.0001" min="0"></label><button class="btn ghost" type="button" id="oAdd">+</button></div>`}
+    <p id="oSum"></p><label>Nota<input id="oNotes" value="${esc(o.notes || '')}" ${off ? 'disabled' : ''}></label>
+    ${off ? '' : `<div class="row"><button class="btn" id="oSave">Guardar cambios</button>${o.status === 'en_proceso' ? '<button class="btn ghost" id="oFin">Finalizar producción</button>' : ''}<button class="btn ghost" id="oAnu">Anular</button></div>
+      <p class="mut">${o.status === 'completada' ? 'Al guardar, se rehace el consumo en el inventario y se recalcula el costo.' : 'Mientras esté en proceso no se mueve el inventario. Al finalizar se descuentan los materiales y entra el producto terminado.'}</p>`}</div>`);
+  const sum = () => { const tot = L.reduce((a, l) => a + l.act * costOf(pm, l.pid), 0), n = +$('#oQty').value || 1; $('#oSum').innerHTML = costLine(tot, tot / n, pm[o.product_id], pm) + '<br><span class="mut">Calculado con los costos actuales.</span>'; };
+  const draw = () => {
+    $('#oL').innerHTML = L.map((l, i) => `<div class="pl" data-i="${i}"><div><b>${esc(pm[l.pid]?.name)}</b><small>Teórico: ${qty(l.plan)} ${esc(pm[l.pid]?.unit)} | Disponible: ${qty(st[l.pid] || 0)}</small>${off ? '' : `<button class="lnk bad" data-rm="${i}">Quitar</button>`}</div>
+      <label>Real usado<input data-a="${i}" type="number" step="0.0001" min="0" value="${l.act}" ${off ? 'disabled' : ''}></label></div>`).join('') || '<p class="mut">Sin materiales.</p>';
+    sum();
+  };
+  draw();
+  if (off) return;
+  $('#oL').addEventListener('input', (e) => { if (e.target.dataset.a !== undefined) { L[+e.target.dataset.a].act = +e.target.value || 0; sum(); } });
+  $('#oL').addEventListener('click', (e) => { if (e.target.dataset.rm !== undefined && L.length > 1) { L.splice(+e.target.dataset.rm, 1); draw(); } });
+  $('#oQty').oninput = sum;
+  $('#oAdd').onclick = () => { const pid = +$('#oAddS').value, a = +$('#oAddQ').value || 0, ex = L.find(l => l.pid === pid); if (ex) ex.act += a; else L.push({pid, plan: 0, act: a}); $('#oAddQ').value = ''; draw(); };
+  const save = () => q(db.rpc('actualizar_orden_produccion', {p_id: o.id, p_qty: +$('#oQty').value, p_notes: $('#oNotes').value.trim() || null, p_items: L.map(l => ({product_id: l.pid, planned: l.plan, actual: l.act}))}));
+  $('#oSave').onclick = () => run(async () => { await save(); closeSheet(); toast('Producción actualizada'); render(); });
+  if (o.status === 'en_proceso') $('#oFin').onclick = () => run(async () => {
+    if (L.some(l => l.act > (st[l.pid] || 0)) && !confirm('Hay materiales con inventario insuficiente. ¿Finalizar de todos modos?')) return;
+    await save(); await q(db.rpc('finalizar_produccion', {p_id: o.id})); closeSheet(); toast('Producción finalizada. Inventario y costos actualizados.'); render();
+  });
+  $('#oAnu').onclick = () => run(async () => {
+    if (!confirm('¿Anular esta producción?' + (o.status === 'completada' ? ' Se devuelven los materiales y se descuenta el producto terminado.' : ''))) return;
     await q(db.rpc('anular_produccion', {p_id: o.id})); closeSheet(); toast('Producción anulada'); render();
   });
 }

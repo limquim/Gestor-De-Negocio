@@ -46,16 +46,16 @@ views.mas = async () => {
   $('#mOut').onclick = () => db.auth.signOut();
 };
 
-views.inventario = page('Inventario', withSubs('inv', {stock: 'Existencias', productos: 'Productos', catalogo: 'Catálogo'}, {stock: viewInventario2, productos: viewProductos2, catalogo: viewCatalogo}), false);
-views.compras = page('Compras', withSubs('com', {nueva: 'Nueva compra', historial: 'Historial'}, {nueva: viewCompra, historial: viewHistCompras}));
+views.inventario = page('Inventario', withSubs('inv', {stock: 'Existencias', productos: 'Productos', catalogo: 'Catálogo', ajuste: 'Ajuste masivo'}, {stock: viewInventario2, productos: viewProductos2, catalogo: viewCatalogo, ajuste: viewAjusteMasivo}), false);
+views.compras = page('Compras', withSubs('com', {nueva: 'Nueva compra', sugerida: 'Reposición sugerida', historial: 'Historial'}, {nueva: viewCompra, sugerida: viewSugerida, historial: viewHistCompras}));
 views.ventas = page('Ventas', withSubs('ven', {nueva: 'Nueva venta', cotizaciones: 'Cotizaciones', historial: 'Historial', devoluciones: 'Devoluciones'}, {nueva: viewVenta, cotizaciones: viewCotizaciones, historial: viewHistVentas, devoluciones: viewDevoluciones}), false);
 views.produccion = page('Producciones', withSubs('prod', {producir: 'Producir', formulas: 'Fórmulas', historial: 'Historial'}, {producir: viewProducir, formulas: viewFormulas, historial: viewHistorialProd}), false);
 views.marketing = page('Marketing', viewMarketing);
 views.finanzas = page('Finanzas', withSubs('fin', {cuentas: 'Cuentas', gastos: 'Gastos'}, {cuentas: viewCuentas, gastos: viewGastos}));
 views.contabilidad = page('Reportes', viewReportes);
 views.directorios = page('Directorios', withSubs('dir', DIR_LABELS, Object.fromEntries(Object.keys(DIRS).map(k => [k, () => viewDir(k)]))));
-views.configuracion = page('Configuración', withSubs('cfg', {tasa: 'Tasa', negocio: 'Negocio', ticket: 'Ticket'},
-  {tasa: viewTasa, negocio: () => viewSettings('negocio'), ticket: () => viewSettings('ticket')}));
+views.configuracion = page('Configuración', withSubs('cfg', {tasa: 'Tasa', negocio: 'Negocio', ticket: 'Ticket', respaldo: 'Respaldo'},
+  {tasa: viewTasa, negocio: () => viewSettings('negocio'), ticket: () => viewSettings('ticket'), respaldo: viewRespaldo}));
 
 // Fondo claro / oscuro (se recuerda la elección)
 const SUN = '<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';

@@ -172,10 +172,10 @@ function prodForm(p, D) {
     <label>Nombre<input name="pname" value="${esc(v('name'))}" required></label>
     <label>Categoría<select name="category_id">${opt(cats, v('category_id'), 'id', c => c.name)}</select></label>
     <label>Unidad de medida<select name="unit">${opt(units, v('unit', 'und'), 'symbol', u => `${u.name} (${u.symbol})`)}</select></label>
-    <label>Costo en USD<input name="cost" type="number" step="0.0001" min="0" value="${v('avg_cost_usd', 0)}"></label>
+    <label>Costo manual en USD (el que tú pones, no cambia solo)<input name="cost" type="number" step="0.0001" min="0" value="${v('manual_cost_usd', 0)}"></label>
     <label>Precio de venta en USD<input name="price" type="number" step="0.0001" min="0" value="${v('sale_price_usd', 0)}"></label>
-    <label>Precio de costo (automático)<input value="${fmt(v('last_cost_usd', 0), 4)} USD" disabled></label>
-    <p class="mut">El precio de costo se asigna solo con la última compra o producción. El costo en USD es el promedio y también se recalcula con ellas.</p>
+    <label>Costo automático (el real, el que usa el sistema)<input value="${p && p.auto_cost_usd != null ? fmt(p.auto_cost_usd, 4) + ' USD' : 'Aún sin compras ni fabricaciones: se usa el costo manual'}" disabled></label>
+    <p class="mut">El costo automático se actualiza solo con cada compra o fabricación, según el método elegido en Configuración. Tu costo manual no cambia: solo se usa mientras no haya compras ni fabricaciones.</p>
     <label class="chk"><input type="checkbox" name="is_service" ${p?.is_service ? 'checked' : ''}> Es un servicio (no maneja inventario, ej: delivery). Tu costo es lo que pagas por él.</label>
     <label>Stock mínimo<input name="min" type="number" step="0.001" min="0" value="${v('min_stock', 0)}"></label>
     <label>Impuesto<select name="tax_id">${opt(taxes, v('tax_id', defTax), 'id', t => `${t.name} (${qty(t.percent)}%)`)}</select></label>
@@ -183,7 +183,7 @@ function prodForm(p, D) {
     <p id="pMargin" class="mut"></p>
     <div class="row"><button class="btn" type="submit">Guardar producto</button>${p ? '<button type="button" class="btn ghost" id="pfDel">Desactivar</button>' : ''}</div></form>`);
   const f = $('#pf'), el = f.elements;
-  const mg = () => { const c = +el.cost.value || 0, pr = +el.price.value || 0; $('#pMargin').textContent = pr > 0 ? `Margen sobre el costo: ${fmt((pr - c) / pr * 100, 0)}% (ganancia de ${fmt(pr - c)} USD por unidad)` : ''; };
+  const mg = () => { const c = p && p.auto_cost_usd != null ? +p.auto_cost_usd : (+el.cost.value || 0), pr = +el.price.value || 0; $('#pMargin').textContent = pr > 0 ? `Margen sobre el costo: ${fmt((pr - c) / pr * 100, 0)}% (ganancia de ${fmt(pr - c)} USD por unidad)` : ''; };
   f.addEventListener('input', mg); mg();
   f.onsubmit = (e) => {
     e.preventDefault();
@@ -200,7 +200,7 @@ function prodForm(p, D) {
         }
       }
       const row = {sku: el.sku.value.trim() || null, name: el.pname.value.trim(), category_id: +el.category_id.value || null, unit: el.unit.value,
-        avg_cost_usd: +el.cost.value || 0, sale_price_usd: +el.price.value || 0, min_stock: +el.min.value || 0, is_service: el.is_service.checked, tax_id: +el.tax_id.value || null, image_url};
+        manual_cost_usd: +el.cost.value || 0, sale_price_usd: +el.price.value || 0, min_stock: +el.min.value || 0, is_service: el.is_service.checked, tax_id: +el.tax_id.value || null, image_url};
       await q(p ? db.from('products').update(row).eq('id', p.id) : db.from('products').insert(row));
       closeSheet(); toast('Producto guardado'); render();
     });

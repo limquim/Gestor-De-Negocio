@@ -69,3 +69,5 @@ input[type=color]{padding:.2rem;cursor:pointer}
 .gain b{font-size:1.6rem;font-weight:800}
 .gain.pos b{color:var(--ok)}
 .gain.neg b{color:var(--bad)}
+
+.item small.df{color:var(--bad);font-weight:700}

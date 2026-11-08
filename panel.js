@@ -8,7 +8,7 @@ async function viewInicio() {
   const [h, mes, ant, quin, accs, stock, alertHtml, vm, sold, set] = await Promise.all([
     rp(hoy, hoy), rp(m0, hoy), rp(p0, p1), rp(d14, hoy),
     q(db.from('cuentas_saldo').select('balance,currency').eq('active', true)),
-    q(db.from('stock_actual').select('product_id,name,stock,bajo_minimo,valor_usd')),
+    q(db.from('stock_actual').select('product_id,name,stock,bajo_minimo,valor_usd,sells_regularly')),
     alertasHtml(),
     q(db.from('ventas_resumen').select('customer,total_usd').gte('sale_date', m0).neq('status', 'anulada')),
     q(db.from('sale_items').select('product_id,sales!inner(sale_date,status)').gte('sales.sale_date', d30).neq('sales.status', 'anulada')),
@@ -26,7 +26,7 @@ async function viewInicio() {
   const cust = {}; vm.forEach(v => { const n = v.customer || 'Cliente general'; cust[n] = (cust[n] || 0) + +v.total_usd; });
   const topC = Object.entries(cust).sort((a, b) => b[1] - a[1]).slice(0, 5), maxC = Math.max(0, ...topC.map(x => x[1]));
   // inventario sin movimiento en 30 días (dinero detenido)
-  const soldSet = new Set(sold.map(x => x.product_id)), slow = stock.filter(x => +x.stock > 0 && !soldSet.has(x.product_id)), slowV = slow.reduce((a, x) => a + +x.valor_usd, 0);
+  const soldSet = new Set(sold.map(x => x.product_id)), slow = stock.filter(x => +x.stock > 0 && x.sells_regularly && !soldSet.has(x.product_id)), slowV = slow.reduce((a, x) => a + +x.valor_usd, 0);
   const gastoTop = mes.gastos_por_tipo.slice(0, 4), maxG = Math.max(0, ...gastoTop.map(x => +x.total));
 
   $('#view').innerHTML = `<p class="mut" style="margin:0 0 .6rem">${esc(set.business_name || 'Mi negocio')} | ${dmy(hoy)}</p>
@@ -54,7 +54,7 @@ async function viewInicio() {
   <h2 class="sec">Inventario</h2>
   <div class="stats"><button class="stat" data-go="inventario"><span>Valor del inventario</span><b>${U(inv)}</b><span>${S.rate ? fmt(inv * S.rate) + ' Bs' : ''}</span></button>
     <button class="stat bad" data-go="inventario"><span>Por reponer</span><b>${bajos}</b><span>en el mínimo o agotados</span></button>
-    <button class="stat warn" data-go="inventario"><span>Sin vender en 30 días</span><b>${slow.length}</b><span>${U(slowV)} detenidos en inventario</span></button></div>`;
+    <button class="stat warn" data-go="inventario"><span>Sin vender en 30 días</span><b>${slow.length}</b><span>${U(slowV)} detenidos (sin contar materia prima)</span></button></div>`;
   $('#pPend').onclick = () => { VH.f = 'pend'; SUB.ven = 'historial'; go('ventas'); };
   $('#pPag').onclick = () => { CH.f = 'pend'; SUB.com = 'historial'; go('compras'); };
 }

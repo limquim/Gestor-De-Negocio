@@ -24,7 +24,7 @@ const DIRS = {
   plantillas: {label: 'Plantillas de mensajes', table: 'message_templates', order: 'name', fields: [{k: 'name', l: 'Nombre', req: 1}, {k: 'body', l: 'Mensaje (usa {nombre} {producto} {negocio} {dias} {saldo})', type: 'textarea', req: 1}], title: r => r.name, sub: r => r.body.slice(0, 60)},
   metodos: {label: 'Métodos de pago', table: 'payment_methods', order: 'name', fields: [{k: 'name', l: 'Nombre (ej: Pago móvil, Binance, Cheque)', req: 1}], title: r => r.name, sub: () => 'Se asigna a cada cuenta en Finanzas > Cuentas'},
   listas: {label: 'Listas de precios', table: 'price_lists', order: 'name', fields: [{k: 'name', l: 'Nombre (ej: Mayor)', req: 1}, {k: 'adjust_percent', l: 'Ajuste sobre el precio de venta, en % (ej: -10 para 10% menos)', type: 'number', req: 1}], title: r => r.name, sub: r => (r.adjust_percent > 0 ? '+' : '') + qty(r.adjust_percent) + '% sobre el precio de venta'},
-  categorias: {label: 'Categorías de producto', table: 'product_categories', order: 'name', fields: [{k: 'name', l: 'Nombre', req: 1}], title: r => r.name, sub: () => ''},
+  categorias: {label: 'Categorías de producto', table: 'product_categories', order: 'name', fields: [{k: 'name', l: 'Nombre', req: 1}, {k: 'sells_regularly', l: 'Se vende con frecuencia (si no, no cuenta en "sin vender en 30 días")', type: 'check', def: true}], title: r => r.name, sub: () => ''},
   usuarios: {label: 'Usuarios', table: 'profiles', order: 'created_at', all: 1, noAdd: 1, noDel: 1, fields: [
     {k: 'full_name', l: 'Nombre', req: 1}, {k: 'role', l: 'Rol', type: 'select', opts: ROLES}, {k: 'active', l: 'Usuario activo', type: 'check'}],
     title: r => r.full_name || 'Sin nombre', sub: r => ROLES[r.role] + (r.active ? '' : ' | inactivo')}
@@ -72,7 +72,8 @@ async function viewSettings(kind) {
     : [['ticket_header', 'Texto debajo del nombre'], ['ticket_footer', 'Mensaje al final']];
   const inputs = F.map(([k, l]) => `<label>${l}<input name="${k}" value="${esc(s[k] ?? '')}"></label>`).join('');
   const extra = kind === 'negocio' ? `<label class="chk"><input type="checkbox" name="enable_product_photos" ${s.enable_product_photos ? 'checked' : ''}> Permitir fotos en los productos</label>
-    <label>Logo del negocio<input name="logo" type="file" accept="image/*"></label>${s.logo_data ? `<img class="thumb big" src="${s.logo_data}" alt=""><label class="chk"><input type="checkbox" name="rmlogo"> Quitar el logo actual</label>` : ''}<label class="chk"><input type="checkbox" name="ticket_show_logo" ${s.ticket_show_logo ? 'checked' : ''}> Mostrar el logo en el ticket en foto</label>` : kind === 'ticket' ? `<label>Ancho del papel<select name="ticket_paper"><option value="58mm" ${s.ticket_paper === '58mm' ? 'selected' : ''}>58 mm</option><option value="80mm" ${s.ticket_paper === '80mm' ? 'selected' : ''}>80 mm</option></select></label>
+    <label>Logo del negocio<input name="logo" type="file" accept="image/*"></label>${s.logo_data ? `<img class="thumb big" src="${s.logo_data}" alt=""><label class="chk"><input type="checkbox" name="rmlogo"> Quitar el logo actual</label>` : ''}<label class="chk"><input type="checkbox" name="ticket_show_logo" ${s.ticket_show_logo ? 'checked' : ''}> Mostrar el logo en el ticket en foto</label>
+    <label>Costo automático de los productos<select name="cost_method"><option value="avg" ${(s.cost_method || 'avg') === 'avg' ? 'selected' : ''}>Costo promedio</option><option value="last" ${s.cost_method === 'last' ? 'selected' : ''}>Costo de la última compra o fabricación</option><option value="max" ${s.cost_method === 'max' ? 'selected' : ''}>Costo más alto</option></select></label>` : kind === 'ticket' ? `<label>Ancho del papel<select name="ticket_paper"><option value="58mm" ${s.ticket_paper === '58mm' ? 'selected' : ''}>58 mm</option><option value="80mm" ${s.ticket_paper === '80mm' ? 'selected' : ''}>80 mm</option></select></label>
     <label class="chk"><input type="checkbox" name="ticket_show_rate" ${s.ticket_show_rate ? 'checked' : ''}> Mostrar la tasa del día en el ticket</label>
     <label class="chk"><input type="checkbox" name="ticket_show_bs" ${s.ticket_show_bs === false ? '' : 'checked'}> Mostrar el monto en bolívares</label>
     <label>Estilo del ticket en foto<select name="ticket_style"><option value="moderno" ${s.ticket_style === 'clasico' ? '' : 'selected'}>Moderno (tarjeta con color)</option><option value="clasico" ${s.ticket_style === 'clasico' ? 'selected' : ''}>Clásico (tipo ticket)</option></select></label>
@@ -104,10 +105,10 @@ async function viewSettings(kind) {
     run(async () => {
       if (kind === 'negocio') {
         obj.ticket_show_logo = el.ticket_show_logo.checked;
-        if (el.rmlogo?.checked) obj.logo_data = null;
+        obj.cost_method = el.cost_method.value; if (el.rmlogo?.checked) obj.logo_data = null;
         const lf = el.logo.files[0]; if (lf) obj.logo_data = await logoDataUrl(lf);
       }
-      await q(db.from('settings').update(obj).eq('id', 1)); toast('Guardado'); render();
+      await q(db.from('settings').update(obj).eq('id', 1)); if (kind === 'negocio' && obj.cost_method !== (s.cost_method || 'avg')) { await q(db.rpc('recalcular_costos')); } toast('Guardado'); render();
     });
   };
 }

@@ -52,6 +52,7 @@ async function viewCompra() {
       <small class="mut eq"></small><button class="lnk bad" data-rmp="${i}">Quitar pago</button></div>`).join('') || '<p class="mut">Sin pagos: la compra quedará por pagar.</p>';
     totals();
   };
+  (CV.pre || []).forEach(x => { if (pm[x.pid]) { const l = line(x.pid); l.qty = x.qty; CV.cart.push(l); } }); CV.pre = null;
   drawCart(); drawPays();
 
   $('#cSearch').oninput = (e) => {
