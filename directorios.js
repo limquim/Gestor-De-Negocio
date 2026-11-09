@@ -22,6 +22,7 @@ const DIRS = {
     {k: 'name', l: 'Nombre', req: 1}, {k: 'is_fixed', l: 'Es un gasto fijo', type: 'check'}, {k: 'in_sales_cost', l: 'Es costo de servicios de ventas (ej: delivery). Ya está en el costo de lo vendido, no se cuenta otra vez como gasto', type: 'check'}],
     title: r => r.name, sub: r => r.is_fixed ? 'Gasto fijo' : 'Gasto variable'},
   plantillas: {label: 'Plantillas de mensajes', table: 'message_templates', order: 'name', fields: [{k: 'name', l: 'Nombre', req: 1}, {k: 'body', l: 'Mensaje (usa {nombre} {producto} {negocio} {dias} {saldo})', type: 'textarea', req: 1}], title: r => r.name, sub: r => r.body.slice(0, 60)},
+  empleados: {label: 'Empleados', table: 'employees', order: 'name', fields: [{k: 'name', l: 'Nombre completo', req: 1}, {k: 'id_number', l: 'Cédula'}, {k: 'phone', l: 'Teléfono (WhatsApp)', type: 'tel'}, {k: 'position', l: 'Cargo'}, {k: 'pay_type', l: 'Cada cuánto se le paga', type: 'select', opts: {semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mensual'}}, {k: 'salary_usd', l: 'Sueldo por período en USD', type: 'number', req: 1}, {k: 'hire_date', l: 'Fecha de ingreso', type: 'date'}], title: r => r.name, sub: r => [r.position, r.pay_type, fmt(r.salary_usd) + ' USD'].filter(Boolean).join(' | ')},
   metodos: {label: 'Métodos de pago', table: 'payment_methods', order: 'name', fields: [{k: 'name', l: 'Nombre (ej: Pago móvil, Binance, Cheque)', req: 1}], title: r => r.name, sub: () => 'Se asigna a cada cuenta en Finanzas > Cuentas'},
   listas: {label: 'Listas de precios', table: 'price_lists', order: 'name', fields: [{k: 'name', l: 'Nombre (ej: Mayor)', req: 1}, {k: 'adjust_percent', l: 'Ajuste sobre el precio de venta, en % (ej: -10 para 10% menos)', type: 'number', req: 1}], title: r => r.name, sub: r => (r.adjust_percent > 0 ? '+' : '') + qty(r.adjust_percent) + '% sobre el precio de venta'},
   categorias: {label: 'Categorías de producto', table: 'product_categories', order: 'name', fields: [{k: 'name', l: 'Nombre', req: 1}, {k: 'sells_regularly', l: 'Se vende con frecuencia (si no, no cuenta en "sin vender en 30 días")', type: 'check', def: true}], title: r => r.name, sub: () => ''},
@@ -73,7 +74,10 @@ async function viewSettings(kind) {
   const inputs = F.map(([k, l]) => `<label>${l}<input name="${k}" value="${esc(s[k] ?? '')}"></label>`).join('');
   const extra = kind === 'negocio' ? `<label class="chk"><input type="checkbox" name="enable_product_photos" ${s.enable_product_photos ? 'checked' : ''}> Permitir fotos en los productos</label>
     <label>Logo del negocio<input name="logo" type="file" accept="image/*"></label>${s.logo_data ? `<img class="thumb big" src="${s.logo_data}" alt=""><label class="chk"><input type="checkbox" name="rmlogo"> Quitar el logo actual</label>` : ''}<label class="chk"><input type="checkbox" name="ticket_show_logo" ${s.ticket_show_logo ? 'checked' : ''}> Mostrar el logo en el ticket en foto</label>
-    <label>Costo automático de los productos<select name="cost_method"><option value="avg" ${(s.cost_method || 'avg') === 'avg' ? 'selected' : ''}>Costo promedio</option><option value="last" ${s.cost_method === 'last' ? 'selected' : ''}>Costo de la última compra o fabricación</option><option value="max" ${s.cost_method === 'max' ? 'selected' : ''}>Costo más alto</option></select></label>` : kind === 'ticket' ? `<label>Ancho del papel<select name="ticket_paper"><option value="58mm" ${s.ticket_paper === '58mm' ? 'selected' : ''}>58 mm</option><option value="80mm" ${s.ticket_paper === '80mm' ? 'selected' : ''}>80 mm</option></select></label>
+    <label>Costo automático de los productos<select name="cost_method"><option value="avg" ${(s.cost_method || 'avg') === 'avg' ? 'selected' : ''}>Costo promedio</option><option value="last" ${s.cost_method === 'last' ? 'selected' : ''}>Costo de la última compra o fabricación</option><option value="max" ${s.cost_method === 'max' ? 'selected' : ''}>Costo más alto</option></select></label>
+    <b class="mut">Módulos opcionales</b>
+    <label class="chk"><input type="checkbox" name="enable_planning" ${s.enable_planning === false ? '' : 'checked'}> Planificación de fabricación (¿alcanza el material para todo?)</label>
+    <label class="chk"><input type="checkbox" name="enable_payroll" ${s.enable_payroll === false ? '' : 'checked'}> Nómina de pagos</label>` : kind === 'ticket' ? `<label>Ancho del papel<select name="ticket_paper"><option value="58mm" ${s.ticket_paper === '58mm' ? 'selected' : ''}>58 mm</option><option value="80mm" ${s.ticket_paper === '80mm' ? 'selected' : ''}>80 mm</option></select></label>
     <label class="chk"><input type="checkbox" name="ticket_show_rate" ${s.ticket_show_rate ? 'checked' : ''}> Mostrar la tasa del día en el ticket</label>
     <label class="chk"><input type="checkbox" name="ticket_show_bs" ${s.ticket_show_bs === false ? '' : 'checked'}> Mostrar el monto en bolívares</label>
     <label>Estilo del ticket en foto<select name="ticket_style"><option value="moderno" ${s.ticket_style === 'clasico' ? '' : 'selected'}>Moderno (tarjeta con color)</option><option value="clasico" ${s.ticket_style === 'clasico' ? 'selected' : ''}>Clásico (tipo ticket)</option></select></label>
@@ -92,7 +96,7 @@ async function viewSettings(kind) {
     const paint = () => { clearTimeout(tmr); tmr = setTimeout(async () => {
       const cur = {...s, ticket_header: e0.ticket_header.value, ticket_footer: e0.ticket_footer.value, ticket_style: e0.ticket_style.value, ticket_color: e0.ticket_color.value, ticket_paper: e0.ticket_paper.value,
         ticket_show_rate: e0.ticket_show_rate.checked, ticket_show_bs: e0.ticket_show_bs.checked, ticket_show_logo: e0.ticket_show_logo.checked, ticket_show_info: e0.ticket_show_info.checked, ticket_show_customer: e0.ticket_show_customer.checked, ticket_show_payments: e0.ticket_show_payments.checked};
-      try { const b = await docBlob(sample, 'DETERGENTE LIQUIDO 1L\n2 x 3.00            6.00\n--------------------------------\nTOTAL USD          12.50', cur); $('#tkPrev').innerHTML = `<img class="rimg" src="${URL.createObjectURL(b)}" alt="Vista previa">`; } catch (err) { $('#tkPrev').innerHTML = '<p class="mut">No se pudo generar la vista previa.</p>'; }
+      try { const b = await docBlob(sample, 'DETERGENTE LIQUIDO 1L\n2 x 3.00            6.00\n--------------------------------\nTOTAL USD          12.50', cur); $('#tkPrev').innerHTML = `<img class="rimg" src="${URL.createObjectURL(b)}" alt="Vista previa">`; } catch (err) { if (!$('#tkPrev')) return; $('#tkPrev').innerHTML = '<p class="mut">No se pudo generar la vista previa.</p>'; }
     }, 250); };
     f.addEventListener('input', paint); f.addEventListener('change', paint); paint();
   }
@@ -105,10 +109,10 @@ async function viewSettings(kind) {
     run(async () => {
       if (kind === 'negocio') {
         obj.ticket_show_logo = el.ticket_show_logo.checked;
-        obj.cost_method = el.cost_method.value; if (el.rmlogo?.checked) obj.logo_data = null;
+        obj.cost_method = el.cost_method.value; obj.enable_planning = el.enable_planning.checked; obj.enable_payroll = el.enable_payroll.checked; if (el.rmlogo?.checked) obj.logo_data = null;
         const lf = el.logo.files[0]; if (lf) obj.logo_data = await logoDataUrl(lf);
       }
-      await q(db.from('settings').update(obj).eq('id', 1)); if (kind === 'negocio' && obj.cost_method !== (s.cost_method || 'avg')) { await q(db.rpc('recalcular_costos')); } toast('Guardado'); render();
+      await q(db.from('settings').update(obj).eq('id', 1)); if (kind === 'negocio' && obj.cost_method !== (s.cost_method || 'avg')) { await q(db.rpc('recalcular_costos')); } if (kind === 'negocio') await loadFlags(); toast('Guardado'); render();
     });
   };
 }

@@ -71,3 +71,5 @@ input[type=color]{padding:.2rem;cursor:pointer}
 .gain.neg b{color:var(--bad)}
 
 .item small.df{color:var(--bad);font-weight:700}
+
+.nrow .nt{font-weight:700;color:var(--ok)}

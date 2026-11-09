@@ -38,24 +38,29 @@ const soon = (note, items) => async () => {
 views.inicio = viewInicio;
 
 const MODS = [['compras', 'Compras', 'Proveedores y entrada de mercancía'], ['marketing', 'Marketing', 'Clientes, ofertas y WhatsApp'],
-  ['finanzas', 'Finanzas', 'Cajas, cuentas y gastos'], ['contabilidad', 'Reportes', 'Rentabilidad, caja y resultados'],
+  ['nomina', 'Nómina', 'Empleados, adelantos y pagos'], ['finanzas', 'Finanzas', 'Cajas, cuentas y gastos'], ['contabilidad', 'Reportes', 'Rentabilidad, caja y resultados'],
   ['directorios', 'Directorios', 'Clientes, proveedores, unidades e impuestos'], ['configuracion', 'Configuración', 'Tasa, negocio y ticket']];
 views.mas = async () => {
-  $('#view').innerHTML = `<h1 class="pt">Más módulos</h1><div class="menu" style="margin-top:.8rem">${MODS.map(([k, t, d]) => `<button data-go="${k}"><b>${t}</b><small>${d}</small></button>`).join('')}</div>
+  $('#view').innerHTML = `<h1 class="pt">Más módulos</h1><div class="menu" style="margin-top:.8rem">${MODS.filter(m => m[0] !== 'nomina' || S.flags?.payroll !== false).map(([k, t, d]) => `<button data-go="${k}"><b>${t}</b><small>${d}</small></button>`).join('')}</div>
     <div class="row"><button class="btn ghost" id="mOut">Cerrar sesión</button></div>`;
   $('#mOut').onclick = () => db.auth.signOut();
 };
 
 views.inventario = page('Inventario', withSubs('inv', {stock: 'Existencias', productos: 'Productos', catalogo: 'Catálogo', ajuste: 'Ajuste masivo'}, {stock: viewInventario2, productos: viewProductos2, catalogo: viewCatalogo, ajuste: viewAjusteMasivo}), false);
 views.compras = page('Compras', withSubs('com', {nueva: 'Nueva compra', sugerida: 'Reposición sugerida', historial: 'Historial'}, {nueva: viewCompra, sugerida: viewSugerida, historial: viewHistCompras}));
-views.ventas = page('Ventas', withSubs('ven', {nueva: 'Nueva venta', cotizaciones: 'Cotizaciones', historial: 'Historial', devoluciones: 'Devoluciones'}, {nueva: viewVenta, cotizaciones: viewCotizaciones, historial: viewHistVentas, devoluciones: viewDevoluciones}), false);
-views.produccion = page('Producciones', withSubs('prod', {producir: 'Producir', formulas: 'Fórmulas', historial: 'Historial'}, {producir: viewProducir, formulas: viewFormulas, historial: viewHistorialProd}), false);
+views.ventas = page('Ventas', withSubs('ven', {nueva: 'Nueva venta', cotizaciones: 'Cotizaciones', historial: 'Historial', devoluciones: 'Devoluciones', cobrar: 'Por cobrar'}, {nueva: viewVenta, cotizaciones: viewCotizaciones, historial: viewHistVentas, devoluciones: viewDevoluciones, cobrar: viewDeudas}), false);
+views.produccion = page('Producciones', async () => {
+  const subs = {producir: 'Producir', formulas: 'Fórmulas', historial: 'Historial'}, fns = {producir: viewProducir, formulas: viewFormulas, historial: viewHistorialProd};
+  if (S.flags?.planning !== false) { subs.planificar = 'Planificar'; fns.planificar = viewPlanificar; }
+  await withSubs('prod', subs, fns)();
+}, false);
 views.marketing = page('Marketing', viewMarketing);
+views.nomina = page('Nómina', withSubs('nom', {pagar: 'Pagar nómina', empleados: 'Empleados', adelantos: 'Adelantos', historial: 'Historial'}, {pagar: viewNomina, empleados: () => viewDir('empleados'), adelantos: viewAdelantos, historial: viewNominaHist}));
 views.finanzas = page('Finanzas', withSubs('fin', {cuentas: 'Cuentas', gastos: 'Gastos'}, {cuentas: viewCuentas, gastos: viewGastos}));
 views.contabilidad = page('Reportes', viewReportes);
 views.directorios = page('Directorios', withSubs('dir', DIR_LABELS, Object.fromEntries(Object.keys(DIRS).map(k => [k, () => viewDir(k)]))));
-views.configuracion = page('Configuración', withSubs('cfg', {tasa: 'Tasa', negocio: 'Negocio', ticket: 'Ticket', respaldo: 'Respaldo'},
-  {tasa: viewTasa, negocio: () => viewSettings('negocio'), ticket: () => viewSettings('ticket'), respaldo: viewRespaldo}));
+views.configuracion = page('Configuración', withSubs('cfg', {tasa: 'Tasa', negocio: 'Negocio', ticket: 'Ticket', respaldo: 'Respaldo', reinicio: 'Comenzar desde 0'},
+  {tasa: viewTasa, negocio: () => viewSettings('negocio'), ticket: () => viewSettings('ticket'), respaldo: viewRespaldo, reinicio: viewReinicio}));
 
 // Fondo claro / oscuro (se recuerda la elección)
 const SUN = '<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';

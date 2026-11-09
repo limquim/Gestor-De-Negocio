@@ -107,7 +107,7 @@ function toast(msg, err) {
   const t = $('#toast'); t.textContent = msg; t.className = err ? 'err' : '';
   clearTimeout(toastTimer); toastTimer = setTimeout(() => t.classList.add('hidden'), 4000);
 }
-const run = async (fn) => { try { await fn(); } catch (e) { console.error(e); toast(e.message || 'Ocurrió un error inesperado', true); } };
+const run = async (fn) => { try { await fn(); } catch (e) { console.error(e); if (e instanceof TypeError && /null/.test(e.message)) return; toast(e.message || 'Ocurrió un error inesperado', true); } };
 const q = async (p) => { const {data, error} = await p; if (error) throw error; return data; };
 
 // ---------- Tasa ----------
@@ -289,7 +289,7 @@ $('#logout').onclick = () => db.auth.signOut();
 
 async function enter() {
   $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
-  await loadRate(); await autoRate(); await loadMethods(); render();
+  await loadRate(); await autoRate(); await loadMethods(); await loadFlags(); render();
 }
 function showLogin() { $('#app').classList.add('hidden'); $('#login').classList.remove('hidden'); }
 
@@ -317,6 +317,8 @@ run(async () => {
 <script src="devoluciones.js"></script>
 <script src="panel.js"></script>
 <script src="gestion.js"></script>
+<script src="nomina.js"></script>
+<script src="planificacion.js"></script>
 <script src="shell.js"></script>
 </body>
 </html>

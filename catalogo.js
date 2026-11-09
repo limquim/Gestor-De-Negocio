@@ -122,8 +122,9 @@ async function viewCatalogo() {
     <div class="row"><button class="btn" id="ctShare">Compartir PDF</button><button class="btn ghost" id="ctPdf">Descargar PDF</button><button class="btn ghost" id="ctCsv">Descargar Excel</button></div>`;
   let tmr;
   const paint = () => { clearTimeout(tmr); tmr = setTimeout(() => run(async () => {
-    const B = await catBuild(D, CT); $('#ctInfo').textContent = `${B.items.length} productos en ${B.lay.pages.length} ${B.lay.pages.length === 1 ? 'página' : 'páginas'}`;
-    $('#ctPrev').innerHTML = B.items.length ? `<img class="rimg" src="${(await drawCatPage(0, B.lay, CT, B.X, 1)).toDataURL('image/jpeg', 0.8)}" alt="Vista previa">` : '<p class="mut">No hay productos con estas opciones.</p>';
+    const B = await catBuild(D, CT); if (!$('#ctInfo')) return; $('#ctInfo').textContent = `${B.items.length} productos en ${B.lay.pages.length} ${B.lay.pages.length === 1 ? 'página' : 'páginas'}`;
+    const pv = B.items.length ? `<img class="rimg" src="${(await drawCatPage(0, B.lay, CT, B.X, 1)).toDataURL('image/jpeg', 0.8)}" alt="Vista previa">` : '<p class="mut">No hay productos con estas opciones.</p>';
+    if ($('#ctPrev')) $('#ctPrev').innerHTML = pv;
   }), 400); };
   $('#ctForm').addEventListener('input', (e) => { const k = e.target.dataset.k; if (k) { CT[k] = e.target.type === 'checkbox' ? e.target.checked : e.target.value; paint(); } });
   $('#ctCats').onclick = (e) => { const b = e.target.closest('[data-c]'); if (!b) return; const id = b.dataset.c; CT.cats = CT.cats.includes(id) ? CT.cats.filter(x => x !== id) : [...CT.cats, id]; b.classList.toggle('on'); paint(); };

@@ -52,7 +52,7 @@ async function receiptBlob(doc, set) {
     }
     y += 28; T('Fecha: ' + dmy(doc.date) + (doc.valid ? '     Válida hasta: ' + dmy(doc.valid) : ''), P, y, 15, 400, mut);
     if (set.ticket_show_customer !== false) {
-      y += 40; T('CLIENTE', P, y, 12, 700, mut); y += 26; T(doc.customer, P, y, 20, 700, ink);
+      y += 40; T(doc.partyLabel || 'CLIENTE', P, y, 12, 700, mut); y += 26; T(doc.customer, P, y, 20, 700, ink);
       if (doc.phone) { y += 22; T(doc.phone, P, y, 15, 400, mut); }
     }
     // tabla de productos
