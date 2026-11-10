@@ -131,15 +131,44 @@ async function viewDeudas() {
   $('#dcL').onclick = (e) => { const b = e.target.closest('[data-i]'); if (b) run(() => debtSheet(rows[+b.dataset.i])); };
 }
 async function debtSheet(c) {
-  let qb = db.from('ventas_resumen').select('id,sale_date,total_usd,paid_usd,due_date').eq('status', 'pendiente').order('sale_date');
+  let qb = db.from('ventas_resumen').select('id,sale_date,total_usd,paid_usd,due_date').eq('status', 'pendiente').order('sale_date').order('id');
   qb = c.customer_id === null ? qb.is('customer_id', null) : qb.eq('customer_id', c.customer_id);
-  const sales = await q(qb), debt = sales.reduce((a, s) => a + s.total_usd - s.paid_usd, 0), hoy = caracasDate();
-  openSheet(esc(c.customer), `<p><b>Deuda total: ${fmt(debt)} USD</b>${S.rate ? ' (' + fmt(debt * S.rate) + ' Bs a la tasa de hoy)' : ''}</p>
-    <div class="scroll"><table><thead><tr><th>Venta</th><th>Fecha</th><th class="n">Debe USD</th></tr></thead><tbody>${sales.map(s => `<tr><td>#${s.id}</td><td>${s.sale_date}${s.due_date && s.due_date < hoy ? ' <span class="warn">vencida</span>' : ''}</td><td class="n">${fmt(s.total_usd - s.paid_usd)}</td></tr>`).join('')}</tbody></table></div>
-    <p class="mut">El pago se aplica primero a las ventas más antiguas. Puedes cobrar todo o solo una parte.</p>
-    <div class="row"><button class="btn" id="dcPay">Cobrar la deuda</button>${c.phone ? '<button class="btn ghost" id="dcWa">Recordar por WhatsApp</button>' : ''}</div>`);
-  $('#dcPay').onclick = () => run(() => debtForm({title: 'Cobrar la deuda', label: 'Deuda total', rpc: 'cobrar_deuda_cliente', args: {p_customer_id: c.customer_id}, bal: debt}));
-  if (c.phone) $('#dcWa').onclick = () => window.open(waLink(c, `Hola ${(c.customer || '').split(' ')[0]}, te recordamos que tienes un saldo pendiente de ${fmt(debt)} USD${S.rate ? ' (' + fmt(debt * S.rate) + ' Bs a la tasa de hoy)' : ''}. Gracias por tu atención.`), '_blank');
+  const [sales, accs] = await Promise.all([q(qb), q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id'))]);
+  const hoy = caracasDate(), bal = (s) => s.total_usd - s.paid_usd, total = sales.reduce((a, s) => a + bal(s), 0);
+  openSheet(esc(c.customer), `<form id="dcF" class="stack"><p><b>Deuda total: ${fmt(total)} USD</b>${S.rate ? ' (' + fmt(total * S.rate) + ' Bs a la tasa de hoy)' : ''}</p>
+    <p class="mut">Marca las ventas que quieres pagar. Si el monto no alcanza para todas, se pagan completas las más antiguas y la siguiente queda con un abono y lo que falta abierto.</p>
+    <div class="list" id="dcS">${sales.map(s => `<div class="item"><label class="chk" style="flex:1"><input type="checkbox" data-s="${s.id}" checked><span><b>Venta #${s.id}</b>
+      <small>${s.sale_date}${s.due_date && s.due_date < hoy ? ' | vencida' : ''} | debe ${fmt(bal(s))} USD</small><small class="al" style="display:block"></small></span></label></div>`).join('')}</div>
+    <label>Cuenta<select name="acc">${acctOpts(accs)}</select></label>
+    <label>Tasa de cambio (Bs por USD)<input name="rate" type="number" step="0.0001" min="0.0001" value="${S.rate || ''}"></label>
+    <label>Método<select name="method"></select></label>
+    <label>Monto a cobrar<input name="amount" type="number" step="0.01" min="0.01" required></label><p class="mut" id="dcSum"></p>
+    <label>Referencia<input name="ref"></label>
+    <div class="row"><button class="btn" type="submit" id="dcGo">Registrar cobro</button>${c.phone ? '<button class="btn ghost" type="button" id="dcWa">Recordar por WhatsApp</button>' : ''}</div></form>`);
+  const el = $('#dcF').elements, cur = () => accs.find(a => String(a.id) === el.acc.value).currency, factor = () => cur() === 'USD' ? 1 : (+el.rate.value || 0);
+  const chosen = (s) => document.querySelector(`[data-s="${s.id}"]`).checked, selDebt = () => sales.filter(chosen).reduce((a, s) => a + bal(s), 0);
+  const alloc = () => { let rem = (num(el.amount.value) || 0) / (factor() || 1); return sales.map(s => { if (!chosen(s)) return {s, a: 0, st: ''}; const a = Math.min(bal(s), Math.max(rem, 0)); rem -= a; return {s, a, st: a >= bal(s) - 0.01 ? 'full' : a > 0.004 ? 'part' : 'none'}; }); };
+  const paint = () => {
+    const al = alloc(), usd = al.reduce((x, y) => x + y.a, 0), sel = selDebt(), over = (num(el.amount.value) || 0) / (factor() || 1) - sel;
+    al.forEach(x => { const l = document.querySelector(`[data-s="${x.s.id}"]`).closest('.item').querySelector('.al'); l.className = 'al ' + (x.st === 'full' ? 'in' : x.st === 'part' ? 'warn' : 'mut'); l.style.display = 'block';
+      l.textContent = x.st === 'full' ? 'Se paga completa' : x.st === 'part' ? `Abono de ${fmt(x.a)} USD: queda abierta debiendo ${fmt(bal(x.s) - x.a)} USD` : x.st === 'none' ? 'No alcanza: queda pendiente' : ''; });
+    $('#dcSum').textContent = over > 0.02 ? `El monto supera la deuda de las ventas elegidas por ${fmt(over)} USD.` : `Cobrarás ${fmt(usd)} USD. Quedan pendientes ${fmt(Math.max(sel - usd, 0))} USD de las ventas elegidas.`;
+  };
+  const fillM = () => { el.method.innerHTML = optList(accMethods(accs.find(a => String(a.id) === el.acc.value))); };
+  let pf = factor();
+  const fill = () => { pf = factor(); el.amount.value = (selDebt() * pf).toFixed(2); paint(); };
+  const conv = () => { const nf = factor(), usd = pf ? (num(el.amount.value) || 0) / pf : selDebt(); pf = nf; el.amount.value = (usd * nf).toFixed(2); paint(); };   // al cambiar tasa o cuenta se conserva el valor en USD
+  fillM(); fill();
+  $('#dcS').addEventListener('change', fill); el.acc.onchange = () => { fillM(); conv(); }; el.rate.oninput = conv; el.amount.oninput = paint;
+  $('#dcF').onsubmit = (e) => {
+    e.preventDefault();
+    run(async () => {
+      const ids = sales.filter(chosen).map(s => s.id); if (!ids.length) throw new Error('Marca al menos una venta');
+      const res = await q(db.rpc('cobrar_ventas', {p_sale_ids: ids, p_account_id: +el.acc.value, p_method: el.method.value, p_amount: num(el.amount.value), p_reference: el.ref.value.trim() || null, p_rate: +el.rate.value || null}));
+      closeSheet(); toast(`Cobro registrado: ${res.pagadas} ${res.pagadas === 1 ? 'venta pagada completa' : 'ventas pagadas completas'}${res.abonadas ? ' y 1 con abono (queda abierta)' : ''}. Pendiente: ${fmt(res.pendiente_usd)} USD`); render();
+    });
+  };
+  if (c.phone) $('#dcWa').onclick = () => window.open(waLink(c, `Hola ${(c.customer || '').split(' ')[0]}, te recordamos que tienes un saldo pendiente de ${fmt(total)} USD${S.rate ? ' (' + fmt(total * S.rate) + ' Bs a la tasa de hoy)' : ''}. Gracias por tu atención.`), '_blank');
 }
 
 // ---------- Módulos opcionales (se activan en Configuración > Negocio) ----------

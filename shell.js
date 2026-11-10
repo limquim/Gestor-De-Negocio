@@ -74,3 +74,10 @@ $('#themeBtn').onclick = () => {
   paintTheme();
 };
 paintTheme();
+
+// Evita duplicados: si se toca dos veces el mismo botón en menos de 2 segundos, se ignora el segundo toque
+document.addEventListener('click', (e) => {
+  const b = e.target.closest('button.btn'); if (!b) return;
+  const t = Date.now(); if (b._t && t - b._t < 2000) { e.stopImmediatePropagation(); e.preventDefault(); return; }
+  b._t = t;
+}, true);

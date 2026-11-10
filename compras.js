@@ -146,7 +146,9 @@ async function debtForm(cfg) {
   const eq = () => { const r = +el.rate.value || 0, a = num(el.amount.value) || 0, usd = cur() === 'USD' ? a : (r ? a / r : 0); $('#dEq').textContent = `Equivale a ${fmt(usd)} USD | quedaría debiendo ${fmt(Math.max(bal - usd, 0))} USD`; };
   const full = () => { el.amount.value = (bal * (cur() === 'USD' ? 1 : (+el.rate.value || 0))).toFixed(2); eq(); };
   const fillM = () => { el.method.innerHTML = optList(accMethods(accs.find(a => String(a.id) === el.acc.value))); };
-  fillM(); full(); el.acc.onchange = () => { fillM(); full(); }; el.rate.oninput = full; el.amount.oninput = eq;
+  fillM(); full(); let pf = cur() === 'USD' ? 1 : (+el.rate.value || 0);
+  const conv = () => { const nf = cur() === 'USD' ? 1 : (+el.rate.value || 0), usd = pf ? (num(el.amount.value) || 0) / pf : bal; pf = nf; el.amount.value = (usd * nf).toFixed(2); eq(); };
+  el.acc.onchange = () => { fillM(); conv(); }; el.rate.oninput = conv; el.amount.oninput = eq;
   $('#dF').onsubmit = (e) => {
     e.preventDefault();
     run(async () => {
