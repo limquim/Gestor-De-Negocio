@@ -73,3 +73,29 @@ input[type=color]{padding:.2rem;cursor:pointer}
 .item small.df{color:var(--bad);font-weight:700}
 
 .nrow .nt{font-weight:700;color:var(--ok)}
+
+/* Escáner de código de barras */
+.scan-row{display:flex;gap:.5rem;align-items:center}
+.scan-row input{flex:1;margin:0;min-width:0}
+.scan-btn{width:46px;height:46px;padding:0;flex:none;color:var(--pri);border-color:color-mix(in srgb,var(--pri) 40%,var(--line))}
+.scan-btn:hover{background:color-mix(in srgb,var(--pri) 10%,var(--card))}
+.icon-btn.on{background:var(--pri);color:var(--pri-ink);border-color:var(--pri)}
+
+.scan-modal{position:fixed;inset:0;z-index:80;display:flex;align-items:flex-end;justify-content:center}
+.scan-bg{position:absolute;inset:0;background:rgba(0,0,0,.72);backdrop-filter:blur(2px)}
+.scan-box{position:relative;width:100%;max-height:92vh;overflow:auto;background:var(--card);border-radius:18px 18px 0 0;padding:1rem 1rem calc(1rem + env(safe-area-inset-bottom));display:grid;gap:.75rem;box-shadow:0 -8px 32px rgba(0,0,0,.35)}
+@media(min-width:700px){.scan-modal{align-items:center}.scan-box{max-width:480px;border-radius:18px}}
+
+.scan-stage{position:relative;width:100%;aspect-ratio:4/3;max-height:52vh;background:#091014;border-radius:14px;overflow:hidden;display:grid;place-items:center}
+.scan-stage video{width:100%;height:100%;object-fit:cover;display:block}
+#scanReader{width:100%;height:100%}
+#scanReader video{width:100%!important;height:100%!important;object-fit:cover!important}
+.scan-aim{position:absolute;inset:18% 10%;border:2px solid rgba(255,255,255,.8);border-radius:12px;pointer-events:none;box-shadow:0 0 0 9999px rgba(0,0,0,.32);transition:border-color .15s}
+.scan-aim.ok{border-color:#5fd394;border-width:3px}
+.scan-aim.bad{border-color:#ff8a6b;border-width:3px}
+.scan-aim i{position:absolute;left:6%;right:6%;top:50%;height:2px;background:var(--tag);box-shadow:0 0 8px var(--tag);animation:scanline 1.8s ease-in-out infinite}
+@keyframes scanline{0%,100%{transform:translateY(-28px)}50%{transform:translateY(28px)}}
+.scan-status{position:absolute;left:.6rem;right:.6rem;bottom:.6rem;background:rgba(10,20,24,.84);color:#fff;padding:.45rem .75rem;border-radius:10px;font-size:.86rem;font-weight:700;text-align:center;backdrop-filter:blur(4px)}
+.scan-status.ok{background:rgba(27,127,75,.94)}
+.scan-status.bad{background:rgba(180,56,26,.94)}
+#toast{z-index:95}

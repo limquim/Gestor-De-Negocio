@@ -39,7 +39,7 @@ async function viewAjusteMasivo() {
     <label>¿Afecta financieramente?<select id="ajF">${Object.entries(finOpts).map(([k, v]) => `<option value="${k}" ${k === AJ.fin ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
     ${AJ.fin === 'gasto' ? `<label>Tipo de gasto<select id="ajT">${types.map(t => `<option value="${t.id}" ${String(t.id) === AJ.etype ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label>` : ''}
     ${AJ.fin === 'pago' ? `<label>Pagado desde<select id="ajA">${acctOpts(accs, AJ.acc)}</select></label>` : ''}
-    <input id="ajQ" type="search" placeholder="Buscar producto o código" value="${esc(AJ.q)}">
+    <div class="scan-row"><input id="ajQ" type="search" placeholder="Buscar producto o escanear para sumar +1" value="${esc(AJ.q)}"><button type="button" class="icon-btn scan-btn" id="ajScan" title="Escanear código de barras (suma +1)" aria-label="Escanear código de barras">${SCAN_ICO}</button></div>
     <div class="chips" id="ajC"><button data-c="all" class="${AJ.cat === 'all' ? 'on' : ''}">Todos</button>${cats.map(([id, n]) => `<button data-c="${id}" class="${AJ.cat === id ? 'on' : ''}">${esc(n)}</button>`).join('')}</div></div>
     <div class="card"><div class="list" id="ajL"></div></div><div class="card"><div id="ajS"></div></div>
     <div class="row"><button class="btn" id="ajGo">Aplicar</button></div>`;
@@ -95,6 +95,26 @@ async function viewAjusteMasivo() {
     if (cid) { AJ.costs[cid] = e.target.value; upd(); }
   });
   $('#ajQ').oninput = (e) => { AJ.q = e.target.value; draw(); };
+  const bumpAdjByCode = (code) => {
+    const r = findBySku(rows, code);
+    if (!r) return {ok: false, msg: 'Código no encontrado: ' + code};
+    const curVal = AJ.vals[r.product_id] !== undefined && AJ.vals[r.product_id] !== '' ? num(AJ.vals[r.product_id]) : 0;
+    const nextVal = Math.round((curVal + 1) * 1000) / 1000;
+    AJ.vals[r.product_id] = String(nextVal);
+    draw();
+    return {ok: true, msg: `${r.name}: ${AJMODE[m][1]} = ${qty(nextVal)} ${r.unit}`};
+  };
+  $('#ajScan').onclick = () => openScanner({
+    title: `Escanear (${AJMODE[m][0]} +1)`,
+    continuous: true,
+    allowContinuous: true,
+    onCode: bumpAdjByCode
+  });
+  bindEnterSku($('#ajQ'), (code) => {
+    const res = bumpAdjByCode(code);
+    if (res.ok) { scanBeep(true); toast(res.msg); AJ.q = ''; $('#ajQ').value = ''; draw(); return true; }
+    return false;
+  });
   $('#ajC').onclick = (e) => { const b = e.target.closest('button'); if (b) { AJ.cat = b.dataset.c; document.querySelectorAll('#ajC button').forEach(x => x.classList.toggle('on', x === b)); draw(); } };
   $('#ajGo').onclick = () => run(async () => {
     const it = pend().map(r => ({

@@ -3,6 +3,7 @@ const MAIN = ['inicio', 'ventas', 'inventario', 'produccion', 'mas'];
 const SUB = {};
 
 function go(t) {
+  if (typeof closeScanner === 'function') closeScanner();
   if (!canSee(t)) { toast('Tu rol no tiene acceso a esta sección', true); t = 'inicio'; }
   tab = t;
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === (MAIN.includes(t) ? t : 'mas')));

@@ -117,7 +117,7 @@ async function viewApertura() {
       <div class="title-row"><h2>2. Inventario inicial</h2><button type="button" class="btn ghost" id="apNewProd">+ Nuevo producto</button></div>
       <p class="mut" style="margin:0">Coloca la existencia física actual y el costo unitario en USD de tus productos. También puedes <button type="button" class="lnk" id="apGoImp" style="padding:0">importarlos desde Excel/CSV</button>.</p>
       <div class="toolbar">
-        <input id="apProdQ" type="search" placeholder="Buscar producto o código" value="${esc(AP.q)}">
+        <div class="scan-row" style="flex:1;min-width:210px"><input id="apProdQ" type="search" placeholder="Buscar producto o escanear código" value="${esc(AP.q)}"><button type="button" class="icon-btn scan-btn" id="apProdScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div>
         <label class="chk"><input type="checkbox" id="apOnly" ${AP.onlyFilled ? 'checked' : ''}> Solo con cantidad cargada</label>
       </div>
       <div class="list" id="apProdList"></div>
@@ -218,6 +218,23 @@ async function viewApertura() {
   });
 
   $('#apProdQ').oninput = (e) => { AP.q = e.target.value; drawProds(); };
+  $('#apProdScan').onclick = () => openScanner({
+    title: 'Buscar producto en apertura',
+    continuous: false,
+    onCode: (code) => {
+      const hit = findBySku(prods, code);
+      AP.q = hit ? (hit.sku || hit.name) : code;
+      AP.onlyFilled = false;
+      $('#apProdQ').value = AP.q;
+      $('#apOnly').checked = false;
+      drawProds();
+      if (hit) {
+        setTimeout(() => document.querySelector(`#apProdList [data-pid="${hit.id}"][data-pf="stock"]`)?.focus(), 260);
+        return {ok: true, msg: 'Encontrado: ' + hit.name};
+      }
+      return {ok: false, msg: 'Sin producto con código ' + code};
+    }
+  });
   $('#apOnly').onchange = (e) => { AP.onlyFilled = e.target.checked; drawProds(); };
 
   $('#apProdList').addEventListener('input', (e) => {
@@ -304,7 +321,7 @@ async function viewApertura() {
   // Crear producto rápido con stock y costo inicial
   $('#apNewProd').onclick = () => {
     openSheet('Nuevo producto con stock inicial', `<form id="apProdF" class="stack">
-      <label>Código (opcional)<input name="sku"></label>
+      <label>Código (opcional)<div class="scan-row" style="margin-top:.25rem"><input name="sku" placeholder="Escanea o escribe el código"><button type="button" class="icon-btn scan-btn" id="apSkuScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div></label>
       <label>Nombre del producto<input name="pname" required></label>
       <label>Categoría<select name="category_id">${cats.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label>
       <label>Unidad<select name="unit">${units.map(u => `<option value="${u.symbol}" ${u.symbol === 'und' ? 'selected' : ''}>${esc(u.name)} (${u.symbol})</option>`).join('')}</select></label>
@@ -315,6 +332,11 @@ async function viewApertura() {
       </div>
       <button class="btn" type="submit">Crear y agregar</button>
     </form>`);
+    $('#apSkuScan').onclick = () => openScanner({
+      title: 'Escanear código del producto',
+      continuous: false,
+      onCode: (code) => { $('#apProdF').elements.sku.value = code; return {ok: true, msg: 'Código asignado: ' + code}; }
+    });
     $('#apProdF').onsubmit = (e) => {
       e.preventDefault();
       const el = e.target.elements;

@@ -30,7 +30,7 @@ async function viewInventario2() {
   ${['admin', 'contador'].includes(S.role || 'admin') ? `<div class="row" style="margin:0 0 .8rem"><button class="btn ghost" data-go="apertura">Configurar inventario y saldos iniciales</button></div>` : ''}
   <div class="card">
     <div class="toolbar">
-      <input id="invQ" type="search" placeholder="Buscar por nombre o código">
+      <div class="scan-row" style="flex:1;min-width:210px"><input id="invQ" type="search" placeholder="Buscar por nombre o código"><button type="button" class="icon-btn scan-btn" id="invScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div>
       <div class="chips" id="invT"><button data-t="all" class="on">Todos</button>${chips}</div>
       <label class="chk"><input type="checkbox" id="invLow"> Solo bajo mínimo</label>
     </div>
@@ -58,6 +58,22 @@ async function viewInventario2() {
 
   drawInvTable();
   $('#invQ').oninput = (e) => { INV.q = e.target.value; drawInvTable(); };
+  $('#invScan').onclick = () => openScanner({
+    title: 'Buscar en existencias',
+    continuous: false,
+    onCode: (code) => {
+      const hit = findBySku(INV.rows, code);
+      INV.q = hit ? (hit.sku || hit.name) : code;
+      INV.type = 'all'; INV.low = false;
+      $('#invQ').value = INV.q;
+      $('#invLow').checked = false;
+      document.querySelectorAll('#invT button').forEach(x => x.classList.toggle('on', x.dataset.t === 'all'));
+      drawInvTable();
+      return hit
+        ? {ok: true, msg: `${hit.name} — Stock: ${qty(hit.stock)} ${hit.unit}`}
+        : {ok: false, msg: 'Sin producto con código ' + code};
+    }
+  });
   $('#invLow').onchange = (e) => { INV.low = e.target.checked; drawInvTable(); };
   $('#invT').onclick = (e) => {
     const b = e.target.closest('button'); if (!b) return;
@@ -216,7 +232,7 @@ async function viewProductos2() {
     q(db.from('settings').select('enable_product_photos').eq('id', 1).single())
   ]);
   const D = {cats, units, taxes, photos: !!set.enable_product_photos};
-  $('#view').innerHTML = `<input id="prQ" type="search" placeholder="Buscar producto o código" value="${esc(PR2.q)}" style="margin-bottom:.8rem">
+  $('#view').innerHTML = `<div class="scan-row" style="margin-bottom:.8rem"><input id="prQ" type="search" placeholder="Buscar producto o escanear código" value="${esc(PR2.q)}"><button type="button" class="icon-btn scan-btn" id="prScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div>
     <div class="list" id="prList"></div><button class="fab" id="prAdd" aria-label="Nuevo producto">+</button>`;
   const draw = () => {
     const t = PR2.q.toLowerCase();
@@ -227,17 +243,34 @@ async function viewProductos2() {
       <span class="mut">&rsaquo;</span></button>`).join('') || '<p class="mut">No hay productos. Pulsa + para crear el primero.</p>';
   };
   draw();
+  const handleProdScan = (code) => {
+    const hit = findBySku(prods, code);
+    if (hit) {
+      PR2.q = hit.sku || hit.name; $('#prQ').value = PR2.q; draw();
+      setTimeout(() => prodForm(hit, D), 260);
+      return {ok: true, msg: 'Abriendo: ' + hit.name};
+    }
+    PR2.q = ''; $('#prQ').value = ''; draw();
+    setTimeout(() => {
+      if (confirm(`El código "${code}" no existe todavía. ¿Crear un producto nuevo con este código?`)) {
+        prodForm(null, D, code);
+      }
+    }, 280);
+    return {ok: false, msg: 'Código nuevo: ' + code};
+  };
   $('#prQ').oninput = (e) => { PR2.q = e.target.value; draw(); };
+  bindEnterSku($('#prQ'), (code) => { handleProdScan(code); return true; });
+  $('#prScan').onclick = () => openScanner({title: 'Buscar o crear producto', continuous: false, onCode: handleProdScan});
   $('#prAdd').onclick = () => prodForm(null, D);
   $('#prList').onclick = (e) => { const b = e.target.closest('[data-id]'); if (b) prodForm(prods.find(p => String(p.id) === b.dataset.id), D); };
 }
 
-function prodForm(p, D) {
+function prodForm(p, D, preSku = '') {
   const {cats, units, taxes, photos} = D, defTax = taxes.find(t => t.is_default)?.id;
   const v = (k, d = '') => p ? (p[k] ?? d) : d;
   const opt = (arr, val, key, label) => arr.map(o => `<option value="${o[key]}" ${String(o[key]) === String(val) ? 'selected' : ''}>${esc(label(o))}</option>`).join('');
   openSheet(p ? 'Editar producto' : 'Nuevo producto', `<form id="pf" class="stack">
-    <label>Código<input name="sku" value="${esc(v('sku'))}"></label>
+    <label>Código (SKU / barras)<div class="scan-row" style="margin-top:.25rem"><input name="sku" value="${esc(v('sku', preSku))}" placeholder="Escanea o escribe el código"><button type="button" class="icon-btn scan-btn" id="pfScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div></label>
     <label>Nombre<input name="pname" value="${esc(v('name'))}" required></label>
     <label>Categoría<select name="category_id">${opt(cats, v('category_id'), 'id', c => c.name)}</select></label>
     <label>Unidad de medida<select name="unit">${opt(units, v('unit', 'und'), 'symbol', u => `${u.name} (${u.symbol})`)}</select></label>
@@ -252,6 +285,11 @@ function prodForm(p, D) {
     <p id="pMargin" class="mut"></p>
     <div class="row"><button class="btn" type="submit">Guardar producto</button>${p ? '<button type="button" class="btn ghost" id="pfDel">Desactivar</button>' : ''}</div></form>`);
   const f = $('#pf'), el = f.elements;
+  $('#pfScan').onclick = () => openScanner({
+    title: 'Escanear código del producto',
+    continuous: false,
+    onCode: (code) => { el.sku.value = code; return {ok: true, msg: 'Código asignado: ' + code}; }
+  });
   const mg = () => { const c = p && p.auto_cost_usd != null ? +p.auto_cost_usd : (+el.cost.value || 0), pr = +el.price.value || 0; $('#pMargin').textContent = pr > 0 ? `Margen sobre el costo: ${fmt((pr - c) / pr * 100, 0)}% (ganancia de ${fmt(pr - c)} USD por unidad)` : ''; };
   f.addEventListener('input', mg); mg();
   f.onsubmit = (e) => {

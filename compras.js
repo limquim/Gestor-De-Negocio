@@ -18,7 +18,7 @@ async function viewCompra() {
     <div class="row0"><label style="flex:1">Proveedor<select id="cSup"><option value="">Sin proveedor</option>${D.sups.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></label><button class="btn ghost" type="button" id="cNewS" aria-label="Nuevo proveedor">+</button></div>
     <div class="grid"><label>Moneda de la factura<select id="cCur"><option value="USD">Dólares (USD)</option><option value="VES">Bolívares (Bs)</option></select></label>
       <label>Tasa (Bs por USD)<input id="cRate" type="number" step="0.0001" min="0.0001"></label></div></div>
-  <div class="card"><h2>Productos</h2><input id="cSearch" type="search" placeholder="Buscar producto o código"><div class="list" id="cRes" style="margin:.5rem 0"></div><div id="cCart"></div></div>
+  <div class="card"><h2>Productos</h2><div class="scan-row"><input id="cSearch" type="search" placeholder="Buscar producto o escanear código"><button type="button" class="icon-btn scan-btn" id="cScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div><div class="list" id="cRes" style="margin:.5rem 0"></div><div id="cCart"></div></div>
   <div class="card"><h2>Total</h2><div id="cTot"></div></div>
   <div class="card"><h2>Pagos</h2><div id="cPays"></div><div class="row"><button class="btn ghost" type="button" id="cAddPay">Agregar pago</button></div>
     <p id="cBal"></p><label id="cDueW" class="hidden">Fecha límite del saldo<input id="cDue" type="date"></label></div>
@@ -59,6 +59,27 @@ async function viewCompra() {
     const t = e.target.value.trim().toLowerCase();
     $('#cRes').innerHTML = t ? (D.products.filter(p => (p.name + ' ' + (p.sku || '')).toLowerCase().includes(t)).slice(0, 6).map(p => `<button class="item" data-add="${p.id}"><span><b>${esc(p.name)}</b><small>Último costo: ${fmt(p.last_cost_usd || p.avg_cost_usd)} USD</small></span><span class="mut">+</span></button>`).join('') || '<p class="mut">Sin resultados.</p>') : '';
   };
+  const addCompraByCode = (code) => {
+    const p = findBySku(D.products, code);
+    if (!p) return {ok: false, msg: 'Código no registrado: ' + code};
+    const ex = CV.cart.find(c => c.pid === p.id);
+    if (ex) ex.qty = Math.round((ex.qty + 1) * 1000) / 1000;
+    else CV.cart.push(line(p.id));
+    drawCart();
+    const curQ = CV.cart.find(c => c.pid === p.id)?.qty || 1;
+    return {ok: true, msg: `${p.name} (x${qty(curQ)})`};
+  };
+  $('#cScan').onclick = () => openScanner({
+    title: 'Escanear para compra',
+    continuous: true,
+    allowContinuous: true,
+    onCode: addCompraByCode
+  });
+  bindEnterSku($('#cSearch'), (code) => {
+    const r = addCompraByCode(code);
+    if (r.ok) { scanBeep(true); toast(r.msg); $('#cSearch').value = ''; $('#cRes').innerHTML = ''; return true; }
+    return false;
+  });
   $('#cRes').onclick = (e) => {
     const b = e.target.closest('[data-add]'); if (!b) return;
     const id = +b.dataset.add, ex = CV.cart.find(c => c.pid === id); if (ex) ex.qty++; else CV.cart.push(line(id));

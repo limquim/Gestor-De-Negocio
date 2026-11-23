@@ -77,7 +77,7 @@ async function viewVenta() {
     <div class="row0"><label style="flex:1">Cliente<select id="vCust"><option value="">Cliente general</option>${D.custs.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label><button class="btn ghost" type="button" id="vNewC" aria-label="Nuevo cliente">+</button></div>
     <label>Documento<select id="vDoc">${optList(DOCS)}</select></label>
     <div class="grid"><label>Tasa (Bs por USD)<input id="vRate" type="number" step="0.0001" min="0.0001"></label><label>Descuento (USD)<input id="vDisc" type="number" step="0.01" min="0" value="0"></label></div></div>
-  <div class="card"><h2>Productos</h2><input id="vSearch" type="search" placeholder="Buscar producto o código"><div class="list" id="vRes" style="margin:.5rem 0"></div><div id="vCart"></div></div>
+  <div class="card"><h2>Productos</h2><div class="scan-row"><input id="vSearch" type="search" placeholder="Buscar producto o escanear código"><button type="button" class="icon-btn scan-btn" id="vScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div><div class="list" id="vRes" style="margin:.5rem 0"></div><div id="vCart"></div></div>
   <div class="card"><h2>Total</h2><div id="vTot"></div></div>
   <div class="card"><h2>Pagos</h2><div id="vPays"></div><div class="row"><button class="btn ghost" type="button" id="vAddPay">Agregar pago</button></div>
     <p id="vBal"></p><label id="vDueW" class="hidden">Fecha límite del saldo<input id="vDue" type="date"></label></div>
@@ -122,6 +122,33 @@ async function viewVenta() {
     const t = e.target.value.trim().toLowerCase();
     $('#vRes').innerHTML = t ? (D.products.filter(p => (p.name + ' ' + (p.sku || '')).toLowerCase().includes(t)).slice(0, 6).map(p => `<button class="item" data-add="${p.id}"><span><b>${esc(p.name)}</b><small>${fmt(p.sale_price_usd)} USD | ${p.is_service ? 'Servicio' : 'Disponible: ' + qty(D.st[p.id] || 0) + ' ' + esc(p.unit)}</small></span><span class="mut">+</span></button>`).join('') || '<p class="mut">Sin resultados.</p>') : '';
   };
+  const addProdByCode = (code) => {
+    const p = findBySku(D.products, code);
+    if (!p) return {ok: false, msg: 'Código no registrado: ' + code};
+    const ex = V.cart.find(c => c.pid === p.id);
+    if (ex) ex.qty = Math.round((ex.qty + 1) * 1000) / 1000;
+    else V.cart.push(line(p.id, 1));
+    drawCart();
+    const curQ = V.cart.find(c => c.pid === p.id)?.qty || 1;
+    return {ok: true, msg: `${p.name} (x${qty(curQ)}) — ${fmt(p.sale_price_usd)} USD`};
+  };
+  $('#vScan').onclick = () => openScanner({
+    title: 'Escanear para vender',
+    continuous: true,
+    allowContinuous: true,
+    onCode: addProdByCode
+  });
+  bindEnterSku($('#vSearch'), (code) => {
+    const r = addProdByCode(code);
+    if (r.ok) { scanBeep(true); toast(r.msg); $('#vSearch').value = ''; $('#vRes').innerHTML = ''; return true; }
+    const hits = D.products.filter(p => (p.name + ' ' + (p.sku || '')).toLowerCase().includes(code.toLowerCase()));
+    if (hits.length === 1) {
+      const p = hits[0], ex = V.cart.find(c => c.pid === p.id);
+      if (ex) ex.qty++; else V.cart.push(line(p.id, 1));
+      drawCart(); toast(p.name + ' agregado'); $('#vSearch').value = ''; $('#vRes').innerHTML = ''; return true;
+    }
+    return false;
+  });
   $('#vRes').onclick = (e) => {
     const b = e.target.closest('[data-add]'); if (!b) return;
     const id = +b.dataset.add, ex = V.cart.find(c => c.pid === id); ex ? ex.qty++ : V.cart.push(line(id, 1));

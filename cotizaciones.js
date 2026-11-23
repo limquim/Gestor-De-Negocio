@@ -68,7 +68,7 @@ async function quoteForm(id) {
     <label>Documento<select name="doc">${optList(DOCS)}</select></label>
     <div class="grid"><label>Tasa (Bs por USD)<input name="rate" type="number" step="0.0001" min="0.0001" required></label>
       <label>Descuento (USD)<input name="disc" type="number" step="0.01" min="0" value="0"></label><label>Válida hasta<input name="valid" type="date"></label></div>
-    <input id="qS" type="search" placeholder="Buscar producto o código"><div class="list" id="qR"></div><div id="qC"></div><p id="qT" class="big"></p>
+    <div class="scan-row"><input id="qS" type="search" placeholder="Buscar producto o escanear código"><button type="button" class="icon-btn scan-btn" id="qScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div><div class="list" id="qR"></div><div id="qC"></div><p id="qT" class="big"></p>
     <label>Nota<input name="notes" placeholder="Ej: entrega en 2 días"></label><button class="btn" type="submit">Guardar cotización</button></form>`);
   const el = $('#qF').elements;
   el.rate.value = old ? old.s.exchange_rate : (S.rate || ''); el.valid.value = old ? (old.s.valid_until || '') : dstr(v7);
@@ -89,6 +89,27 @@ async function quoteForm(id) {
     const t = e.target.value.trim().toLowerCase();
     $('#qR').innerHTML = t ? (D.products.filter(p => (p.name + ' ' + (p.sku || '')).toLowerCase().includes(t)).slice(0, 6).map(p => `<button type="button" class="item" data-add="${p.id}"><span><b>${esc(p.name)}</b><small>${fmt(p.sale_price_usd)} USD</small></span><span class="mut">+</span></button>`).join('') || '<p class="mut">Sin resultados.</p>') : '';
   };
+  const addQuoteByCode = (code) => {
+    const p = findBySku(D.products, code);
+    if (!p) return {ok: false, msg: 'Código no registrado: ' + code};
+    const ex = cart.find(c => c.pid === p.id);
+    if (ex) ex.qty = Math.round((ex.qty + 1) * 1000) / 1000;
+    else cart.push(line(p.id, 1));
+    draw();
+    const curQ = cart.find(c => c.pid === p.id)?.qty || 1;
+    return {ok: true, msg: `${p.name} (x${qty(curQ)})`};
+  };
+  $('#qScan').onclick = () => openScanner({
+    title: 'Escanear para cotizar',
+    continuous: true,
+    allowContinuous: true,
+    onCode: addQuoteByCode
+  });
+  bindEnterSku($('#qS'), (code) => {
+    const res = addQuoteByCode(code);
+    if (res.ok) { scanBeep(true); toast(res.msg); $('#qS').value = ''; $('#qR').innerHTML = ''; return true; }
+    return false;
+  });
   $('#qR').onclick = (e) => { const b = e.target.closest('[data-add]'); if (!b) return; const pid = +b.dataset.add, ex = cart.find(c => c.pid === pid); ex ? ex.qty++ : cart.push(line(pid, 1)); $('#qS').value = ''; $('#qR').innerHTML = ''; draw(); };
   $('#qC').addEventListener('input', (e) => { const l = e.target.closest('.pl'); if (l && e.target.dataset.f) { cart[+l.dataset.i][e.target.dataset.f] = +e.target.value || 0; tot(); } });
   $('#qC').addEventListener('click', (e) => { if (e.target.dataset.rm !== undefined) { cart.splice(+e.target.dataset.rm, 1); draw(); } });
