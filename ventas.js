@@ -17,33 +17,17 @@ async function vData() {
 async function saleDetail(id) {
   const [s, items, pays, ret, rit] = await Promise.all([
     q(db.from('sales').select('*, parties(name,phone)').eq('id', id).single()),
-    q(db.from('sale_items').select('product_id,quantity,unit_price_usd,unit_cost_usd,tax_percent,products(name)').eq('sale_id', id).order('id')),
+    q(db.from('sale_items').select('product_id,quantity,unit_price_usd,unit_cost_usd,tax_percent,products(name,sku)').eq('sale_id', id).order('id')),
     q(db.from('payments').select('method,currency,amount,amount_usd,reference,account_id,accounts(name)').eq('sale_id', id).order('id')),
     q(db.from('sale_returns').select('total_usd,refund_usd').eq('sale_id', id).eq('status', 'activa')),
     q(db.from('sale_return_items').select('quantity,unit_price_usd,unit_cost_usd,restock,sale_returns!inner(sale_id,status)').eq('sale_returns.sale_id', id).eq('sale_returns.status', 'activa'))
   ]);
-  return {s, items: items.map(i => ({...i, name: i.products?.name})), pays, ret, rit};
+  return {s, items: items.map(i => ({...i, name: i.products?.name, sku: i.products?.sku || ''})), pays, ret, rit};
 }
 
 // ---------- Ticket ----------
-function ticketText(d, set) {
-  const s = d.s, w = set.ticket_paper === '80mm' ? 42 : 32, ln = '-'.repeat(w);
-  const two = (a, b) => a + ' '.repeat(Math.max(1, w - a.length - b.length)) + b;
-  const paid = covered(d), bal = s.total_usd - paid;
-  const o = [(set.business_name || 'Mi negocio').toUpperCase(), set.business_rif && 'RIF: ' + set.business_rif, set.business_phone, set.business_address, set.ticket_header].filter(Boolean);
-  const docNum = Number(s.id) < 0 ? 'LOC-' + Math.abs(s.id) : s.id;
-  o.push(ln, (s.doc_type === 'factura' ? 'FACTURA' : 'NOTA DE ENTREGA') + ' #' + docNum, fdate(s.created_at), 'Cliente: ' + (s.parties?.name || 'Cliente general'), ln);
-  d.items.forEach(i => o.push(i.name, two(`${qty(i.quantity)} x ${fmt(i.unit_price_usd)}`, fmt(i.quantity * i.unit_price_usd))));
-  o.push(ln, two('Subtotal USD', fmt(s.subtotal_usd)));
-  if (+s.discount_usd) o.push(two('Descuento', '-' + fmt(s.discount_usd)));
-  if (+s.tax_usd) o.push(two('IVA', fmt(s.tax_usd)));
-  o.push(two('TOTAL USD', fmt(s.total_usd)));
-  if (set.ticket_show_bs !== false) o.push(two('TOTAL Bs', fmt(s.total_usd * s.exchange_rate)));
-  if (set.ticket_show_rate) o.push('Tasa: ' + fmt(s.exchange_rate, 4) + ' Bs/USD');
-  if (d.pays.length) { o.push(ln, 'PAGOS'); d.pays.forEach(p => o.push(two(METHODS[p.method] || p.method, fmt(p.amount) + ' ' + p.currency))); }
-  if (bal > 0.01) o.push(two('POR PAGAR USD', fmt(bal)));
-  if (set.ticket_footer) o.push(ln, set.ticket_footer);
-  return o.join('\n');
+function ticketText(d, set, payDetails = '') {
+  return docText(saleDoc(d, set, payDetails), set);
 }
 function printTicket(text, paper) {
   const f = document.createElement('iframe'); f.style.cssText = 'position:fixed;width:0;height:0;border:0'; document.body.appendChild(f);
@@ -51,9 +35,14 @@ function printTicket(text, paper) {
   f.contentWindow.focus(); f.contentWindow.print(); setTimeout(() => f.remove(), 3000);
 }
 async function showTicket(id) {
-  const [d, set] = await Promise.all([saleDetail(id), q(db.from('settings').select('*').eq('id', 1).single())]);
-  const text = ticketText(d, set);
-  const blobP = docBlob(saleDoc(d), text, set).catch(() => null);
+  const [d, set, payTxt] = await Promise.all([
+    saleDetail(id),
+    q(db.from('settings').select('*').eq('id', 1).single()),
+    typeof getPaymentDetailsText === 'function' ? getPaymentDetailsText() : Promise.resolve('')
+  ]);
+  const doc = saleDoc(d, set, payTxt);
+  const text = docText(doc, set);
+  const blobP = docBlob(doc, text, set).catch(() => null);
   const dispId = Number(id) < 0 ? 'LOC-' + Math.abs(id) + ' (Sin conexión)' : '#' + id;
   openSheet('Ticket de venta ' + dispId, `<div id="tPrev"><pre class="ticket">${esc(text)}</pre></div><div class="row"><button class="btn" id="tI">Enviar como foto</button><button class="btn ghost" id="tD">Descargar foto</button></div>
     <div class="row"><button class="btn ghost" id="tP">Imprimir</button><button class="btn ghost" id="tW">Enviar como texto</button></div>`);

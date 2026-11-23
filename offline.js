@@ -41,6 +41,7 @@ const OFF_MIRROR_SPEC = [
   {t: 'expenses', order: 'id', limit: 400},
   {t: 'account_movements', order: 'id', limit: 800},
   {t: 'inventory_movements', order: 'id', limit: 1000},
+  {t: 'inventory_adjustments', order: 'id', limit: 100},
   {t: 'cash_closings', order: 'id', limit: 100},
   {t: 'payroll_runs', order: 'id', limit: 100},
   {t: 'payroll_items', order: 'id', limit: 500},
@@ -1390,16 +1391,40 @@ const OFF = {
     // ---- 5. AJUSTE MASIVO DE INVENTARIO ----
     if (fnName === 'ajuste_masivo2') {
       const mode = P.p_mode || 'conteo';
+      const adjId = this.nextTempId();
       let n = 0, inUsd = 0, outUsd = 0;
+      const logItems = [];
       for (const it of (P.p_items || [])) {
         const st = (this.mem.stock_actual || []).find(x => Number(x.product_id) === Number(it.product_id));
-        const curSt = Number(st?.stock || 0), curCost = Number(st?.avg_cost_usd || 0);
+        const pr = prodById(it.product_id);
+        const curSt = Number(st?.stock || 0), curCost = Number(st?.avg_cost_usd || pr?.avg_cost_usd || 0);
         const delta = mode === 'conteo' ? this.r3(Number(it.qty) - curSt) : mode === 'ingreso' ? this.r3(Math.abs(Number(it.qty))) : this.r3(-Math.abs(Number(it.qty)));
         if (Math.abs(delta) < 0.0004) continue;
         const uc = delta > 0 ? Number(it.unit_cost_usd ?? curCost) : curCost;
-        await this.bumpStock(it.product_id, delta, uc, (delta < 0 && P.p_reason === 'merma') ? 'merma' : 'ajuste', 'ajuste_masivo', null, P.p_note || null, delta > 0 && it.unit_cost_usd != null);
+        await this.bumpStock(it.product_id, delta, uc, (delta < 0 && P.p_reason === 'merma') ? 'merma' : 'ajuste', 'ajuste_masivo', adjId, P.p_note || null, delta > 0 && it.unit_cost_usd != null);
         if (delta > 0) inUsd += delta * uc; else outUsd += Math.abs(delta) * uc;
+        logItems.push({
+          product_id: Number(it.product_id),
+          name: pr?.name || st?.name || ('Producto #' + it.product_id),
+          sku: pr?.sku || st?.sku || null,
+          unit: pr?.unit || st?.unit || 'und',
+          prev_stock: this.r3(curSt),
+          new_stock: this.r3(curSt + delta),
+          delta,
+          unit_cost_usd: this.r4(uc),
+          total_usd: this.r2(Math.abs(delta) * uc)
+        });
         n++;
+      }
+      if (n > 0) {
+        const adjs = this.mem.inventory_adjustments || [];
+        adjs.unshift({
+          id: adjId, mode, reason: P.p_reason || 'otro', note: P.p_note || null,
+          fin_effect: P.p_fin || 'none', account_id: P.p_account_id || null, expense_type_id: P.p_expense_type_id || null,
+          items_count: n, in_usd: this.r2(inUsd), out_usd: this.r2(outUsd),
+          items: logItems, created_by: S?.userName || 'Usuario (local)', created_at: now
+        });
+        await this.saveTable('inventory_adjustments', adjs);
       }
       if (P.p_fin === 'gasto' && outUsd > 0.004) {
         const exps = this.mem.expenses || [];
@@ -1410,8 +1435,8 @@ const OFF = {
         const amt = acc?.currency === 'USD' ? this.r2(inUsd) : this.r2(inUsd * rate);
         await this.bumpAccount(P.p_account_id, -amt, 'pago', P.p_note || 'Pago ajuste ingreso');
       }
-      if (enqueue) await this.enqueueOp({kind: 'rpc', rpc_name: fnName, payload: P, label: `Ajuste masivo (${n} productos)`});
-      return {data: {n, ingreso_usd: this.r2(inUsd), perdida_usd: this.r2(outUsd)}, error: null};
+      if (enqueue) await this.enqueueOp({kind: 'rpc', rpc_name: fnName, payload: P, temp_id: n > 0 ? adjId : null, label: `Ajuste masivo (${n} productos)`});
+      return {data: {n, ingreso_usd: this.r2(inUsd), perdida_usd: this.r2(outUsd), adjustment_id: n > 0 ? adjId : null}, error: null};
     }
 
     // ---- 6. COTIZACIONES ----

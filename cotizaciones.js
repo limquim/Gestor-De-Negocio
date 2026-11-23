@@ -2,25 +2,12 @@
 async function quoteDetail(id) {
   const [s, items] = await Promise.all([
     q(db.from('quotes').select('*, parties(name,phone)').eq('id', id).single()),
-    q(db.from('quote_items').select('product_id,quantity,unit_price_usd,products(name)').eq('quote_id', id).order('id'))
+    q(db.from('quote_items').select('product_id,quantity,unit_price_usd,products(name,sku)').eq('quote_id', id).order('id'))
   ]);
-  return {s, items: items.map(i => ({...i, name: i.products?.name}))};
+  return {s, items: items.map(i => ({...i, name: i.products?.name, sku: i.products?.sku || ''}))};
 }
-function quoteText(d, set) {
-  const s = d.s, w = set.ticket_paper === '80mm' ? 42 : 32, ln = '-'.repeat(w);
-  const two = (a, b) => a + ' '.repeat(Math.max(1, w - a.length - b.length)) + b;
-  const o = [(set.business_name || 'Mi negocio').toUpperCase(), set.business_rif && 'RIF: ' + set.business_rif, set.business_phone, set.business_address,
-    ln, 'COTIZACIÓN #' + s.id, 'Fecha: ' + s.quote_date, s.valid_until && 'Válida hasta: ' + s.valid_until, 'Cliente: ' + (s.parties?.name || 'Cliente general'), ln];
-  d.items.forEach(i => o.push(i.name, two(`${qty(i.quantity)} x ${fmt(i.unit_price_usd)}`, fmt(i.quantity * i.unit_price_usd))));
-  o.push(ln, two('Subtotal USD', fmt(s.subtotal_usd)));
-  if (+s.discount_usd) o.push(two('Descuento', '-' + fmt(s.discount_usd)));
-  if (+s.tax_usd) o.push(two('IVA', fmt(s.tax_usd)));
-  o.push(two('TOTAL USD', fmt(s.total_usd)));
-  if (set.ticket_show_bs !== false) o.push(two('TOTAL Bs', fmt(s.total_usd * s.exchange_rate)));
-  o.push('Tasa: ' + fmt(s.exchange_rate, 4) + ' Bs/USD');
-  if (s.notes) o.push(ln, s.notes);
-  o.push(ln, 'Precios sujetos a cambio según la tasa del día.');
-  return o.filter(Boolean).join('\n');
+function quoteText(d, set, payDetails = '') {
+  return docText(quoteDoc(d, set, payDetails), set);
 }
 
 async function viewCotizaciones() {
@@ -39,7 +26,7 @@ async function viewCotizaciones() {
 
 async function quoteSheet(id) {
   const [d, set, payTxt] = await Promise.all([quoteDetail(id), q(db.from('settings').select('*').eq('id', 1).single()), getPaymentDetailsText()]);
-  const s = d.s, text = quoteText(d, set), blobP = docBlob(quoteDoc(d), text, set).catch(() => null), open = s.status === 'abierta';
+  const s = d.s, doc = quoteDoc(d, set, payTxt), text = docText(doc, set), blobP = docBlob(doc, text, set).catch(() => null), open = s.status === 'abierta';
   openSheet('Cotización #' + id, `<div id="tPrev"><pre class="ticket">${esc(text)}</pre></div>
     <div class="row"><button class="btn" id="qI">Enviar como foto</button><button class="btn ghost" id="qD">Descargar foto</button></div>
     ${payTxt ? '<div class="row"><button class="btn ghost" id="qPay">Enviar datos de pago (WhatsApp)</button></div>' : ''}
