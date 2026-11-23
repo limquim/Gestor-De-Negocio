@@ -102,8 +102,16 @@ const OFF = {
 
   isNetError(err) {
     if (this.isOffline()) return true;
+    if (err instanceof TypeError && /is not a function|cannot read|undefined|null/i.test(String(err.message || ''))) return false;
     const msg = String(err?.message || err || '');
-    return /Failed to fetch|NetworkError|Load failed|NETWORK_TIMEOUT|ERR_INTERNET|ERR_CONNECTION|ECONN|fetch|network|offline|AbortError/i.test(msg);
+    return /Failed to fetch|NetworkError|Load failed|NETWORK_TIMEOUT|ERR_INTERNET|ERR_CONNECTION|ERR_NAME_NOT_RESOLVED|ECONN|Network request failed|appears to be offline|AbortError/i.test(msg);
+  },
+
+  hasAutoSyncOps() {
+    if (!this.ops.length) return false;
+    const first = this.ops[0];
+    if (first.last_error) return false;
+    return true;
   },
 
   withTimeout(promise, ms = 10000) {
@@ -1670,7 +1678,7 @@ const OFF = {
               if (!self.isNetError(err)) return {data: null, error: err};
               // Caída de señal -> continuar al motor local
             }
-          } else if (!self.isOffline() && self.ops.length > 0 && !self.syncing) {
+          } else if (!self.isOffline() && self.hasAutoSyncOps() && !self.syncing) {
             setTimeout(() => self.syncNow(false), 300);
           }
           return self.execLocalSelect(spec);
@@ -1878,6 +1886,7 @@ const OFF = {
       const snapshot = [...this.ops];
       for (const op of snapshot) {
         if (this.isOffline()) { netStopped = true; break; }
+        if (!manual && op.last_error) { break; }
         try {
           const payload = this.resolveIds(op.payload);
           const filters = this.resolveIds(op.filters || []);
@@ -1936,7 +1945,18 @@ const OFF = {
             }
 
             if (hasOpLog && op.rpc_name !== 'registrar_venta_offline') {
-              this.rawDb.rpc('offline_op_mark', {p_op_id: op.op_id, p_action: op.rpc_name || (op.kind + ':' + op.table), p_result: serverRes ?? null}).catch(() => {});
+              try {
+                await this.withTimeout(
+                  this.rawDb.rpc('offline_op_mark', {
+                    p_op_id: op.op_id,
+                    p_action: op.rpc_name || (op.kind + ':' + op.table),
+                    p_result: serverRes ?? null
+                  }),
+                  6000
+                );
+              } catch (markErr) {
+                // Nunca bloquear la eliminación de la cola si el registro de log falla
+              }
             }
           }
 
@@ -2078,7 +2098,7 @@ const OFF = {
     });
 
     setInterval(() => {
-      if (!this.isOffline() && !this.syncing && this.ops.length > 0 && this.rawDb) {
+      if (!this.isOffline() && !this.syncing && this.hasAutoSyncOps() && this.rawDb) {
         this.syncNow(false);
       }
     }, 30000);
@@ -2130,7 +2150,7 @@ async function viewOffline() {
           </div>
           ${op.last_error ? `<small class="bad">Error del servidor: ${esc(op.last_error)}</small>` : ''}
           <div class="row" style="margin-top:.15rem">
-            ${op.last_error ? `<button type="button" class="btn ghost" data-odel="${esc(op.op_id)}" style="color:var(--bad)">Descartar operación</button>` : ''}
+            <button type="button" class="btn ghost" data-odel="${esc(op.op_id)}" style="color:var(--bad)">Descartar de la cola</button>
           </div>
         </div>`).join('')}</div>
         ${qList.some(x => x.last_error) ? '' : '<p class="mut" style="margin:0">Se subirán en orden estricto apenas detecte señal.</p>'}`
@@ -2174,7 +2194,7 @@ async function viewOffline() {
       const dl = e.target.closest('[data-odel]');
       if (!dl) return;
       run(async () => {
-        if (!confirm('¿Descartar esta operación con error de la cola? No se subirá a Supabase.')) return;
+        if (!confirm('¿Quitar esta operación de la cola pendiente? Si ya se guardó en Supabase, puedes descartarla sin problema.')) return;
         await OFF.removeOp(dl.dataset.odel);
         toast('Operación descartada');
         render();

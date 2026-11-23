@@ -1,5 +1,5 @@
 // Seguridad: roles y permisos, bitácora de cambios y estado del sistema
-const APP_VERSION = '23';
+const APP_VERSION = '24';
 const ROLE_NAMES = {admin: 'Administrador', vendedor: 'Vendedor', almacen: 'Almacén', contador: 'Contador'};
 const ACCESS = {   // secciones que ve cada rol (el administrador ve todo)
   vendedor: ['ventas', 'inventario', 'marketing', 'directorios'],
