@@ -367,6 +367,8 @@ const OFF = {
         registrar_compra: 'Compra',
         registrar_pago_compra: 'Pago de compra',
         anular_compra: 'Anular compra',
+        pagar_compras: 'Pago múltiple a proveedor',
+        actualizar_compra: 'Modificar compra',
         registrar_gasto: 'Gasto',
         anular_gasto: 'Anular gasto',
         registrar_transferencia: 'Transferencia',
@@ -1312,6 +1314,106 @@ const OFF = {
       }
       if (enqueue) await this.enqueueOp({kind: 'rpc', rpc_name: fnName, payload: P, label: `Anular compra #${id}`});
       return {data: {ok: true, id}, error: null};
+    }
+
+    if (fnName === 'pagar_compras') {
+      const ids = (P.p_purchase_ids || []).map(Number);
+      const acc = accById(P.p_account_id);
+      const cur = acc?.currency || 'USD';
+      const amt = this.r2(P.p_amount);
+      let remUsd = this.r2(this.toUsdLocal(amt, cur, rate));
+      let pagadas = 0, abonadas = 0, pendUsd = 0;
+      const pays = this.mem.payments || [];
+      for (const pid of ids) {
+        const cr = (this.mem.compras_resumen || []).find(x => Number(x.id) === pid);
+        if (!cr || cr.status !== 'registrada') continue;
+        const bal = Math.max(0, Number(cr.total_usd || 0) - Number(cr.paid_usd || 0));
+        const app = Math.min(bal, Math.max(0, remUsd));
+        remUsd = this.r2(remUsd - app);
+        if (app > 0.004) {
+          const origAmt = cur === 'USD' ? this.r2(app) : this.r2(app * rate);
+          pays.push({id: this.nextTempId(), sale_id: null, purchase_id: pid, account_id: Number(P.p_account_id), method: P.p_method || 'efectivo', currency: cur, amount: origAmt, amount_usd: this.r2(app), exchange_rate: rate, reference: P.p_reference || null, paid_at: now, created_at: now});
+          cr.paid_usd = this.r2(Number(cr.paid_usd || 0) + app);
+          if (cr.paid_usd >= Number(cr.total_usd || 0) - 0.01) {
+            cr.status = 'pagada'; pagadas++;
+            const b = (this.mem.purchases || []).find(x => Number(x.id) === pid);
+            if (b) b.status = 'pagada';
+          } else { abonadas++; }
+        }
+        pendUsd += Math.max(0, Number(cr.total_usd || 0) - Number(cr.paid_usd || 0));
+      }
+      await this.saveTable('payments', pays);
+      await this.saveTable('compras_resumen', this.mem.compras_resumen || []);
+      await this.saveTable('purchases', this.mem.purchases || []);
+      await this.bumpAccount(P.p_account_id, -amt, 'pago', 'Pago múltiple a proveedor');
+      if (enqueue) await this.enqueueOp({kind: 'rpc', rpc_name: fnName, payload: P, label: `Pago proveedor · ${fmt(this.toUsdLocal(amt, cur, rate))} USD`});
+      return {data: {pagadas, abonadas, pendiente_usd: this.r2(pendUsd)}, error: null};
+    }
+
+    if (fnName === 'actualizar_compra') {
+      const pid = Number(P.p_id);
+      const cur = P.p_currency || 'USD';
+      const items = P.p_items || [];
+      const b = (this.mem.purchases || []).find(x => Number(x.id) === pid);
+      const oldItems = (this.mem.purchase_items || []).filter(x => Number(x.purchase_id) === pid);
+
+      let totalUsd = Number(b?.total_usd || 0);
+      if (items.length > 0) {
+        // Revertir stock de ítems anteriores localmente
+        for (const oi of oldItems) {
+          await this.bumpStock(oi.product_id, -Math.abs(Number(oi.quantity)), oi.unit_cost_usd, 'ajuste', 'purchase', pid, 'Corrección compra #' + pid);
+        }
+        totalUsd = 0;
+        const newItems = [];
+        for (const it of items) {
+          const uUsd = this.r4(this.toUsdLocal(it.unit_cost, cur, rate));
+          totalUsd += Number(it.quantity) * uUsd;
+          newItems.push({id: this.nextTempId(), purchase_id: pid, product_id: Number(it.product_id), quantity: Number(it.quantity), unit_cost_usd: uUsd});
+          await this.bumpStock(it.product_id, Number(it.quantity), uUsd, 'compra', 'purchase', pid, P.p_notes || null, true);
+        }
+        totalUsd = this.r2(totalUsd);
+        await this.saveTable('purchase_items', [...(this.mem.purchase_items || []).filter(x => Number(x.purchase_id) !== pid), ...newItems]);
+      }
+
+      if (P.p_replace_payments) {
+        const oldPays = (this.mem.payments || []).filter(p => Number(p.purchase_id) === pid);
+        for (const op of oldPays) await this.bumpAccount(op.account_id, Math.abs(Number(op.amount)), 'anulacion', 'Corrección compra #' + pid);
+        const keptPays = (this.mem.payments || []).filter(p => Number(p.purchase_id) !== pid);
+        for (const py of (P.p_payments || [])) {
+          const acc = accById(py.account_id), pcur = acc?.currency || 'USD';
+          const amt = this.r2(py.amount), usd = this.r2(this.toUsdLocal(amt, pcur, rate));
+          if (amt <= 0) continue;
+          keptPays.push({id: this.nextTempId(), sale_id: null, purchase_id: pid, account_id: Number(py.account_id), method: py.method || 'efectivo', currency: pcur, amount: amt, amount_usd: usd, exchange_rate: rate, reference: py.reference || null, paid_at: now, created_at: now});
+          await this.bumpAccount(py.account_id, -amt, 'pago', 'Pago compra #' + pid);
+        }
+        await this.saveTable('payments', keptPays);
+      }
+
+      const paidUsd = this.r2((this.mem.payments || []).filter(p => Number(p.purchase_id) === pid).reduce((s, p) => s + Number(p.amount_usd || 0), 0));
+      const status = paidUsd >= totalUsd - 0.01 ? 'pagada' : 'registrada';
+      const sup = partyById(P.p_supplier_id);
+      if (b) {
+        Object.assign(b, {
+          supplier_id: P.p_supplier_id || null,
+          purchase_date: P.p_purchase_date || b.purchase_date,
+          currency: cur, exchange_rate: rate, total_usd: totalUsd,
+          due_date: P.p_due_date || null, notes: P.p_notes || null, status
+        });
+        await this.saveTable('purchases', this.mem.purchases);
+      }
+      const cr = (this.mem.compras_resumen || []).find(x => Number(x.id) === pid);
+      if (cr) {
+        Object.assign(cr, {
+          supplier_id: P.p_supplier_id || null,
+          supplier: sup?.name || 'Sin proveedor',
+          purchase_date: P.p_purchase_date || cr.purchase_date,
+          exchange_rate: rate, total_usd: totalUsd, paid_usd: paidUsd,
+          due_date: P.p_due_date || null, status
+        });
+        await this.saveTable('compras_resumen', this.mem.compras_resumen);
+      }
+      if (enqueue) await this.enqueueOp({kind: 'rpc', rpc_name: fnName, payload: P, label: `Modificar compra #${pid} · ${fmt(totalUsd)} USD`});
+      return {data: pid, error: null};
     }
 
     // ---- 4. FINANZAS (GASTOS, TRANSFERENCIAS, AJUSTES, CAPITAL, CIERRE, MÉTODOS) ----

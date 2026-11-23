@@ -61,7 +61,7 @@ views.inventario = page('Inventario', async () => {
   if (S.role === 'vendedor') { delete subs.productos; delete subs.ajuste; }
   await withSubs('inv', subs, fns)();
 }, false);
-views.compras = page('Compras', withSubs('com', {nueva: 'Nueva compra', sugerida: 'Reposición sugerida', historial: 'Historial'}, {nueva: viewCompra, sugerida: viewSugerida, historial: viewHistCompras}));
+views.compras = page('Compras', withSubs('com', {nueva: 'Nueva compra', sugerida: 'Reposición sugerida', historial: 'Historial', pagar: 'Por pagar'}, {nueva: viewCompra, sugerida: viewSugerida, historial: viewHistCompras, pagar: viewDeudasProv}));
 views.ventas = page('Ventas', withSubs('ven', {nueva: 'Nueva venta', cotizaciones: 'Cotizaciones', historial: 'Historial', devoluciones: 'Devoluciones', cobrar: 'Por cobrar'}, {nueva: viewVenta, cotizaciones: viewCotizaciones, historial: viewHistVentas, devoluciones: viewDevoluciones, cobrar: viewDeudas}), false);
 views.produccion = page('Producciones', async () => {
   const subs = {producir: 'Producir', formulas: 'Fórmulas', historial: 'Historial'}, fns = {producir: viewProducir, formulas: viewFormulas, historial: viewHistorialProd};

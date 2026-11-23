@@ -1,5 +1,5 @@
-// Compras: nueva compra (igual que ventas), historial, detalle y pagos a proveedores
-const CV = {cart: [], pays: []}, CH = {f: 'all', q: '', from: '', to: ''};
+// Compras: nueva compra o modificación, historial con filtros, anulación y pagos a proveedores
+const CV = {cart: [], pays: [], edit: null}, CH = {f: 'all', q: '', from: '', to: ''};
 const r2 = (n) => Math.round(n * 100) / 100;
 
 async function cData() {
@@ -11,27 +11,82 @@ async function cData() {
   return {products, sups, accs};
 }
 
+async function purchaseDetail(id) {
+  const [b, items, pays] = await Promise.all([
+    q(db.from('purchases').select('*, parties(name,phone)').eq('id', id).single()),
+    q(db.from('purchase_items').select('product_id,quantity,unit_cost_usd,products(name,unit)').eq('purchase_id', id).order('id')),
+    q(db.from('payments').select('account_id,method,currency,amount,amount_usd,exchange_rate,reference,accounts(name)').eq('purchase_id', id).order('id'))
+  ]);
+  return {b, items, pays};
+}
+
 async function viewCompra() {
+  if (CV.pre && CV.pre.length) CV.edit = null;
   const D = await cData(), pm = Object.fromEntries(D.products.map(p => [p.id, p]));
-  CV.cart = []; CV.pays = [];
-  $('#view').innerHTML = `<div class="card stack">
-    <div class="row0"><label style="flex:1">Proveedor<select id="cSup"><option value="">Sin proveedor</option>${D.sups.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}</select></label><button class="btn ghost" type="button" id="cNewS" aria-label="Nuevo proveedor">+</button></div>
-    <div class="grid"><label>Moneda de la factura<select id="cCur"><option value="USD">Dólares (USD)</option><option value="VES">Bolívares (Bs)</option></select></label>
-      <label>Tasa (Bs por USD)<input id="cRate" type="number" step="0.0001" min="0.0001"></label></div></div>
-  <div class="card"><h2>Productos</h2><div class="scan-row"><input id="cSearch" type="search" placeholder="Buscar producto o escanear código"><button type="button" class="icon-btn scan-btn" id="cScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div><div class="list" id="cRes" style="margin:.5rem 0"></div><div id="cCart"></div></div>
+  const old = CV.edit ? await purchaseDetail(CV.edit) : null;
+  if (old && old.b.status === 'anulada') {
+    toast('No se puede modificar una compra anulada', true);
+    CV.edit = null;
+  }
+  const editing = old && old.b.status !== 'anulada';
+  const initCur = editing ? (old.b.currency || 'USD') : 'USD';
+  const initRate = editing ? (+old.b.exchange_rate || S.rate || 1) : (S.rate || '');
+  const line = (pid, qv = 1, costInCur = null) => {
+    const p = pm[pid], u = +p?.last_cost_usd || +p?.avg_cost_usd || 0;
+    const rt = Number($('#cRate')?.value || initRate || S.rate || 0);
+    const cDef = initCur === 'USD' ? u : u * rt;
+    return {pid, name: p?.name || ('Producto #' + pid), unit: p?.unit || 'und', qty: qv, cost: costInCur != null ? costInCur : r2(cDef)};
+  };
+
+  CV.cart = editing
+    ? old.items.map(i => {
+        const cVal = initCur === 'VES' ? r2(+i.unit_cost_usd * (+old.b.exchange_rate || 1)) : r2(+i.unit_cost_usd);
+        return {pid: i.product_id, name: i.products?.name || pm[i.product_id]?.name || ('Producto #' + i.product_id), unit: i.products?.unit || pm[i.product_id]?.unit || 'und', qty: +i.quantity, cost: cVal};
+      })
+    : [];
+  CV.pays = editing
+    ? old.pays.map(p => ({acc: p.account_id, method: p.method || 'efectivo', amount: +p.amount, ref: p.reference || ''}))
+    : [];
+  const origPaysSnap = JSON.stringify(CV.pays);
+  const openingNoItems = editing && old.items.length === 0;
+
+  $('#view').innerHTML = `${editing ? `<div class="card title-row"><b>Corrigiendo la compra #${CV.edit}</b><button class="lnk" id="cCancel">Cancelar</button></div>` : ''}
+  <div class="card stack">
+    <div class="row0"><label style="flex:1">Proveedor<select id="cSup"><option value="">Sin proveedor</option>${D.sups.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}${editing && old.b.supplier_id && !D.sups.some(s => String(s.id) === String(old.b.supplier_id)) ? `<option value="${old.b.supplier_id}">${esc(old.b.parties?.name || ('Proveedor #' + old.b.supplier_id))}</option>` : ''}</select></label><button class="btn ghost" type="button" id="cNewS" aria-label="Nuevo proveedor">+</button></div>
+    <div class="grid">
+      ${editing ? `<label>Fecha de compra<input id="cDate" type="date" value="${esc(old.b.purchase_date || caracasDate())}"></label>` : ''}
+      <label>Moneda de la factura<select id="cCur"><option value="USD">Dólares (USD)</option><option value="VES">Bolívares (Bs)</option></select></label>
+      <label>Tasa (Bs por USD)<input id="cRate" type="number" step="0.0001" min="0.0001"></label>
+    </div>
+  </div>
+  <div class="card"><h2>Productos</h2>
+    ${openingNoItems ? '<p class="mut" style="margin:0 0 .5rem">Esta compra viene de saldo inicial (sin detalle de artículos). Puedes modificar sus datos arriba o agregar productos.</p>' : ''}
+    <div class="scan-row"><input id="cSearch" type="search" placeholder="Buscar producto o escanear código"><button type="button" class="icon-btn scan-btn" id="cScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div><div class="list" id="cRes" style="margin:.5rem 0"></div><div id="cCart"></div>
+  </div>
   <div class="card"><h2>Total</h2><div id="cTot"></div></div>
   <div class="card"><h2>Pagos</h2><div id="cPays"></div><div class="row"><button class="btn ghost" type="button" id="cAddPay">Agregar pago</button></div>
     <p id="cBal"></p><label id="cDueW" class="hidden">Fecha límite del saldo<input id="cDue" type="date"></label></div>
   <label>Nota o N.° de factura<input id="cNotes"></label>
-  <div class="row"><button class="btn" id="cGo">Registrar compra</button></div>`;
-  $('#cRate').value = S.rate || '';
-  let pcur = 'USD';
+  <div class="row"><button class="btn" id="cGo">${editing ? 'Guardar corrección' : 'Registrar compra'}</button></div>`;
+
+  $('#cCur').value = initCur;
+  $('#cRate').value = initRate;
+  if (editing) {
+    $('#cSup').value = old.b.supplier_id || '';
+    $('#cDue').value = old.b.due_date || '';
+    $('#cNotes').value = old.b.notes || '';
+  }
+
+  let pcur = initCur;
   const cur = () => $('#cCur').value, rate = () => +$('#cRate').value || 0;
   const inUsd = (v) => cur() === 'USD' ? v : (rate() ? v / rate() : 0);
   const payUsd = (p) => { const a = D.accs.find(x => x.id === +p.acc); return !a ? 0 : a.currency === 'USD' ? p.amount : (rate() ? p.amount / rate() : 0); };
-  const line = (pid) => { const p = pm[pid], u = +p.last_cost_usd || +p.avg_cost_usd || 0; return {pid, name: p.name, unit: p.unit, qty: 1, cost: r2(cur() === 'USD' ? u : u * rate())}; };
+  const newLine = (pid) => { const p = pm[pid], u = +p.last_cost_usd || +p.avg_cost_usd || 0; return {pid, name: p.name, unit: p.unit, qty: 1, cost: r2(cur() === 'USD' ? u : u * rate())}; };
+
   const totals = () => {
-    const tot = CV.cart.reduce((a, c) => a + c.qty * inUsd(c.cost), 0), paid = CV.pays.reduce((a, p) => a + payUsd(p), 0), bal = tot - paid, rt = rate();
+    const cartTot = CV.cart.reduce((a, c) => a + c.qty * inUsd(c.cost), 0);
+    const tot = (openingNoItems && !CV.cart.length) ? +old.b.total_usd : cartTot;
+    const paid = CV.pays.reduce((a, p) => a + payUsd(p), 0), bal = tot - paid, rt = rate();
     $('#cTot').innerHTML = `<span class="big">${fmt(tot)} USD</span><br><span class="mut">${fmt(tot * rt)} Bs a la tasa indicada</span>`;
     $('#cBal').innerHTML = `Pagado: <b>${fmt(paid)} USD</b> | ` + (bal > 0.01 ? `<span class="warn">Queda por pagar: <b>${fmt(bal)} USD</b> (${fmt(bal * rt)} Bs)</span>` : bal < -0.01 ? `<span class="warn">El pago supera el total por ${fmt(-bal)} USD</span>` : 'Pago completo');
     $('#cDueW').classList.toggle('hidden', !(bal > 0.01));
@@ -47,7 +102,7 @@ async function viewCompra() {
   const drawCart = () => {
     $('#cCart').innerHTML = CV.cart.map((c, i) => `<div class="pl" data-i="${i}"><div><b>${esc(c.name)}</b><small class="lt"></small><button class="lnk bad" data-rm="${i}">Quitar</button></div>
       <div class="stack" style="gap:.3rem"><label>Cant. (${esc(c.unit)})<input data-f="qty" type="number" step="0.001" min="0.001" value="${c.qty}"></label>
-      <label>Costo (${cur() === 'USD' ? 'USD' : 'Bs'})<input data-f="cost" type="number" step="0.01" min="0" value="${c.cost}"></label></div></div>`).join('') || '<p class="mut">Busca y agrega productos.</p>';
+      <label>Costo (${cur() === 'USD' ? 'USD' : 'Bs'})<input data-f="cost" type="number" step="0.01" min="0" value="${c.cost}"></label></div></div>`).join('') || (openingNoItems ? '<p class="mut">Sin artículos detallados (mantiene el monto inicial).</p>' : '<p class="mut">Busca y agrega productos.</p>');
     totals();
   };
   const drawPays = () => {
@@ -58,8 +113,13 @@ async function viewCompra() {
       <small class="mut eq"></small><button class="lnk bad" data-rmp="${i}">Quitar pago</button></div>`).join('') || '<p class="mut">Sin pagos: la compra quedará por pagar.</p>';
     totals();
   };
-  (CV.pre || []).forEach(x => { if (pm[x.pid]) { const l = line(x.pid); l.qty = x.qty; CV.cart.push(l); } }); CV.pre = null;
+  if (!editing) {
+    (CV.pre || []).forEach(x => { if (pm[x.pid]) { const l = newLine(x.pid); l.qty = x.qty; CV.cart.push(l); } });
+    CV.pre = null;
+  }
   drawCart(); drawPays();
+
+  if ($('#cCancel')) $('#cCancel').onclick = () => { CV.edit = null; render(); };
 
   $('#cSearch').oninput = (e) => {
     const t = e.target.value.trim().toLowerCase();
@@ -70,7 +130,7 @@ async function viewCompra() {
     if (!p) return {ok: false, msg: 'Código no registrado: ' + code};
     const ex = CV.cart.find(c => c.pid === p.id);
     if (ex) ex.qty = Math.round((ex.qty + 1) * 1000) / 1000;
-    else CV.cart.push(line(p.id));
+    else CV.cart.push(newLine(p.id));
     drawCart();
     const curQ = CV.cart.find(c => c.pid === p.id)?.qty || 1;
     return {ok: true, msg: `${p.name} (x${qty(curQ)})`};
@@ -88,7 +148,7 @@ async function viewCompra() {
   });
   $('#cRes').onclick = (e) => {
     const b = e.target.closest('[data-add]'); if (!b) return;
-    const id = +b.dataset.add, ex = CV.cart.find(c => c.pid === id); if (ex) ex.qty++; else CV.cart.push(line(id));
+    const id = +b.dataset.add, ex = CV.cart.find(c => c.pid === id); if (ex) ex.qty++; else CV.cart.push(newLine(id));
     $('#cSearch').value = ''; $('#cRes').innerHTML = ''; drawCart();
   };
   $('#cCart').addEventListener('input', (e) => { const l = e.target.closest('.pl'); if (l && e.target.dataset.f) { CV.cart[+l.dataset.i][e.target.dataset.f] = +e.target.value || 0; totals(); } });
@@ -118,12 +178,44 @@ async function viewCompra() {
     $('#cSup').insertAdjacentHTML('beforeend', `<option value="${s.id}">${esc(name)}</option>`); $('#cSup').value = s.id;
   });
   $('#cGo').onclick = () => run(async () => {
-    if (!CV.cart.length) throw new Error('Agrega al menos un producto');
-    const t = totals(); if (t.paid > t.tot + 0.01) throw new Error('El pago supera el total de la compra. Ajusta los montos.');
+    if (!CV.cart.length && !openingNoItems) throw new Error('Agrega al menos un producto');
+    const t = totals();
+    if (t.paid > t.tot + 0.01) throw new Error('El pago supera el total de la compra. Ajusta los montos en la sección Pagos.');
+    const cleanPays = CV.pays.filter(x => +x.amount > 0).map(p => ({account_id: +p.acc, method: p.method, amount: +p.amount, reference: p.ref || null}));
+
+    if (editing) {
+      const paysChanged = JSON.stringify(CV.pays) !== origPaysSnap;
+      try {
+        await q(db.rpc('actualizar_compra', {
+          p_id: CV.edit,
+          p_supplier_id: +$('#cSup').value || null,
+          p_currency: cur(),
+          p_rate: rate(),
+          p_due_date: $('#cDue').value || null,
+          p_notes: $('#cNotes').value.trim() || null,
+          p_items: CV.cart.map(c => ({product_id: c.pid, quantity: c.qty, unit_cost: c.cost})),
+          p_purchase_date: $('#cDate')?.value || old.b.purchase_date || null,
+          p_replace_payments: paysChanged,
+          p_payments: paysChanged ? cleanPays : []
+        }));
+      } catch (err) {
+        if (err.code === 'PGRST202' || /actualizar_compra/i.test(err.message || '')) {
+          throw new Error('Falta ejecutar 29_pagar_compras_y_editar_compra.sql en Supabase (SQL Editor).');
+        }
+        throw err;
+      }
+      const editedId = CV.edit;
+      CV.edit = null;
+      toast('Compra #' + editedId + ' modificada. Stock, costos y saldos actualizados.');
+      SUB.com = 'historial';
+      render();
+      return;
+    }
+
     const id = await q(db.rpc('registrar_compra', {p_supplier_id: +$('#cSup').value || null, p_currency: cur(), p_rate: rate(), p_notes: $('#cNotes').value.trim() || null,
       p_items: CV.cart.map(c => ({product_id: c.pid, quantity: c.qty, unit_cost: c.cost}))}));
     let perr = null;
-    try { for (const p of CV.pays.filter(x => +x.amount > 0)) await q(db.rpc('registrar_pago_compra', {p_purchase_id: id, p_account_id: +p.acc, p_method: p.method, p_amount: +p.amount, p_reference: p.ref || null, p_rate: rate()})); }
+    try { for (const p of cleanPays) await q(db.rpc('registrar_pago_compra', {p_purchase_id: id, p_account_id: p.account_id, p_method: p.method, p_amount: p.amount, p_reference: p.reference, p_rate: rate()})); }
     catch (e) { perr = e.message || 'error desconocido'; }
     if ($('#cDue').value) await q(db.from('purchases').update({due_date: $('#cDue').value}).eq('id', id));
     if (perr) toast('Compra #' + id + ' registrada, pero un pago falló: ' + perr + '. Revísalo en el historial.', true);
@@ -207,11 +299,7 @@ async function viewHistCompras() {
 }
 
 async function purchaseSheet(id) {
-  const [b, items, pays] = await Promise.all([
-    q(db.from('purchases').select('*, parties(name,phone)').eq('id', id).single()),
-    q(db.from('purchase_items').select('product_id,quantity,unit_cost_usd,products(name,unit)').eq('purchase_id', id)),
-    q(db.from('payments').select('method,currency,amount,amount_usd,exchange_rate,accounts(name)').eq('purchase_id', id).order('id'))
-  ]);
+  const {b, items, pays} = await purchaseDetail(id);
   const paid = pays.reduce((a, p) => a + +p.amount_usd, 0), bal = Math.max(0, b.total_usd - paid);
   const anul = b.status === 'anulada', open = !anul && bal > 0.01;
   const idLbl = Number(id) < 0 ? 'LOC-' + Math.abs(id) + ' (Sin subir)' : '#' + id;
@@ -226,13 +314,24 @@ async function purchaseSheet(id) {
     ${pays.length ? `<p class="mut">${pays.map(p => `${METHODS[p.method] || p.method} (${esc(p.accounts?.name)}): ${fmt(p.amount)} ${p.currency === 'USD' ? 'USD' : 'Bs'} a tasa ${fmt(p.exchange_rate, 2)}`).join('<br>')}</p>` : ''}
     <div class="row">
       ${open ? '<button class="btn" id="pcPay">Registrar pago</button>' : ''}
-      ${items.length ? '<button class="btn ghost" id="pcDup">Duplicar compra</button>' : ''}
-      ${!anul ? '<button class="btn ghost" id="pcAnu" style="color:var(--bad)">Anular compra</button>' : ''}
+      ${!anul ? '<button class="btn ghost" id="pcEdit">Modificar</button>' : ''}
+      ${items.length ? '<button class="btn ghost" id="pcDup">Duplicar</button>' : ''}
+      ${!anul ? '<button class="btn ghost" id="pcAnu" style="color:var(--bad)">Anular</button>' : ''}
     </div>`);
 
   if (open) $('#pcPay').onclick = () => run(() => debtForm({title: 'Registrar pago', label: 'Debes', rpc: 'registrar_pago_compra', args: {p_purchase_id: id}, bal}));
+  if (!anul) {
+    $('#pcEdit').onclick = () => {
+      CV.edit = id;
+      CV.pre = null;
+      SUB.com = 'nueva';
+      closeSheet();
+      go('compras');
+    };
+  }
   if (items.length) {
     $('#pcDup').onclick = () => {
+      CV.edit = null;
       CV.pre = items.map(i => ({pid: i.product_id, qty: +i.quantity}));
       SUB.com = 'nueva';
       closeSheet();
@@ -260,7 +359,170 @@ async function purchaseSheet(id) {
   }
 }
 
-// ---------- Cobro o pago de una deuda: queda en USD y se convierte con la tasa del día de pago ----------
+// ---------- Deuda general con cada proveedor (Por pagar — espejo de Por cobrar a clientes) ----------
+async function viewDeudasProv() {
+  const [openPurs, parties] = await Promise.all([
+    q(db.from('compras_resumen').select('*').eq('status', 'registrada').order('purchase_date').order('id')),
+    q(db.from('parties').select('id,name,phone').eq('is_supplier', true))
+  ]);
+  const hoy = caracasDate();
+  const partyMap = Object.fromEntries(parties.map(p => [String(p.id), p]));
+  const grouped = {};
+  openPurs.forEach(c => {
+    const bal = r2(Math.max(0, Number(c.total_usd || 0) - Number(c.paid_usd || 0)));
+    if (bal <= 0.01) return;
+    const key = c.supplier_id == null ? 'null' : String(c.supplier_id);
+    const p = c.supplier_id != null ? partyMap[key] : null;
+    if (!grouped[key]) {
+      grouped[key] = {
+        supplier_id: c.supplier_id ?? null,
+        supplier: c.supplier || p?.name || 'Sin proveedor',
+        phone: p?.phone || null,
+        num_compras: 0,
+        vencidas: 0,
+        debt_usd: 0,
+        desde: c.purchase_date
+      };
+    }
+    grouped[key].num_compras++;
+    if (c.due_date && c.due_date < hoy) grouped[key].vencidas++;
+    grouped[key].debt_usd = r2(grouped[key].debt_usd + bal);
+    if (c.purchase_date && (!grouped[key].desde || c.purchase_date < grouped[key].desde)) grouped[key].desde = c.purchase_date;
+  });
+
+  const rows = Object.values(grouped).sort((a, b) => b.debt_usd - a.debt_usd);
+  const tot = rows.reduce((a, r) => a + r.debt_usd, 0);
+
+  $('#view').innerHTML = `<div class="stat warn" style="margin-bottom:1rem">
+      <span>Total por pagar</span>
+      <b>${fmt(tot)} USD</b>
+      <span>${S.rate ? fmt(tot * S.rate) + ' Bs a la tasa de hoy | ' : ''}${rows.length} ${rows.length === 1 ? 'proveedor' : 'proveedores'}</span>
+    </div>
+    <div class="list" id="dpL">${rows.map((r, i) => `<button class="item" data-i="${i}">
+      <span>
+        <b>${esc(r.supplier)}</b>
+        <small>${r.num_compras} ${r.num_compras === 1 ? 'compra pendiente' : 'compras pendientes'}${r.vencidas ? ` · <span class="bad">${r.vencidas} ${r.vencidas === 1 ? 'vencida' : 'vencidas'}</span>` : ''} | desde hace ${diasDesde(r.desde)} días</small>
+      </span>
+      <span class="n"><b>${fmt(r.debt_usd)} USD</b><small>${S.rate ? fmt(r.debt_usd * S.rate) + ' Bs hoy' : ''}</small></span>
+    </button>`).join('') || '<p class="mut">No le debes a ningún proveedor.</p>'}</div>`;
+
+  $('#dpL').onclick = (e) => {
+    const b = e.target.closest('[data-i]');
+    if (b) run(() => supplierDebtSheet(rows[+b.dataset.i]));
+  };
+}
+
+async function supplierDebtSheet(sup) {
+  let qb = db.from('compras_resumen').select('id,purchase_date,total_usd,paid_usd,due_date').eq('status', 'registrada').order('purchase_date').order('id');
+  qb = sup.supplier_id === null ? qb.is('supplier_id', null) : qb.eq('supplier_id', sup.supplier_id);
+  const [pursRaw, accs] = await Promise.all([q(qb), loadActiveAccounts()]);
+  const hoy = caracasDate(), bal = (p) => Math.max(0, Number(p.total_usd || 0) - Number(p.paid_usd || 0));
+  const purs = pursRaw.filter(p => bal(p) > 0.01);
+  if (!purs.length) { toast('Este proveedor ya no tiene saldo pendiente'); render(); return; }
+  const total = purs.reduce((a, p) => a + bal(p), 0);
+
+  openSheet(esc(sup.supplier), `<form id="dpF" class="stack">
+    <p><b>Deuda total: ${fmt(total)} USD</b>${S.rate ? ' (' + fmt(total * S.rate) + ' Bs a la tasa de hoy)' : ''}</p>
+    <p class="mut">Marca las compras que vas a pagar. Si el monto no alcanza para todas, se pagan completas las más antiguas y la siguiente queda con un abono y el resto abierto.</p>
+    <div class="list" id="dpS">${purs.map(p => `<div class="item">
+      <label class="chk" style="flex:1"><input type="checkbox" data-p="${p.id}" checked>
+        <span><b>Compra #${p.id}</b>
+          <small>${dmy(p.purchase_date)}${p.due_date && p.due_date < hoy ? ' | vencida' : ''} | debes ${fmt(bal(p))} USD</small>
+          <small class="al" style="display:block"></small>
+        </span>
+      </label>
+    </div>`).join('')}</div>
+    <label>Pagar desde la cuenta<select name="acc">${acctOpts(accs)}</select></label>
+    <small id="dpAccBal" style="display:block;margin-top:-.45rem"></small>
+    <label>Tasa de cambio (Bs por USD)<input name="rate" type="number" step="0.0001" min="0.0001" value="${S.rate || ''}"></label>
+    <label>Método<select name="method"></select></label>
+    <label>Monto a pagar<input name="amount" type="number" step="0.01" min="0.01" required></label>
+    <p class="mut" id="dpSum"></p>
+    <label>Referencia<input name="ref" placeholder="N.° de transferencia o recibo"></label>
+    <div class="row">
+      <button class="btn" type="submit" id="dpGo">Registrar pago</button>
+      ${sup.phone ? '<button class="btn ghost" type="button" id="dpWa">WhatsApp</button>' : ''}
+    </div>
+  </form>`);
+
+  const el = $('#dpF').elements;
+  const curAcc = () => accs.find(a => String(a.id) === el.acc.value);
+  const cur = () => curAcc().currency;
+  const factor = () => cur() === 'USD' ? 1 : (+el.rate.value || 0);
+  const chosen = (p) => document.querySelector(`[data-p="${p.id}"]`).checked;
+  const selDebt = () => purs.filter(chosen).reduce((a, p) => a + bal(p), 0);
+  const alloc = () => {
+    let rem = (num(el.amount.value) || 0) / (factor() || 1);
+    return purs.map(p => {
+      if (!chosen(p)) return {p, a: 0, st: ''};
+      const a = Math.min(bal(p), Math.max(rem, 0));
+      rem -= a;
+      return {p, a, st: a >= bal(p) - 0.01 ? 'full' : a > 0.004 ? 'part' : 'none'};
+    });
+  };
+  const paint = () => {
+    const amt = num(el.amount.value) || 0;
+    const al = alloc(), usd = al.reduce((x, y) => x + y.a, 0), sel = selDebt(), over = amt / (factor() || 1) - sel;
+    al.forEach(x => {
+      const l = document.querySelector(`[data-p="${x.p.id}"]`).closest('.item').querySelector('.al');
+      l.className = 'al ' + (x.st === 'full' ? 'in' : x.st === 'part' ? 'warn' : 'mut');
+      l.style.display = 'block';
+      l.textContent = x.st === 'full' ? 'Se paga completa' : x.st === 'part' ? `Abono de ${fmt(x.a)} USD: queda abierta debiendo ${fmt(bal(x.p) - x.a)} USD` : x.st === 'none' ? 'No alcanza: queda pendiente' : '';
+    });
+    $('#dpSum').textContent = over > 0.02
+      ? `El monto supera la deuda de las compras elegidas por ${fmt(over)} USD.`
+      : `Pagarás ${fmt(usd)} USD. Quedan pendientes ${fmt(Math.max(sel - usd, 0))} USD de las compras elegidas.`;
+    if ($('#dpAccBal')) $('#dpAccBal').innerHTML = accBalanceLine(curAcc(), amt, true);
+  };
+  const fillM = () => { el.method.innerHTML = optList(accMethods(curAcc())); };
+  let pf = factor();
+  const fill = () => { pf = factor(); el.amount.value = (selDebt() * pf).toFixed(2); paint(); };
+  const conv = () => { const nf = factor(), usd = pf ? (num(el.amount.value) || 0) / pf : selDebt(); pf = nf; el.amount.value = (usd * nf).toFixed(2); paint(); };
+  fillM(); fill();
+  $('#dpS').addEventListener('change', fill);
+  el.acc.onchange = () => { fillM(); conv(); };
+  el.rate.oninput = conv;
+  el.amount.oninput = paint;
+
+  $('#dpF').onsubmit = (e) => {
+    e.preventDefault();
+    run(async () => {
+      const ids = purs.filter(chosen).map(p => p.id);
+      if (!ids.length) throw new Error('Marca al menos una compra');
+      const amt = num(el.amount.value), sel = selDebt(), over = amt / (factor() || 1) - sel;
+      if (over > 0.02) throw new Error(`El monto supera la deuda seleccionada (${fmt(sel)} USD)`);
+      let res;
+      try {
+        res = await q(db.rpc('pagar_compras', {
+          p_purchase_ids: ids,
+          p_account_id: +el.acc.value,
+          p_method: el.method.value,
+          p_amount: amt,
+          p_reference: el.ref.value.trim() || null,
+          p_rate: +el.rate.value || null
+        }));
+      } catch (err) {
+        if (err.code === 'PGRST202' || /pagar_compras/i.test(err.message || '')) {
+          throw new Error('Falta ejecutar 29_pagar_compras_y_editar_compra.sql en Supabase (SQL Editor).');
+        }
+        throw err;
+      }
+      closeSheet();
+      toast(`Pago registrado: ${res.pagadas} ${res.pagadas === 1 ? 'compra pagada completa' : 'compras pagadas completas'}${res.abonadas ? ' y 1 con abono (queda abierta)' : ''}. Pendiente: ${fmt(res.pendiente_usd)} USD`);
+      render();
+    });
+  };
+
+  if (sup.phone && $('#dpWa')) {
+    $('#dpWa').onclick = () => {
+      const amt = num(el.amount.value) || 0, ref = el.ref.value.trim();
+      const msg = `Hola ${sup.supplier}, te escribo respecto a nuestro saldo pendiente (${fmt(total)} USD).${amt > 0 ? ` Pago por ${money(amt, cur())}${ref ? ' · Ref: ' + ref : ''}.` : ''}`;
+      window.open(`https://wa.me/${waDigits(sup.phone)}?text=${encodeURIComponent(msg)}`, '_blank');
+    };
+  }
+}
+
+// ---------- Cobro o pago de una deuda individual: queda en USD y se convierte con la tasa del día ----------
 async function debtForm(cfg) {
   const accs = await loadActiveAccounts(), bal = cfg.bal, isOut = cfg.rpc === 'registrar_pago_compra';
   openSheet(cfg.title, `<form id="dF" class="stack"><p>${cfg.label}: <b>${fmt(bal)} USD</b> (${fmt(bal * (S.rate || 0))} Bs a la tasa de hoy)<br>
@@ -290,4 +552,3 @@ async function debtForm(cfg) {
     });
   };
 }
-

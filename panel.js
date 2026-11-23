@@ -111,7 +111,7 @@ async function viewInicio() {
     });
   }
   $('#pPend').onclick = () => { VH.f = 'pend'; SUB.ven = 'historial'; go('ventas'); };
-  $('#pPag').onclick = () => { CH.f = 'pend'; SUB.com = 'historial'; go('compras'); };
+  $('#pPag').onclick = () => { SUB.com = 'pagar'; go('compras'); };
   if ($('#pSkipAp')) $('#pSkipAp').onclick = () => run(async () => {
     await q(db.from('settings').update({apertura_completada: true, fecha_apertura: hoy, updated_at: new Date().toISOString()}).eq('id', 1));
     toast('Configuración inicial omitida. Puedes abrirla cuando quieras desde Configuración > Saldos iniciales.');
