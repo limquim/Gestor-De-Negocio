@@ -1,4 +1,4 @@
-// Panel del dueño: cómo va el negocio de un vistazo
+// Panel del dueño: cómo va el negocio de un vistazo + asistente de apertura
 const ico = (d) => `<svg class="ic" viewBox="0 0 24 24">${d}</svg>`;
 async function viewInicio() {
   const hoy = caracasDate(), t = new Date(hoy + 'T12:00:00'), y = t.getFullYear(), m = t.getMonth(), dd = t.getDate();
@@ -12,24 +12,32 @@ async function viewInicio() {
     alertasHtml(),
     q(db.from('ventas_resumen').select('customer,total_usd').gte('sale_date', m0).neq('status', 'anulada')),
     q(db.from('sale_items').select('product_id,sales!inner(sale_date,status)').gte('sales.sale_date', d30).neq('sales.status', 'anulada')),
-    q(db.from('settings').select('business_name').eq('id', 1).single())
+    q(db.from('settings').select('*').eq('id', 1).single())
   ]);
   const U = (n) => fmt(n) + ' USD', ut = (r) => r.ingresos - r.costo_ventas - r.gastos;
   const dl = (a, b) => b ? (a - b) / Math.abs(b) * 100 : null, dtxt = (a, b, l) => { const v = dl(a, b); return v === null ? '' : `${v >= 0 ? '+' : ''}${fmt(v, 0)}% ${l}`; };
   const caja = accs.reduce((a, x) => a + toUsd(+x.balance, x.currency), 0), inv = stock.reduce((a, x) => a + +x.valor_usd, 0), cap = caja + inv + mes.por_cobrar - mes.por_pagar;
   const U1 = ut(mes), mg = mes.ingresos > 0 ? U1 / mes.ingresos * 100 : 0, gHoy = h.ingresos - h.costo_ventas, bajos = stock.filter(x => x.bajo_minimo).length;
   const bar = (lab, val, max, right) => `<div class="bl"><div class="rl" style="border:0;padding:.2rem 0"><span>${esc(lab)}</span><b>${right}</b></div><div class="bar w"><i style="width:${max > 0 ? Math.max(2, val / max * 100) : 0}%"></i></div></div>`;
-  // ventas de los últimos 14 días
   const byDay = Object.fromEntries(quin.por_dia.map(x => [x.dia, +x.total])), days = Array.from({length: 14}, (_, i) => dstr(new Date(y, m, dd - 13 + i))), maxD = Math.max(0, ...days.map(x => byDay[x] || 0));
-  // mejores productos y clientes del mes
   const top = [...mes.top_productos].sort((a, b) => b.utilidad - a.utilidad).slice(0, 5), maxP = Math.max(0, ...top.map(x => +x.utilidad));
   const cust = {}; vm.forEach(v => { const n = v.customer || 'Cliente general'; cust[n] = (cust[n] || 0) + +v.total_usd; });
   const topC = Object.entries(cust).sort((a, b) => b[1] - a[1]).slice(0, 5), maxC = Math.max(0, ...topC.map(x => x[1]));
-  // inventario sin movimiento en 30 días (dinero detenido)
   const soldSet = new Set(sold.map(x => x.product_id)), slow = stock.filter(x => +x.stock > 0 && x.sells_regularly && !soldSet.has(x.product_id)), slowV = slow.reduce((a, x) => a + +x.valor_usd, 0);
   const gastoTop = mes.gastos_por_tipo.slice(0, 4), maxG = Math.max(0, ...gastoTop.map(x => +x.total));
 
-  $('#view').innerHTML = `<p class="mut" style="margin:0 0 .6rem">${esc(set.business_name || 'Mi negocio')} | ${dmy(hoy)}</p>
+  const showWelcome = set.apertura_completada === false;
+  const welcomeCard = showWelcome ? `<div class="card" style="border-left:5px solid var(--pri)">
+    <h2>¿Tu negocio ya estaba en marcha?</h2>
+    <p class="mut" style="margin:.2rem 0 .8rem">Configura tus <b>saldos iniciales</b> para registrar el dinero que ya tienes en caja/bancos, tu inventario actual con sus costos, deudas pendientes y tu capital inicial sin alterar tus reportes de ventas.</p>
+    <div class="row" style="margin:0">
+      <button class="btn" data-go="apertura">Configurar saldos iniciales</button>
+      <button class="btn ghost" id="pSkipAp">Empecé desde 0 (ocultar)</button>
+    </div>
+  </div>` : '';
+
+  $('#view').innerHTML = `<p class="mut" style="margin:0 0 .6rem">${esc(set.business_name || 'Mi negocio')} | ${dmy(hoy)}${set.fecha_apertura ? ' | Inicio: ' + dmy(set.fecha_apertura) : ''}</p>
+  ${welcomeCard}
   <div class="hero"><span>Ganancia neta del mes</span><b class="${U1 < 0 ? 'neg2' : ''}">${U(U1)}</b><small>${S.rate ? fmt(U1 * S.rate) + ' Bs | ' : ''}${dtxt(U1, ut(ant), 'vs el mismo período del mes pasado') || 'después de costos y gastos'}</small>
     <div class="hero3"><div><span>Ventas</span><b>${U(mes.ingresos)}</b><small>${dtxt(mes.ingresos, ant.ingresos, 'vs mes pasado')}</small></div><div><span>Gastos</span><b>${U(mes.gastos)}</b></div><div><span>Margen neto</span><b>${fmt(mg, 0)}%</b></div></div></div>
   <div class="tiles">
@@ -45,7 +53,7 @@ async function viewInicio() {
   <div class="stats"><button class="stat" data-go="finanzas"><span>Disponible en cuentas</span><b>${U(caja)}</b><span>${S.rate ? fmt(caja * S.rate) + ' Bs' : ''}</span></button>
     <button class="stat warn" id="pPend"><span>Te deben (por cobrar)</span><b>${U(mes.por_cobrar)}</b><span>${S.rate ? fmt(mes.por_cobrar * S.rate) + ' Bs a la tasa de hoy' : ''}</span></button>
     <button class="stat" id="pPag"><span>Debes (por pagar)</span><b>${U(mes.por_pagar)}</b><span>${S.rate ? fmt(mes.por_pagar * S.rate) + ' Bs a la tasa de hoy' : ''}</span></button>
-    <div class="stat"><span>Capital del negocio</span><b>${U(cap)}</b><span>cuentas + inventario + por cobrar - por pagar</span></div></div>
+    <button class="stat" data-go="apertura"><span>Capital del negocio</span><b>${U(cap)}</b><span>${Number(set.capital_inicial_usd || 0) > 0 ? 'Inicial: ' + U(set.capital_inicial_usd) + ' | ' : ''}Toca para editar saldos iniciales</span></button></div>
   <div class="card"><h2>Ventas de los últimos 14 días</h2><div class="dayb">${days.map(x => `<i style="height:${Math.max(3, (byDay[x] || 0) / (maxD || 1) * 100)}%" title="${dmy(x)}: ${fmt(byDay[x] || 0)} USD"></i>`).join('')}</div>
     <p class="mut">${dmy(days[0])} a ${dmy(days[13])}. Total: ${U(quin.ingresos)}</p></div>
   <div class="card"><h2>Lo que más ganancia te deja este mes</h2>${top.map(x => bar(x.name, +x.utilidad, maxP, U(+x.utilidad))).join('') || '<p class="mut">Aún no hay ventas este mes.</p>'}</div>
@@ -57,4 +65,9 @@ async function viewInicio() {
     <button class="stat warn" data-go="inventario"><span>Sin vender en 30 días</span><b>${slow.length}</b><span>${U(slowV)} detenidos (sin contar materia prima)</span></button></div>`;
   $('#pPend').onclick = () => { VH.f = 'pend'; SUB.ven = 'historial'; go('ventas'); };
   $('#pPag').onclick = () => { CH.f = 'pend'; SUB.com = 'historial'; go('compras'); };
+  if ($('#pSkipAp')) $('#pSkipAp').onclick = () => run(async () => {
+    await q(db.from('settings').update({apertura_completada: true, fecha_apertura: hoy, updated_at: new Date().toISOString()}).eq('id', 1));
+    toast('Configuración inicial omitida. Puedes abrirla cuando quieras desde Configuración > Saldos iniciales.');
+    render();
+  });
 }

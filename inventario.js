@@ -1,13 +1,13 @@
-// Inventario v2: resumen, filtros, kardex por producto y conteo físico
+// Inventario v2: resumen, filtros, kardex por producto, conteo físico y ajustes valorados
 const INV = {rows: [], q: '', type: 'all', low: false};
-const REF = {purchase: 'Compra', sale: 'Venta', production: 'Producción'};
-const refLabel = (m) => m.ref_type ? `${REF[m.ref_type] || m.ref_type} #${m.ref_id}` : '-';
+const REF = {purchase: 'Compra', sale: 'Venta', production: 'Producción', apertura: 'Apertura', ajuste_masivo: 'Ajuste masivo'};
+const refLabel = (m) => m.ref_type ? (REF[m.ref_type] ? `${REF[m.ref_type]}${m.ref_id ? ' #' + m.ref_id : ''}` : `${m.ref_type}${m.ref_id ? ' #' + m.ref_id : ''}`) : '-';
 const fdate = (d) => new Date(d).toLocaleString('es-VE', {dateStyle: 'short', timeStyle: 'short'});
 
 async function viewInventario2() {
   const [rows, moves] = await Promise.all([
     q(db.from('stock_actual').select('*').order('name')),
-    q(db.from('inventory_movements').select('movement_type,quantity,ref_type,ref_id,notes,created_at,products(name)').order('created_at', {ascending: false}).limit(10))
+    q(db.from('inventory_movements').select('movement_type,quantity,unit_cost_usd,ref_type,ref_id,notes,created_at,products(name)').order('created_at', {ascending: false}).limit(10))
   ]);
   INV.rows = rows;
   const valor = rows.reduce((a, x) => a + Number(x.valor_usd || 0), 0);
@@ -15,9 +15,10 @@ async function viewInventario2() {
   const bajos = rows.filter(x => Number(x.stock) > 0 && x.bajo_minimo).length;
   const cats = [...new Map(rows.filter(x => x.category_id).map(x => [x.category_id, x.category])).entries()];
   const chips = cats.map(([k, v]) => `<button data-t="${k}">${esc(v)}</button>`).join('');
-  const opts = rows.map(s => `<option value="${s.product_id}">${esc(s.name)} (${esc(s.unit)})</option>`).join('');
+  const opts = rows.map(s => `<option value="${s.product_id}">${esc(s.name)} (${esc(s.unit)}) — Stock: ${qty(s.stock)}</option>`).join('');
   const mrows = moves.map(m => `<tr><td>${fdate(m.created_at)}</td><td>${esc(m.products?.name)}</td><td>${MOV[m.movement_type]}</td>
-    <td>${refLabel(m)}</td><td class="n ${m.quantity > 0 ? 'in' : 'outq'}">${m.quantity > 0 ? '+' : ''}${qty(m.quantity)}</td><td>${esc(m.notes)}</td></tr>`).join('');
+    <td>${refLabel(m)}</td><td class="n ${m.quantity > 0 ? 'in' : 'outq'}">${m.quantity > 0 ? '+' : ''}${qty(m.quantity)}</td>
+    <td class="n">${m.unit_cost_usd != null ? fmt(m.unit_cost_usd) : '-'}</td><td>${esc(m.notes)}</td></tr>`).join('');
 
   $('#view').innerHTML = `
   <div class="stats">
@@ -26,6 +27,7 @@ async function viewInventario2() {
     <div class="stat warn"><span>Bajo el mínimo</span><b>${bajos}</b></div>
     <div class="stat bad"><span>Agotados</span><b>${agotados}</b></div>
   </div>
+  ${['admin', 'contador'].includes(S.role || 'admin') ? `<div class="row" style="margin:0 0 .8rem"><button class="btn ghost" data-go="apertura">Configurar inventario y saldos iniciales</button></div>` : ''}
   <div class="card">
     <div class="toolbar">
       <input id="invQ" type="search" placeholder="Buscar por nombre o código">
@@ -39,15 +41,20 @@ async function viewInventario2() {
     ${rows.length ? `<form id="mForm"><div class="grid">
       <label>Producto<select name="product_id">${opts}</select></label>
       <label>Movimiento<select name="kind">
-        <option value="in">Entrada o carga inicial</option><option value="out">Salida o corrección</option>
-        <option value="merma">Merma o pérdida</option><option value="count">Conteo físico (cantidad real)</option></select></label>
+        <option value="in">Entrada / ajuste de ingreso</option>
+        <option value="out">Salida o corrección</option>
+        <option value="merma">Merma o pérdida</option>
+        <option value="count">Conteo físico (cantidad real)</option>
+      </select></label>
       <label>Cantidad<input name="qty" type="number" step="0.001" min="0" required></label>
+      <label id="mCostLbl">Costo unitario de entrada (USD)<input name="unit_cost" id="mCost" type="number" step="0.0001" min="0" required></label>
       <label>Nota<input name="notes" placeholder="Ej: derrame en bodega"></label></div>
-      <p class="mut">En conteo físico escribe lo que realmente hay: el sistema calcula la diferencia y la ajusta.</p>
+      <p class="mut" id="mValInfo" style="margin-top:.5rem"></p>
+      <p class="mut" id="mHint">En ingreso puedes indicar el costo unitario y se recalculará el costo promedio. En salida se aplica automáticamente el costo actual del producto.</p>
       <div class="row"><button class="btn" type="submit">Registrar</button></div></form>` : '<p class="mut">Primero crea productos en la pestaña Productos.</p>'}
   </details>
   <div class="card"><h2>Últimos movimientos</h2>
-    ${moves.length ? `<div class="scroll"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th>Origen</th><th class="n">Cantidad</th><th>Nota</th></tr></thead><tbody>${mrows}</tbody></table></div>` : '<p class="mut">Aún no hay movimientos.</p>'}</div>`;
+    ${moves.length ? `<div class="scroll"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th>Origen</th><th class="n">Cantidad</th><th class="n">Costo USD</th><th>Nota</th></tr></thead><tbody>${mrows}</tbody></table></div>` : '<p class="mut">Aún no hay movimientos.</p>'}</div>`;
 
   drawInvTable();
   $('#invQ').oninput = (e) => { INV.q = e.target.value; drawInvTable(); };
@@ -58,29 +65,91 @@ async function viewInventario2() {
     document.querySelectorAll('#invT button').forEach(x => x.classList.toggle('on', x === b));
     drawInvTable();
   };
+
+  const form = $('#mForm');
+  const syncMovUI = (resetCost = false) => {
+    if (!form) return;
+    const pid = +form.elements.product_id.value;
+    const kind = form.elements.kind.value;
+    const p = INV.rows.find(x => x.product_id === pid);
+    if (!p) return;
+    const curCost = Number(p.avg_cost_usd || 0);
+    const curStock = Number(p.stock || 0);
+    const costInp = $('#mCost');
+    const costLbl = $('#mCostLbl');
+
+    if (kind === 'in') {
+      costLbl.firstChild.textContent = 'Costo unitario de ingreso (USD)';
+      costInp.readOnly = false;
+      costInp.disabled = false;
+      if (resetCost || costInp.value === '') costInp.value = curCost > 0 ? curCost : 0;
+    } else {
+      costLbl.firstChild.textContent = kind === 'count' ? 'Costo actual del producto (USD)' : 'Costo de salida (fijo actual USD)';
+      costInp.value = curCost;
+      costInp.readOnly = true;
+      costInp.disabled = true;
+    }
+
+    const qv = +form.elements.qty.value || 0;
+    const uc = kind === 'in' ? (+costInp.value || 0) : curCost;
+    if (kind === 'in') {
+      const tot = qv * uc;
+      const newAvg = (Math.max(curStock, 0) + qv) > 0
+        ? ((Math.max(curStock, 0) * curCost) + (qv * uc)) / (Math.max(curStock, 0) + qv)
+        : uc;
+      $('#mValInfo').innerHTML = qv > 0
+        ? `Valor de entrada: <b>${fmt(tot)} USD</b>${S.rate ? ' (' + fmt(tot * S.rate) + ' Bs)' : ''} | Nuevo costo promedio estimado: <b>${fmt(newAvg, 4)} USD</b>`
+        : `Costo actual: ${fmt(curCost, 4)} USD | Stock actual: ${qty(curStock)} ${esc(p.unit)}`;
+    } else if (kind === 'count') {
+      const diff = Math.round((qv - curStock) * 1000) / 1000;
+      $('#mValInfo').innerHTML = `Stock en sistema: <b>${qty(curStock)} ${esc(p.unit)}</b> | Diferencia: <b>${diff >= 0 ? '+' : ''}${qty(diff)}</b> (${fmt(Math.abs(diff) * curCost)} USD)`;
+    } else {
+      const tot = qv * curCost;
+      $('#mValInfo').innerHTML = qv > 0
+        ? `Salida valorada al costo actual (${fmt(curCost, 4)} USD): <b>${fmt(tot)} USD</b>${S.rate ? ' (' + fmt(tot * S.rate) + ' Bs)' : ''} | Stock restante: <b>${qty(curStock - qv)} ${esc(p.unit)}</b>`
+        : `Sale al costo actual: <b>${fmt(curCost, 4)} USD</b> | Disponible: ${qty(curStock)} ${esc(p.unit)}`;
+    }
+  };
+
+  if (form) {
+    syncMovUI(true);
+    form.elements.product_id.onchange = () => syncMovUI(true);
+    form.elements.kind.onchange = () => syncMovUI(true);
+    form.elements.qty.oninput = () => syncMovUI(false);
+    $('#mCost').oninput = () => syncMovUI(false);
+
+    form.onsubmit = (e) => {
+      e.preventDefault();
+      const f = new FormData(form), kind = f.get('kind'), n = +f.get('qty'), pid = +f.get('product_id');
+      const p = INV.rows.find(x => x.product_id === pid);
+      run(async () => {
+        if (kind !== 'count' && !(n > 0)) throw new Error('La cantidad debe ser mayor que cero');
+        const delta = Math.round((kind === 'in' ? n : kind === 'count' ? n - Number(p.stock) : -n) * 1000) / 1000;
+        if (!delta) throw new Error('El conteo coincide con el sistema: no hay nada que ajustar');
+        const unitCost = kind === 'in'
+          ? Math.max(0, Number($('#mCost').value || 0))
+          : (Number(p.avg_cost_usd) || 0);
+        await q(db.from('inventory_movements').insert({
+          product_id: pid,
+          movement_type: kind === 'merma' ? 'merma' : 'ajuste',
+          quantity: delta,
+          unit_cost_usd: unitCost,
+          notes: f.get('notes').trim() || (kind === 'count' ? 'Conteo físico' : null)
+        }));
+        toast(kind === 'count' ? 'Conteo aplicado: ajuste de ' + qty(delta) : 'Movimiento registrado'); render();
+      });
+    };
+  }
+
   $('#invTable').onclick = (e) => {
     const b = e.target.closest('[data-kx],[data-adj]'); if (!b) return;
     if (b.dataset.kx) run(() => showKardex(b.dataset.kx));
     if (b.dataset.adj && $('#mForm')) {
-      $('#movBox').open = true; $('#mForm').elements.product_id.value = b.dataset.adj;
+      $('#movBox').open = true;
+      $('#mForm').elements.product_id.value = b.dataset.adj;
+      syncMovUI(true);
       $('#movBox').scrollIntoView({behavior: 'smooth'});
     }
-  };
-  const form = $('#mForm');
-  if (form) form.onsubmit = (e) => {
-    e.preventDefault();
-    const f = new FormData(form), kind = f.get('kind'), n = +f.get('qty'), pid = +f.get('product_id');
-    const p = INV.rows.find(x => x.product_id === pid);
-    run(async () => {
-      if (kind !== 'count' && !(n > 0)) throw new Error('La cantidad debe ser mayor que cero');
-      const delta = Math.round((kind === 'in' ? n : kind === 'count' ? n - Number(p.stock) : -n) * 1000) / 1000;
-      if (!delta) throw new Error('El conteo coincide con el sistema: no hay nada que ajustar');
-      await q(db.from('inventory_movements').insert({
-        product_id: pid, movement_type: kind === 'merma' ? 'merma' : 'ajuste', quantity: delta,
-        unit_cost_usd: Number(p.avg_cost_usd) || null, notes: f.get('notes').trim() || (kind === 'count' ? 'Conteo físico' : null)
-      }));
-      toast(kind === 'count' ? 'Conteo aplicado: ajuste de ' + qty(delta) : 'Movimiento registrado'); render();
-    });
   };
 }
 
@@ -175,7 +244,7 @@ function prodForm(p, D) {
     <label>Costo manual en USD (el que tú pones, no cambia solo)<input name="cost" type="number" step="0.0001" min="0" value="${v('manual_cost_usd', 0)}"></label>
     <label>Precio de venta en USD<input name="price" type="number" step="0.0001" min="0" value="${v('sale_price_usd', 0)}"></label>
     <label>Costo automático (el real, el que usa el sistema)<input value="${p && p.auto_cost_usd != null ? fmt(p.auto_cost_usd, 4) + ' USD' : 'Aún sin compras ni fabricaciones: se usa el costo manual'}" disabled></label>
-    <p class="mut">El costo automático se actualiza solo con cada compra o fabricación, según el método elegido en Configuración. Tu costo manual no cambia: solo se usa mientras no haya compras ni fabricaciones.</p>
+    <p class="mut">El costo automático se actualiza solo con cada compra, fabricación o ajuste de ingreso con costo. Tu costo manual no cambia: solo se usa mientras no haya movimientos con costo.</p>
     <label class="chk"><input type="checkbox" name="is_service" ${p?.is_service ? 'checked' : ''}> Es un servicio (no maneja inventario, ej: delivery). Tu costo es lo que pagas por él.</label>
     <label>Stock mínimo<input name="min" type="number" step="0.001" min="0" value="${v('min_stock', 0)}"></label>
     <label>Impuesto<select name="tax_id">${opt(taxes, v('tax_id', defTax), 'id', t => `${t.name} (${qty(t.percent)}%)`)}</select></label>
