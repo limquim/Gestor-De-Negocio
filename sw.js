@@ -1,5 +1,5 @@
-// Service Worker v27: caché completa para que toda la herramienta funcione sin internet
-const CACHE_NAME = 'gestor-negocio-v27';
+// Service Worker v28: caché completa para que toda la herramienta funcione sin internet
+const CACHE_NAME = 'gestor-negocio-v28';
 const CORE_ASSETS = [
   './',
   './index.html',

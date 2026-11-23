@@ -1,5 +1,5 @@
 // Compras: nueva compra (igual que ventas), historial, detalle y pagos a proveedores
-const CV = {cart: [], pays: []}, CH = {f: 'all'};
+const CV = {cart: [], pays: []}, CH = {f: 'all', q: '', from: '', to: ''};
 const r2 = (n) => Math.round(n * 100) / 100;
 
 async function cData() {
@@ -132,31 +132,132 @@ async function viewCompra() {
   });
 }
 
-// ---------- Historial ----------
+// ---------- Historial de Compras (con búsqueda, fechas, estado y totales) ----------
 async function viewHistCompras() {
-  const rows = await q(db.from('compras_resumen').select('*').order('id', {ascending: false}).limit(80));
-  const list = rows.filter(r => CH.f === 'all' || r.status === 'registrada'), ST = {pagada: 'Pagada', registrada: 'Por pagar', anulada: 'Anulada'};
-  $('#view').innerHTML = `<div class="chips sub" id="chF"><button data-f="all" class="${CH.f === 'all' ? 'on' : ''}">Todas</button><button data-f="pend" class="${CH.f === 'pend' ? 'on' : ''}">Por pagar</button></div>
-    <div class="list" id="chL">${list.map(r => { const d = r.total_usd - r.paid_usd; return `<button class="item" data-id="${r.id}"><span><b>#${r.id} ${esc(r.supplier || 'Sin proveedor')}</b><small>${r.purchase_date}${r.due_date ? ' | vence ' + r.due_date : ''}</small>
-      <small>${r.status === 'registrada' ? 'Debes ' + fmt(d) + ' USD (' + fmt(d * (S.rate || r.exchange_rate)) + ' Bs hoy)' : fmt(r.total_usd) + ' USD (' + fmt(r.total_usd * r.exchange_rate) + ' Bs)'}</small></span>
-      <span class="badge ${r.status === 'pagada' ? 'ok' : r.status === 'registrada' ? 'low' : 'out'}">${ST[r.status] || r.status}</span></button>`; }).join('') || '<p class="mut">No hay compras en esta lista.</p>'}</div>`;
+  const rows = await q(db.from('compras_resumen').select('*').order('id', {ascending: false}).limit(200));
+  const hoy = caracasDate();
+  const ST = {pagada: 'Pagada', registrada: 'Por pagar', anulada: 'Anulada'};
+
+  $('#view').innerHTML = `
+    <div class="stats" id="chStats"></div>
+    <div class="card stack" style="margin-bottom:.8rem">
+      <input id="chQ" type="search" placeholder="Buscar por proveedor o N.° de compra..." value="${esc(CH.q)}">
+      <div class="chips" id="chF">
+        <button type="button" data-f="all" class="${CH.f === 'all' ? 'on' : ''}">Todas</button>
+        <button type="button" data-f="pend" class="${CH.f === 'pend' ? 'on' : ''}">Por pagar</button>
+        <button type="button" data-f="pagada" class="${CH.f === 'pagada' ? 'on' : ''}">Pagadas</button>
+        <button type="button" data-f="anulada" class="${CH.f === 'anulada' ? 'on' : ''}">Anuladas</button>
+      </div>
+      <div class="grid">
+        <label>Desde<input id="chFrom" type="date" value="${esc(CH.from)}"></label>
+        <label>Hasta<input id="chTo" type="date" value="${esc(CH.to)}"></label>
+      </div>
+      ${CH.q || CH.from || CH.to || CH.f !== 'all' ? '<div class="row" style="margin:0"><button type="button" class="lnk" id="chClr" style="padding:0">Limpiar filtros</button></div>' : ''}
+    </div>
+    <div class="list" id="chL"></div>`;
+
+  const draw = () => {
+    const t = CH.q.trim().toLowerCase();
+    const list = rows.filter(r => {
+      if (CH.f === 'pend' && r.status !== 'registrada') return false;
+      if (CH.f === 'pagada' && r.status !== 'pagada') return false;
+      if (CH.f === 'anulada' && r.status !== 'anulada') return false;
+      if (CH.from && r.purchase_date && r.purchase_date < CH.from) return false;
+      if (CH.to && r.purchase_date && r.purchase_date > CH.to) return false;
+      if (!t) return true;
+      const hay = `#${r.id} ${r.supplier || 'Sin proveedor'} ${r.purchase_date || ''}`.toLowerCase();
+      return hay.includes(t);
+    });
+
+    const actList = list.filter(r => r.status !== 'anulada');
+    const totUsd = actList.reduce((s, r) => s + Number(r.total_usd || 0), 0);
+    const pendUsd = actList.filter(r => r.status === 'registrada').reduce((s, r) => s + Math.max(0, Number(r.total_usd || 0) - Number(r.paid_usd || 0)), 0);
+
+    $('#chStats').innerHTML = `
+      <div class="stat"><span>Total comprado</span><b>${fmt(totUsd)} USD</b><span>${actList.length} ${actList.length === 1 ? 'compra activa' : 'compras activas'}${S.rate ? ' · ' + fmt(totUsd * S.rate) + ' Bs' : ''}</span></div>
+      <div class="stat ${pendUsd > 0.01 ? 'warn' : ''}"><span>Por pagar</span><b>${fmt(pendUsd)} USD</b><span>${S.rate ? fmt(pendUsd * S.rate) + ' Bs hoy' : ''}</span></div>`;
+
+    $('#chL').innerHTML = list.map(r => {
+      const d = Math.max(0, Number(r.total_usd || 0) - Number(r.paid_usd || 0));
+      const isLoc = Number(r.id) < 0;
+      const venc = r.status === 'registrada' && r.due_date && r.due_date < hoy;
+      const idLbl = isLoc ? 'LOC-' + Math.abs(r.id) : '#' + r.id;
+      const bCls = isLoc ? 'low' : r.status === 'pagada' ? 'ok' : venc ? 'out' : r.status === 'registrada' ? 'low' : 'out';
+      const bTxt = isLoc ? 'Sin subir' : venc ? 'Vencida' : (ST[r.status] || r.status);
+      return `<button class="item" data-id="${r.id}">
+        <span>
+          <b>${idLbl} ${esc(r.supplier || 'Sin proveedor')}</b>
+          <small>${dmy(r.purchase_date)}${r.due_date ? ' | vence ' + dmy(r.due_date) : ''}</small>
+          <small>${r.status === 'registrada'
+            ? 'Debes ' + fmt(d) + ' USD (' + fmt(d * (S.rate || r.exchange_rate)) + ' Bs hoy)'
+            : fmt(r.total_usd) + ' USD (' + fmt(r.total_usd * r.exchange_rate) + ' Bs)'}</small>
+        </span>
+        <span class="badge ${bCls}">${bTxt}</span>
+      </button>`;
+    }).join('') || '<p class="mut">No hay compras con ese filtro.</p>';
+  };
+  draw();
+
+  $('#chQ').oninput = (e) => { CH.q = e.target.value; draw(); };
+  $('#chFrom').onchange = (e) => { CH.from = e.target.value; render(); };
+  $('#chTo').onchange = (e) => { CH.to = e.target.value; render(); };
   $('#chF').onclick = (e) => { const b = e.target.closest('button'); if (b) { CH.f = b.dataset.f; render(); } };
+  if ($('#chClr')) $('#chClr').onclick = () => { CH.f = 'all'; CH.q = ''; CH.from = ''; CH.to = ''; render(); };
   $('#chL').onclick = (e) => { const b = e.target.closest('[data-id]'); if (b) run(() => purchaseSheet(+b.dataset.id)); };
 }
 
 async function purchaseSheet(id) {
   const [b, items, pays] = await Promise.all([
-    q(db.from('purchases').select('*, parties(name)').eq('id', id).single()),
-    q(db.from('purchase_items').select('quantity,unit_cost_usd,products(name)').eq('purchase_id', id)),
+    q(db.from('purchases').select('*, parties(name,phone)').eq('id', id).single()),
+    q(db.from('purchase_items').select('product_id,quantity,unit_cost_usd,products(name,unit)').eq('purchase_id', id)),
     q(db.from('payments').select('method,currency,amount,amount_usd,exchange_rate,accounts(name)').eq('purchase_id', id).order('id'))
   ]);
-  const paid = pays.reduce((a, p) => a + +p.amount_usd, 0), bal = b.total_usd - paid, open = b.status !== 'anulada' && bal > 0.01;
-  openSheet('Compra #' + id, `<p>${esc(b.parties?.name || 'Sin proveedor')} | ${b.purchase_date}${b.due_date ? ' | vence ' + b.due_date : ''}</p>
-    <div class="scroll"><table><thead><tr><th>Producto</th><th class="n">Cant.</th><th class="n">Costo USD</th></tr></thead><tbody>${items.map(i => `<tr><td>${esc(i.products?.name)}</td><td class="n">${qty(i.quantity)}</td><td class="n">${fmt(i.unit_cost_usd)}</td></tr>`).join('')}</tbody></table></div>
+  const paid = pays.reduce((a, p) => a + +p.amount_usd, 0), bal = Math.max(0, b.total_usd - paid);
+  const anul = b.status === 'anulada', open = !anul && bal > 0.01;
+  const idLbl = Number(id) < 0 ? 'LOC-' + Math.abs(id) + ' (Sin subir)' : '#' + id;
+
+  openSheet('Compra ' + idLbl, `
+    <p>${esc(b.parties?.name || 'Sin proveedor')} | ${dmy(b.purchase_date)}${b.due_date ? ' | vence ' + dmy(b.due_date) : ''}${anul ? ' | <b class="warn">ANULADA</b>' : ''}${b.notes ? '<br><small class="mut">' + esc(b.notes) + '</small>' : ''}</p>
+    ${items.length ? `<div class="scroll"><table>
+      <thead><tr><th>Producto</th><th class="n">Cant.</th><th class="n">Costo</th><th class="n">Total</th></tr></thead>
+      <tbody>${items.map(i => `<tr><td>${esc(i.products?.name)}</td><td class="n">${qty(i.quantity)} ${esc(i.products?.unit || '')}</td><td class="n">${fmt(i.unit_cost_usd, 4)}</td><td class="n">${fmt(i.quantity * i.unit_cost_usd)}</td></tr>`).join('')}</tbody>
+    </table></div>` : '<p class="mut">Compra de saldo inicial sin detalle de artículos.</p>'}
     <p><b>Total ${fmt(b.total_usd)} USD</b> (${fmt(b.total_usd * b.exchange_rate)} Bs a la tasa de la compra)<br>Pagado ${fmt(paid)} USD${open ? `<br><span class="warn">Debes ${fmt(bal)} USD (${fmt(bal * (S.rate || b.exchange_rate))} Bs a la tasa de hoy)</span>` : ''}</p>
     ${pays.length ? `<p class="mut">${pays.map(p => `${METHODS[p.method] || p.method} (${esc(p.accounts?.name)}): ${fmt(p.amount)} ${p.currency === 'USD' ? 'USD' : 'Bs'} a tasa ${fmt(p.exchange_rate, 2)}`).join('<br>')}</p>` : ''}
-    ${open ? '<div class="row"><button class="btn" id="pcPay">Registrar pago</button></div>' : ''}`);
+    <div class="row">
+      ${open ? '<button class="btn" id="pcPay">Registrar pago</button>' : ''}
+      ${items.length ? '<button class="btn ghost" id="pcDup">Duplicar compra</button>' : ''}
+      ${!anul ? '<button class="btn ghost" id="pcAnu" style="color:var(--bad)">Anular compra</button>' : ''}
+    </div>`);
+
   if (open) $('#pcPay').onclick = () => run(() => debtForm({title: 'Registrar pago', label: 'Debes', rpc: 'registrar_pago_compra', args: {p_purchase_id: id}, bal}));
+  if (items.length) {
+    $('#pcDup').onclick = () => {
+      CV.pre = items.map(i => ({pid: i.product_id, qty: +i.quantity}));
+      SUB.com = 'nueva';
+      closeSheet();
+      go('compras');
+      toast('Productos cargados en una nueva compra');
+    };
+  }
+  if (!anul) {
+    $('#pcAnu').onclick = () => run(async () => {
+      const msg = '¿Anular esta compra? Se descontará del inventario lo recibido y se devolverán a tus cuentas los pagos registrados.';
+      if (!confirm(msg)) return;
+      const reason = prompt('Motivo de la anulación (opcional):') || null;
+      try {
+        await q(db.rpc('anular_compra', {p_id: id, p_reason: reason ? reason.trim() : null}));
+      } catch (err) {
+        if (err.code === 'PGRST202' || /anular_compra/i.test(err.message || '')) {
+          throw new Error('Falta ejecutar 28_anular_compra.sql en Supabase (SQL Editor).');
+        }
+        throw err;
+      }
+      closeSheet();
+      toast('Compra anulada: inventario y cuentas revertidos');
+      render();
+    });
+  }
 }
 
 // ---------- Cobro o pago de una deuda: queda en USD y se convierte con la tasa del día de pago ----------

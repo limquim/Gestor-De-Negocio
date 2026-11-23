@@ -366,6 +366,7 @@ const OFF = {
         anular_devolucion: 'Anular devolución',
         registrar_compra: 'Compra',
         registrar_pago_compra: 'Pago de compra',
+        anular_compra: 'Anular compra',
         registrar_gasto: 'Gasto',
         anular_gasto: 'Anular gasto',
         registrar_transferencia: 'Transferencia',
@@ -1291,6 +1292,26 @@ const OFF = {
       }
       if (enqueue) await this.enqueueOp({kind: 'rpc', rpc_name: fnName, payload: P, label: `Pago compra #${pid} · ${fmt(usd)} USD`});
       return {data: true, error: null};
+    }
+
+    if (fnName === 'anular_compra') {
+      const id = Number(P.p_id);
+      const b = (this.mem.purchases || []).find(x => Number(x.id) === id);
+      if (b && b.status !== 'anulada') {
+        b.status = 'anulada';
+        if (P.p_reason) b.notes = b.notes ? `${b.notes} | Anulación: ${P.p_reason}` : `Anulación: ${P.p_reason}`;
+        await this.saveTable('purchases', this.mem.purchases);
+        const cr = (this.mem.compras_resumen || []).find(x => Number(x.id) === id);
+        if (cr) { cr.status = 'anulada'; await this.saveTable('compras_resumen', this.mem.compras_resumen); }
+        for (const it of (this.mem.purchase_items || []).filter(x => Number(x.purchase_id) === id)) {
+          await this.bumpStock(it.product_id, -Math.abs(Number(it.quantity)), it.unit_cost_usd, 'ajuste', 'purchase', id, 'Anulación compra #' + id);
+        }
+        for (const py of (this.mem.payments || []).filter(x => Number(x.purchase_id) === id)) {
+          await this.bumpAccount(py.account_id, Math.abs(Number(py.amount)), 'anulacion', 'Anulación compra #' + id);
+        }
+      }
+      if (enqueue) await this.enqueueOp({kind: 'rpc', rpc_name: fnName, payload: P, label: `Anular compra #${id}`});
+      return {data: {ok: true, id}, error: null};
     }
 
     // ---- 4. FINANZAS (GASTOS, TRANSFERENCIAS, AJUSTES, CAPITAL, CIERRE, MÉTODOS) ----

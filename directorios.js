@@ -1,47 +1,319 @@
-// Directorios (lista y formulario genéricos) y ajustes del negocio
+// Directorios organizados (Hub con buscador, filtro interno y Ficha / Estado de cuenta de contactos)
 const ROLES = {admin: 'Administrador', vendedor: 'Vendedor', almacen: 'Almacén', contador: 'Contador'};
 const DIRS = {
-  terceros: {label: 'Clientes y proveedores', table: 'parties', order: 'name', fields: [
+  terceros: {label: 'Clientes y proveedores', desc: 'Agenda comercial, RIF, teléfonos y estado de cuenta', table: 'parties', order: 'name', fields: [
     {k: 'name', l: 'Nombre o razón social', req: 1}, {k: 'rif', l: 'RIF o cédula'}, {k: 'phone', l: 'Teléfono (WhatsApp)', type: 'tel'},
     {k: 'email', l: 'Correo', type: 'email'}, {k: 'address', l: 'Dirección'},
     {k: 'is_customer', l: 'Es cliente', type: 'check', def: true}, {k: 'is_supplier', l: 'Es proveedor', type: 'check'}],
-    title: r => r.name, sub: r => [r.is_customer && 'Cliente', r.is_supplier && 'Proveedor', r.phone].filter(Boolean).join(' | ')},
-  unidades: {label: 'Unidades', table: 'units', order: 'name', fields: [
+    title: r => r.name, sub: r => [r.is_customer && 'Cliente', r.is_supplier && 'Proveedor', r.rif, r.phone].filter(Boolean).join(' | ')},
+  empleados: {label: 'Empleados', desc: 'Personal activo, cargos, frecuencia y sueldo base', table: 'employees', order: 'name', fields: [
+    {k: 'name', l: 'Nombre completo', req: 1}, {k: 'id_number', l: 'Cédula'}, {k: 'phone', l: 'Teléfono (WhatsApp)', type: 'tel'},
+    {k: 'position', l: 'Cargo'}, {k: 'pay_type', l: 'Cada cuánto se le paga', type: 'select', opts: {semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mensual'}},
+    {k: 'salary_usd', l: 'Sueldo por período en USD', type: 'number', req: 1}, {k: 'hire_date', l: 'Fecha de ingreso', type: 'date'}],
+    title: r => r.name, sub: r => [r.position, r.pay_type, fmt(r.salary_usd) + ' USD'].filter(Boolean).join(' | ')},
+  usuarios: {label: 'Usuarios y roles', desc: 'Accesos y permisos de administrador, vendedor, almacén y contador', table: 'profiles', order: 'created_at', all: 1, noAdd: 1, noDel: 1, fields: [
+    {k: 'full_name', l: 'Nombre', req: 1}, {k: 'role', l: 'Rol', type: 'select', opts: ROLES}, {k: 'active', l: 'Usuario activo', type: 'check'}],
+    title: r => r.full_name || 'Sin nombre', sub: r => ROLES[r.role] + (r.active ? '' : ' | inactivo')},
+  categorias: {label: 'Categorías de producto', desc: 'Clasificación del inventario y control de rotación', table: 'product_categories', order: 'name', fields: [
+    {k: 'name', l: 'Nombre', req: 1}, {k: 'sells_regularly', l: 'Se vende con frecuencia (si no, no cuenta en "sin vender en 30 días")', type: 'check', def: true}],
+    title: r => r.name, sub: r => r.sells_regularly === false ? 'Insumo / no venta regular' : 'Venta regular'},
+  unidades: {label: 'Unidades de medida', desc: 'Unidades, peso y volumen (und, kg, L, g, ml)', table: 'units', order: 'name', fields: [
     {k: 'name', l: 'Nombre', req: 1}, {k: 'symbol', l: 'Símbolo (kg, L, und)', req: 1},
     {k: 'kind', l: 'Tipo', type: 'select', opts: {unidad: 'Unidad', masa: 'Masa (base: gramo)', volumen: 'Volumen (base: mililitro)'}},
     {k: 'factor_to_base', l: 'Equivale a (g, ml o und)', type: 'number', req: 1}],
     title: r => `${r.name} (${r.symbol})`, sub: r => `1 ${r.symbol} = ${qty(r.factor_to_base)} de la unidad base`},
-  monedas: {label: 'Monedas', table: 'currencies', order: 'code', fields: [
-    {k: 'code', l: 'Código (USD)', req: 1}, {k: 'name', l: 'Nombre', req: 1}, {k: 'symbol', l: 'Símbolo'}],
-    title: r => `${r.code} - ${r.name}`, sub: r => r.is_base ? 'Moneda base' : ''},
-  impuestos: {label: 'Impuestos', table: 'taxes', order: 'name', fields: [
+  listas: {label: 'Listas de precios', desc: 'Porcentajes automáticos (ej: Mayor, Distribuidor)', table: 'price_lists', order: 'name', fields: [
+    {k: 'name', l: 'Nombre (ej: Mayor)', req: 1}, {k: 'adjust_percent', l: 'Ajuste sobre el precio de venta, en % (ej: -10 para 10% menos)', type: 'number', req: 1}],
+    title: r => r.name, sub: r => (r.adjust_percent > 0 ? '+' : '') + qty(r.adjust_percent) + '% sobre el precio de venta'},
+  plantillas: {label: 'Plantillas de mensajes', desc: 'Textos rápidos para campañas y cobros por WhatsApp', table: 'message_templates', order: 'name', fields: [
+    {k: 'name', l: 'Nombre', req: 1}, {k: 'body', l: 'Mensaje (usa {nombre} {producto} {negocio} {dias} {saldo})', type: 'textarea', req: 1}],
+    title: r => r.name, sub: r => (r.body || '').slice(0, 65)},
+  metodos: {label: 'Métodos de pago', desc: 'Efectivo, Pago móvil, Zelle, Binance, Cashea, etc.', table: 'payment_methods', order: 'name', fields: [
+    {k: 'name', l: 'Nombre (ej: Pago móvil, Binance, Cheque)', req: 1}],
+    title: r => r.name, sub: () => 'Se asigna a cada cuenta en Finanzas > Cuentas'},
+  cuentas: {label: 'Tipos de cuenta', desc: 'Efectivo, Banco nacional, Divisas, Billetera digital', table: 'account_types', order: 'name', fields: [
+    {k: 'name', l: 'Nombre', req: 1}], title: r => r.name, sub: () => ''},
+  gastos: {label: 'Tipos de gasto', desc: 'Categorías de gastos fijos, variables o costos de venta', table: 'expense_types', order: 'name', fields: [
+    {k: 'name', l: 'Nombre', req: 1}, {k: 'is_fixed', l: 'Es un gasto fijo', type: 'check'}, {k: 'in_sales_cost', l: 'Es costo de servicios de ventas (ej: delivery). Ya está en el costo de lo vendido, no se cuenta otra vez como gasto', type: 'check'}],
+    title: r => r.name, sub: r => [r.is_fixed ? 'Gasto fijo' : 'Gasto variable', r.in_sales_cost ? 'Costo de venta' : ''].filter(Boolean).join(' | ')},
+  impuestos: {label: 'Impuestos', desc: 'Alícuotas de IVA y valor por defecto en facturas', table: 'taxes', order: 'name', fields: [
     {k: 'name', l: 'Nombre', req: 1}, {k: 'percent', l: 'Porcentaje', type: 'number', req: 1}, {k: 'is_default', l: 'Aplicar por defecto', type: 'check'}],
     title: r => r.name, sub: r => `${qty(r.percent)}%${r.is_default ? ' | por defecto' : ''}`},
-  cuentas: {label: 'Tipos de cuenta', table: 'account_types', order: 'name', fields: [{k: 'name', l: 'Nombre', req: 1}], title: r => r.name, sub: () => ''},
-  gastos: {label: 'Tipos de gasto', table: 'expense_types', order: 'name', fields: [
-    {k: 'name', l: 'Nombre', req: 1}, {k: 'is_fixed', l: 'Es un gasto fijo', type: 'check'}, {k: 'in_sales_cost', l: 'Es costo de servicios de ventas (ej: delivery). Ya está en el costo de lo vendido, no se cuenta otra vez como gasto', type: 'check'}],
-    title: r => r.name, sub: r => r.is_fixed ? 'Gasto fijo' : 'Gasto variable'},
-  plantillas: {label: 'Plantillas de mensajes', table: 'message_templates', order: 'name', fields: [{k: 'name', l: 'Nombre', req: 1}, {k: 'body', l: 'Mensaje (usa {nombre} {producto} {negocio} {dias} {saldo})', type: 'textarea', req: 1}], title: r => r.name, sub: r => r.body.slice(0, 60)},
-  empleados: {label: 'Empleados', table: 'employees', order: 'name', fields: [{k: 'name', l: 'Nombre completo', req: 1}, {k: 'id_number', l: 'Cédula'}, {k: 'phone', l: 'Teléfono (WhatsApp)', type: 'tel'}, {k: 'position', l: 'Cargo'}, {k: 'pay_type', l: 'Cada cuánto se le paga', type: 'select', opts: {semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mensual'}}, {k: 'salary_usd', l: 'Sueldo por período en USD', type: 'number', req: 1}, {k: 'hire_date', l: 'Fecha de ingreso', type: 'date'}], title: r => r.name, sub: r => [r.position, r.pay_type, fmt(r.salary_usd) + ' USD'].filter(Boolean).join(' | ')},
-  metodos: {label: 'Métodos de pago', table: 'payment_methods', order: 'name', fields: [{k: 'name', l: 'Nombre (ej: Pago móvil, Binance, Cheque)', req: 1}], title: r => r.name, sub: () => 'Se asigna a cada cuenta en Finanzas > Cuentas'},
-  listas: {label: 'Listas de precios', table: 'price_lists', order: 'name', fields: [{k: 'name', l: 'Nombre (ej: Mayor)', req: 1}, {k: 'adjust_percent', l: 'Ajuste sobre el precio de venta, en % (ej: -10 para 10% menos)', type: 'number', req: 1}], title: r => r.name, sub: r => (r.adjust_percent > 0 ? '+' : '') + qty(r.adjust_percent) + '% sobre el precio de venta'},
-  categorias: {label: 'Categorías de producto', table: 'product_categories', order: 'name', fields: [{k: 'name', l: 'Nombre', req: 1}, {k: 'sells_regularly', l: 'Se vende con frecuencia (si no, no cuenta en "sin vender en 30 días")', type: 'check', def: true}], title: r => r.name, sub: () => ''},
-  usuarios: {label: 'Usuarios', table: 'profiles', order: 'created_at', all: 1, noAdd: 1, noDel: 1, fields: [
-    {k: 'full_name', l: 'Nombre', req: 1}, {k: 'role', l: 'Rol', type: 'select', opts: ROLES}, {k: 'active', l: 'Usuario activo', type: 'check'}],
-    title: r => r.full_name || 'Sin nombre', sub: r => ROLES[r.role] + (r.active ? '' : ' | inactivo')}
+  monedas: {label: 'Monedas', desc: 'Divisas configuradas en el sistema', table: 'currencies', order: 'code', fields: [
+    {k: 'code', l: 'Código (USD)', req: 1}, {k: 'name', l: 'Nombre', req: 1}, {k: 'symbol', l: 'Símbolo'}],
+    title: r => `${r.code} - ${r.name}`, sub: r => r.is_base ? 'Moneda base' : ''}
 };
 const DIR_LABELS = Object.fromEntries(Object.entries(DIRS).map(([k, c]) => [k, c.label]));
+const DIR_STATE = {hubQ: '', q: '', pType: 'all'};
 
+const DIR_GROUPS = [
+  {title: 'Contactos y Equipo', keys: ['terceros', 'empleados', 'usuarios']},
+  {title: 'Catálogo, Precios y Mensajes', keys: ['categorias', 'unidades', 'listas', 'plantillas']},
+  {title: 'Finanzas y Parámetros', keys: ['metodos', 'cuentas', 'gastos', 'impuestos', 'monedas']}
+];
+
+function allowedDirKeys() {
+  const ok = {vendedor: ['terceros', 'plantillas'], almacen: ['terceros', 'unidades', 'categorias'], contador: ['terceros']}[S.role];
+  return Object.keys(DIRS).filter(k => !ok || ok.includes(k));
+}
+
+// ---------- Hub organizado de Directorios ----------
+async function viewDirectorios() {
+  const allowed = allowedDirKeys();
+  const cur = SUB.dir;
+  if (cur && cur !== 'menu' && DIRS[cur] && allowed.includes(cur)) {
+    await viewDir(cur);
+    $('#view').insertAdjacentHTML('afterbegin', `
+      <div class="title-row" style="margin-bottom:.8rem">
+        <h1 class="pt">${esc(DIRS[cur].label)}</h1>
+        <button class="lnk" id="dirBack">&lsaquo; Directorios</button>
+      </div>`);
+    $('#dirBack').onclick = () => { SUB.dir = 'menu'; DIR_STATE.q = ''; render(); };
+    return;
+  }
+
+  SUB.dir = 'menu';
+  const counts = {};
+  let custCnt = 0, supCnt = 0;
+  await Promise.all(allowed.map(async (k) => {
+    const c = DIRS[k];
+    try {
+      let qb = db.from(c.table).select(k === 'terceros' ? 'id,is_customer,is_supplier' : 'id');
+      if (!c.all) qb = qb.eq('active', true);
+      const r = await q(qb);
+      counts[k] = r.length;
+      if (k === 'terceros') {
+        custCnt = r.filter(x => x.is_customer).length;
+        supCnt = r.filter(x => x.is_supplier).length;
+      }
+    } catch (e) { counts[k] = null; }
+  }));
+
+  $('#view').innerHTML = `
+    <div class="title-row" style="margin-bottom:.8rem">
+      <h1 class="pt">Directorios</h1>
+      <button class="lnk" data-go="mas">Volver a Más</button>
+    </div>
+    <input id="dirHubQ" type="search" placeholder="Buscar directorio (ej: clientes, proveedores, categorías, impuestos...)" value="${esc(DIR_STATE.hubQ)}" style="margin-bottom:.9rem">
+    <div id="dirHub"></div>`;
+
+  const drawHub = () => {
+    const t = DIR_STATE.hubQ.trim().toLowerCase();
+    const html = DIR_GROUPS.map(g => {
+      const items = g.keys.filter(k => allowed.includes(k)).map(k => ({k, ...DIRS[k]}))
+        .filter(it => !t || (it.label + ' ' + it.desc + ' ' + g.title).toLowerCase().includes(t));
+      if (!items.length) return '';
+      return `<div class="cfg-sec">
+        <h2 class="sec" style="margin-top:.9rem">${esc(g.title)}</h2>
+        <div class="list">${items.map(it => {
+          const pill = it.k === 'terceros' && counts[it.k] != null
+            ? `${custCnt} cli · ${supCnt} prov`
+            : (counts[it.k] != null ? `${counts[it.k]}` : '');
+          return `<button class="item cfg-item" data-dir="${it.k}">
+            <span style="flex:1">
+              <b>${esc(it.label)}</b>
+              <small>${esc(it.desc)}</small>
+            </span>
+            <span class="row0" style="gap:.45rem;flex:none">
+              ${pill ? `<span class="badge">${esc(pill)}</span>` : ''}
+              <span class="mut">&rsaquo;</span>
+            </span>
+          </button>`;
+        }).join('')}</div>
+      </div>`;
+    }).join('');
+    $('#dirHub').innerHTML = html || '<p class="mut">No se encontró ningún directorio con esa búsqueda.</p>';
+  };
+  drawHub();
+
+  $('#dirHubQ').oninput = (e) => { DIR_STATE.hubQ = e.target.value; drawHub(); };
+  $('#dirHub').onclick = (e) => {
+    const b = e.target.closest('[data-dir]'); if (!b) return;
+    SUB.dir = b.dataset.dir;
+    DIR_STATE.q = '';
+    render();
+  };
+}
+
+// ---------- Vista genérica de un directorio (con búsqueda interna y ficha para clientes/proveedores) ----------
 async function viewDir(key) {
   const c = DIRS[key];
   let qb = db.from(c.table).select('*');
   if (!c.all) qb = qb.eq('active', true);
   const rows = await q(qb.order(c.order));
-  $('#view').innerHTML = `<div class="list" id="dList">${rows.map(r => `<button class="item" data-id="${r.id}"><span><b>${esc(c.title(r))}</b><small>${esc(c.sub(r))}</small></span><span class="mut">&rsaquo;</span></button>`).join('')
-    || '<p class="mut">Aún no hay registros. Pulsa el botón + para agregar.</p>'}</div>
-    ${c.noAdd ? '<p class="mut">Para crear un usuario nuevo usa Supabase (Authentication > Users). Aquí le asignas su rol.</p>' : '<button class="fab" id="dAdd" aria-label="Agregar">+</button>'}`;
+  const isParties = key === 'terceros';
+
+  let debtMap = {};
+  if (isParties) {
+    try {
+      const [dc, cp] = await Promise.all([
+        q(db.from('deudas_clientes').select('customer_id,debt_usd')),
+        q(db.from('compras_resumen').select('supplier_id,total_usd,paid_usd,status').eq('status', 'registrada'))
+      ]);
+      dc.forEach(x => { if (x.customer_id != null) debtMap[x.customer_id] = {...(debtMap[x.customer_id] || {}), cxc: Number(x.debt_usd || 0)}; });
+      cp.forEach(x => {
+        if (x.supplier_id == null) return;
+        const bal = Math.max(0, Number(x.total_usd || 0) - Number(x.paid_usd || 0));
+        if (bal > 0.01) debtMap[x.supplier_id] = {...(debtMap[x.supplier_id] || {}), cxp: (debtMap[x.supplier_id]?.cxp || 0) + bal};
+      });
+    } catch (e) {}
+  }
+
+  $('#view').innerHTML = `
+    <div class="card stack" style="margin-bottom:.8rem">
+      <input id="dSearch" type="search" placeholder="Buscar en ${esc(c.label)}..." value="${esc(DIR_STATE.q)}">
+      ${isParties ? `<div class="chips" id="dPF">
+        <button type="button" data-pt="all" class="${DIR_STATE.pType === 'all' ? 'on' : ''}">Todos (${rows.length})</button>
+        <button type="button" data-pt="cli" class="${DIR_STATE.pType === 'cli' ? 'on' : ''}">Clientes (${rows.filter(r => r.is_customer).length})</button>
+        <button type="button" data-pt="prov" class="${DIR_STATE.pType === 'prov' ? 'on' : ''}">Proveedores (${rows.filter(r => r.is_supplier).length})</button>
+        <button type="button" data-pt="debt" class="${DIR_STATE.pType === 'debt' ? 'on' : ''}">Con saldo</button>
+      </div>` : ''}
+      <small class="mut" id="dCount"></small>
+    </div>
+    <div class="list" id="dList"></div>
+    ${c.noAdd ? '<p class="mut" style="margin-top:.8rem">Para crear un usuario nuevo usa Supabase (Authentication &gt; Users). Aquí le asignas su rol.</p>' : '<button class="fab" id="dAdd" aria-label="Agregar">+</button>'}`;
+
+  const draw = () => {
+    const t = DIR_STATE.q.trim().toLowerCase();
+    const list = rows.filter(r => {
+      if (isParties) {
+        if (DIR_STATE.pType === 'cli' && !r.is_customer) return false;
+        if (DIR_STATE.pType === 'prov' && !r.is_supplier) return false;
+        if (DIR_STATE.pType === 'debt' && !debtMap[r.id]?.cxc && !debtMap[r.id]?.cxp) return false;
+      }
+      if (!t) return true;
+      return (String(c.title(r) || '') + ' ' + String(c.sub(r) || '') + ' ' + String(r.rif || '') + ' ' + String(r.phone || '') + ' ' + String(r.email || '')).toLowerCase().includes(t);
+    });
+    $('#dCount').textContent = `Mostrando ${list.length} de ${rows.length} ${rows.length === 1 ? 'registro' : 'registros'}`;
+    $('#dList').innerHTML = list.map(r => {
+      const dm = isParties ? debtMap[r.id] : null;
+      const right = dm && (dm.cxc || dm.cxp)
+        ? `<span class="n" style="flex:none">
+            ${dm.cxc ? `<b class="warn">Te debe ${fmt(dm.cxc)}</b>` : ''}
+            ${dm.cxp ? `<small class="bad" style="display:block">Debes ${fmt(dm.cxp)}</small>` : ''}
+          </span>`
+        : '<span class="mut">&rsaquo;</span>';
+      return `<button class="item" data-id="${r.id}"><span><b>${esc(c.title(r))}</b><small>${esc(c.sub(r))}</small></span>${right}</button>`;
+    }).join('') || '<p class="mut">No hay registros con ese filtro.</p>';
+  };
+  draw();
+
+  $('#dSearch').oninput = (e) => { DIR_STATE.q = e.target.value; draw(); };
+  if (isParties && $('#dPF')) {
+    $('#dPF').onclick = (e) => {
+      const b = e.target.closest('button'); if (!b) return;
+      DIR_STATE.pType = b.dataset.pt;
+      document.querySelectorAll('#dPF button').forEach(x => x.classList.toggle('on', x === b));
+      draw();
+    };
+  }
   if (!c.noAdd) $('#dAdd').onclick = () => dirForm(c, null);
-  $('#dList').onclick = (e) => { const b = e.target.closest('[data-id]'); if (b) dirForm(c, rows.find(r => String(r.id) === b.dataset.id)); };
+  $('#dList').onclick = (e) => {
+    const b = e.target.closest('[data-id]'); if (!b) return;
+    const row = rows.find(r => String(r.id) === b.dataset.id);
+    if (!row) return;
+    if (isParties) run(() => partySheet(row, c));
+    else dirForm(c, row);
+  };
+}
+
+// ---------- Ficha completa y Estado de cuenta de Cliente / Proveedor ----------
+async function partySheet(p, dirCfg) {
+  const [sales, purchases, payTxt, set] = await Promise.all([
+    p.is_customer ? q(db.from('ventas_resumen').select('*').eq('customer_id', p.id).order('id', {ascending: false}).limit(50)) : Promise.resolve([]),
+    p.is_supplier ? q(db.from('compras_resumen').select('*').eq('supplier_id', p.id).order('id', {ascending: false}).limit(50)) : Promise.resolve([]),
+    typeof getPaymentDetailsText === 'function' ? getPaymentDetailsText() : Promise.resolve(''),
+    q(db.from('settings').select('business_name').eq('id', 1).single()).catch(() => ({business_name: 'Mi negocio'}))
+  ]);
+
+  const actSales = sales.filter(s => s.status !== 'anulada');
+  const pendSales = actSales.filter(s => s.status === 'pendiente' && (Number(s.total_usd) - Number(s.paid_usd)) > 0.01);
+  const totSold = actSales.reduce((a, s) => a + Number(s.total_usd || 0), 0);
+  const cxc = pendSales.reduce((a, s) => a + Math.max(0, Number(s.total_usd || 0) - Number(s.paid_usd || 0)), 0);
+
+  const actPurs = purchases.filter(x => x.status !== 'anulada');
+  const pendPurs = actPurs.filter(x => x.status === 'registrada' && (Number(x.total_usd) - Number(x.paid_usd)) > 0.01);
+  const totBought = actPurs.reduce((a, x) => a + Number(x.total_usd || 0), 0);
+  const cxp = pendPurs.reduce((a, x) => a + Math.max(0, Number(x.total_usd || 0) - Number(x.paid_usd || 0)), 0);
+
+  const badges = [p.is_customer ? '<span class="badge ok">Cliente</span>' : '', p.is_supplier ? '<span class="badge">Proveedor</span>' : ''].filter(Boolean).join(' ');
+  const contactMeta = [p.rif && 'RIF/CI: ' + p.rif, p.phone && 'Tlf: ' + p.phone, p.email, p.address].filter(Boolean).join(' · ');
+
+  openSheet(esc(p.name), `
+    <div class="stack">
+      <div>${badges}${contactMeta ? `<p class="mut" style="margin:.4rem 0 0">${esc(contactMeta)}</p>` : ''}</div>
+      <div class="row" style="margin:0">
+        <button type="button" class="btn ghost" id="psEdit">Editar datos</button>
+        ${p.phone ? '<button type="button" class="btn ghost" id="psWa">Chat WhatsApp</button>' : ''}
+        ${(cxc > 0.01 || cxp > 0.01) ? '<button type="button" class="btn" id="psStmt">Enviar estado de cuenta</button>' : ''}
+      </div>
+
+      ${p.is_customer ? `<div class="card" style="background:var(--bg);margin:0">
+        <h2 style="font-size:.98rem">Cuenta como cliente</h2>
+        <div class="rl"><span>Ventas registradas</span><b>${actSales.length} (${fmt(totSold)} USD)</b></div>
+        <div class="rl tot ${cxc > 0.01 ? 'neg' : 'pos'}"><span>Por cobrar</span><b>${fmt(cxc)} USD${S.rate && cxc > 0.01 ? ' (' + fmt(cxc * S.rate) + ' Bs)' : ''}</b></div>
+        ${actSales.length ? `<div class="list" id="psSales" style="margin-top:.6rem">${actSales.slice(0, 8).map(s => {
+          const bal = Math.max(0, Number(s.total_usd) - Number(s.paid_usd));
+          return `<button type="button" class="item" data-sid="${s.id}">
+            <span><b>Venta #${s.id}</b><small>${dmy(s.sale_date)}${s.due_date && bal > 0.01 ? ' · vence ' + dmy(s.due_date) : ''}</small></span>
+            <span class="n"><b>${bal > 0.01 ? 'Debe ' + fmt(bal) : fmt(s.total_usd)} USD</b><small class="${bal > 0.01 ? 'warn' : 'in'}">${bal > 0.01 ? 'Pendiente' : 'Pagada'}</small></span>
+          </button>`;
+        }).join('')}</div>` : '<p class="mut" style="margin:.5rem 0 0">Sin ventas registradas aún.</p>'}
+      </div>` : ''}
+
+      ${p.is_supplier ? `<div class="card" style="background:var(--bg);margin:0">
+        <h2 style="font-size:.98rem">Cuenta como proveedor</h2>
+        <div class="rl"><span>Compras registradas</span><b>${actPurs.length} (${fmt(totBought)} USD)</b></div>
+        <div class="rl tot ${cxp > 0.01 ? 'neg' : 'pos'}"><span>Por pagar</span><b>${fmt(cxp)} USD${S.rate && cxp > 0.01 ? ' (' + fmt(cxp * S.rate) + ' Bs)' : ''}</b></div>
+        ${actPurs.length ? `<div class="list" id="psPurs" style="margin-top:.6rem">${actPurs.slice(0, 8).map(x => {
+          const bal = Math.max(0, Number(x.total_usd) - Number(x.paid_usd));
+          return `<button type="button" class="item" data-pid="${x.id}">
+            <span><b>Compra #${x.id}</b><small>${dmy(x.purchase_date)}${x.due_date && bal > 0.01 ? ' · vence ' + dmy(x.due_date) : ''}</small></span>
+            <span class="n"><b>${bal > 0.01 ? 'Debes ' + fmt(bal) : fmt(x.total_usd)} USD</b><small class="${bal > 0.01 ? 'warn' : 'in'}">${bal > 0.01 ? 'Por pagar' : 'Pagada'}</small></span>
+          </button>`;
+        }).join('')}</div>` : '<p class="mut" style="margin:.5rem 0 0">Sin compras registradas aún.</p>'}
+      </div>` : ''}
+    </div>`);
+
+  $('#psEdit').onclick = () => dirForm(dirCfg, p);
+  if (p.phone && $('#psWa')) $('#psWa').onclick = () => window.open('https://wa.me/' + waDigits(p.phone), '_blank');
+
+  if ($('#psStmt')) {
+    $('#psStmt').onclick = () => {
+      const bName = String(set?.business_name || 'Mi negocio').toUpperCase();
+      const lines = [`*ESTADO DE CUENTA — ${bName}*`, `Contacto: ${p.name}`, `Fecha: ${dmy(caracasDate())}${S.rate ? ' | Tasa: ' + fmt(S.rate, 4) + ' Bs/USD' : ''}`, ''];
+      if (cxc > 0.01) {
+        lines.push('*Ventas pendientes por pagar:*');
+        pendSales.forEach(s => {
+          const bal = Math.max(0, Number(s.total_usd) - Number(s.paid_usd));
+          lines.push(`• Venta #${s.id} (${dmy(s.sale_date)}): ${fmt(bal)} USD${s.due_date ? ' [vence ' + dmy(s.due_date) + ']' : ''}`);
+        });
+        lines.push(`*Total pendiente: ${fmt(cxc)} USD*${S.rate ? ' (' + fmt(cxc * S.rate) + ' Bs hoy)' : ''}`);
+        if (payTxt) lines.push('', payTxt);
+      } else if (cxp > 0.01) {
+        lines.push('*Facturas / Compras pendientes de pago:*');
+        pendPurs.forEach(x => {
+          const bal = Math.max(0, Number(x.total_usd) - Number(x.paid_usd));
+          lines.push(`• Compra #${x.id} (${dmy(x.purchase_date)}): ${fmt(bal)} USD${x.due_date ? ' [vence ' + dmy(x.due_date) + ']' : ''}`);
+        });
+        lines.push(`*Total por pagar: ${fmt(cxp)} USD*${S.rate ? ' (' + fmt(cxp * S.rate) + ' Bs hoy)' : ''}`);
+      }
+      window.open(`https://wa.me/${waDigits(p.phone || '')}?text=${encodeURIComponent(lines.join('\n'))}`, '_blank');
+    };
+  }
+
+  if ($('#psSales')) {
+    $('#psSales').onclick = (e) => {
+      const b = e.target.closest('[data-sid]');
+      if (b && typeof saleSheet === 'function') run(() => saleSheet(+b.dataset.sid));
+    };
+  }
+  if ($('#psPurs')) {
+    $('#psPurs').onclick = (e) => {
+      const b = e.target.closest('[data-pid]');
+      if (b && typeof purchaseSheet === 'function') run(() => purchaseSheet(+b.dataset.pid));
+    };
+  }
 }
 
 function dirForm(c, row) {
@@ -52,7 +324,7 @@ function dirForm(c, row) {
     if (f.type === 'select') return `<label>${f.l}<select name="${f.k}">${Object.entries(f.opts).map(([k, t]) => `<option value="${k}" ${v(f) === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label>`;
     return `<label>${f.l}<input name="${f.k}" type="${f.type || 'text'}" ${f.type === 'number' ? 'step="0.0001"' : ''} value="${esc(v(f) ?? '')}" ${f.req ? 'required' : ''}></label>`;
   }).join('');
-  openSheet(row ? 'Editar' : 'Nuevo', `<form id="dForm" class="stack">${fields}<div class="row"><button class="btn" type="submit">Guardar</button>${row && !c.noDel ? '<button type="button" class="btn ghost" id="dDel">Desactivar</button>' : ''}</div></form>`);
+  openSheet(row ? 'Editar ' + c.label.toLowerCase() : 'Nuevo registro', `<form id="dForm" class="stack">${fields}<div class="row"><button class="btn" type="submit">Guardar</button>${row && !c.noDel ? '<button type="button" class="btn ghost" id="dDel">Desactivar</button>' : ''}</div></form>`);
   $('#dForm').onsubmit = (e) => {
     e.preventDefault();
     const el = e.target.elements, obj = {};

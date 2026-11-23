@@ -48,8 +48,10 @@ views.mas = async () => {
   $('#view').innerHTML = `<h1 class="pt">Más módulos</h1><div class="menu" id="masMenu" style="margin-top:.8rem">${MODS.filter(m => canSee(m[0]) && (m[0] !== 'nomina' || S.flags?.payroll !== false)).map(([k, t, d]) => `<button data-go="${k}"><b>${t}</b><small>${d}</small></button>`).join('')}</div>
     <div class="row"><button class="btn ghost" id="mOut">Cerrar sesión</button></div>`;
   $('#masMenu').addEventListener('click', (e) => {
-    const b = e.target.closest('[data-go="configuracion"]');
-    if (b) SUB.cfg = 'menu';
+    const b = e.target.closest('[data-go]');
+    if (!b) return;
+    if (b.dataset.go === 'configuracion') SUB.cfg = 'menu';
+    if (b.dataset.go === 'directorios') { SUB.dir = 'menu'; if (typeof DIR_STATE !== 'undefined') DIR_STATE.hubQ = ''; }
   }, true);
   $('#mOut').onclick = () => (typeof safeSignOut === 'function' ? safeSignOut() : db.auth.signOut());
 };
@@ -70,11 +72,7 @@ views.marketing = page('Marketing', viewMarketing);
 views.nomina = page('Nómina', withSubs('nom', {pagar: 'Pagar nómina', empleados: 'Empleados', adelantos: 'Adelantos', historial: 'Historial'}, {pagar: viewNomina, empleados: () => viewDir('empleados'), adelantos: viewAdelantos, historial: viewNominaHist}));
 views.finanzas = page('Finanzas', withSubs('fin', {cuentas: 'Cuentas', cierre: 'Cierre de caja', gastos: 'Gastos'}, {cuentas: viewCuentas, cierre: viewCierreCaja, gastos: viewGastos}));
 views.contabilidad = page('Reportes', viewReportes);
-views.directorios = page('Directorios', async () => {
-  const ok = {vendedor: ['terceros', 'plantillas'], almacen: ['terceros', 'unidades', 'categorias'], contador: ['terceros']}[S.role], subs = {}, fns = {};
-  Object.keys(DIRS).forEach(k => { if (!ok || ok.includes(k)) { subs[k] = DIR_LABELS[k]; fns[k] = () => viewDir(k); } });
-  await withSubs('dir', subs, fns)();
-});
+views.directorios = viewDirectorios;
 views.configuracion = viewConfiguracion;
 
 // Fondo claro / oscuro (se recuerda la elección)
