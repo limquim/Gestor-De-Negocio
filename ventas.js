@@ -6,36 +6,13 @@ const waDigits = (t) => String(t || '').replace(/\D/g, '').replace(/^0/, '58');
 const optList = (obj, sel) => Object.entries(obj).map(([k, v]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${v}</option>`).join('');
 
 async function vData() {
-  const fromCache = async () => {
-    const snap = typeof OFF !== 'undefined' ? await OFF.getSnapshot() : null;
-    if (!snap || !snap.products?.length) {
-      throw new Error('Sin internet y aún no hay productos guardados en este dispositivo. Conéctate una vez para descargarlos.');
-    }
-    const st = await OFF.getAdjustedStockMap(snap.st || {});
-    return {products: snap.products || [], st, custs: snap.custs || [], accs: snap.accs || [], offline: true};
-  };
-
-  if (typeof OFF !== 'undefined' && OFF.isOffline()) return fromCache();
-
-  try {
-    const req = Promise.all([
-      q(db.from('products').select('id,name,sku,unit,sale_price_usd,is_service,taxes(percent)').eq('active', true).order('name')),
-      q(db.from('stock_actual').select('product_id,stock')),
-      q(db.from('parties').select('id,name,phone').eq('is_customer', true).eq('active', true).order('name')),
-      db.from('accounts').select('id,name,currency,methods,is_default').eq('active', true).order('is_default', {ascending: false}).order('id').then(r => r.error ? q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id')) : r.data)
-    ]);
-    const [products, stock, custs, accs] = await (typeof OFF !== 'undefined' ? OFF.withTimeout(req, 9000) : req);
-    const baseSt = Object.fromEntries(stock.map(s => [s.product_id, Number(s.stock)]));
-    if (typeof OFF !== 'undefined') {
-      OFF.saveSnapshot({products, st: baseSt, custs, accs});
-      const adjSt = await OFF.getAdjustedStockMap(baseSt);
-      return {products, st: adjSt, custs, accs, offline: false};
-    }
-    return {products, st: baseSt, custs, accs, offline: false};
-  } catch (e) {
-    if (typeof OFF !== 'undefined' && OFF.isNetError(e)) return fromCache();
-    throw e;
-  }
+  const [products, stock, custs, accs] = await Promise.all([
+    q(db.from('products').select('id,name,sku,unit,sale_price_usd,is_service,taxes(percent)').eq('active', true).order('name')),
+    q(db.from('stock_actual').select('product_id,stock')),
+    q(db.from('parties').select('id,name,phone').eq('is_customer', true).eq('active', true).order('name')),
+    db.from('accounts').select('id,name,currency,methods,is_default').eq('active', true).order('is_default', {ascending: false}).order('id').then(r => r.error ? q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id')) : r.data)
+  ]);
+  return {products, st: Object.fromEntries(stock.map(s => [s.product_id, Number(s.stock)])), custs, accs};
 }
 async function saleDetail(id) {
   const [s, items, pays, ret, rit] = await Promise.all([
@@ -54,7 +31,8 @@ function ticketText(d, set) {
   const two = (a, b) => a + ' '.repeat(Math.max(1, w - a.length - b.length)) + b;
   const paid = covered(d), bal = s.total_usd - paid;
   const o = [(set.business_name || 'Mi negocio').toUpperCase(), set.business_rif && 'RIF: ' + set.business_rif, set.business_phone, set.business_address, set.ticket_header].filter(Boolean);
-  o.push(ln, (s.doc_type === 'factura' ? 'FACTURA' : 'NOTA DE ENTREGA') + ' #' + s.id, fdate(s.created_at), 'Cliente: ' + (s.parties?.name || 'Cliente general'), ln);
+  const docNum = Number(s.id) < 0 ? 'LOC-' + Math.abs(s.id) : s.id;
+  o.push(ln, (s.doc_type === 'factura' ? 'FACTURA' : 'NOTA DE ENTREGA') + ' #' + docNum, fdate(s.created_at), 'Cliente: ' + (s.parties?.name || 'Cliente general'), ln);
   d.items.forEach(i => o.push(i.name, two(`${qty(i.quantity)} x ${fmt(i.unit_price_usd)}`, fmt(i.quantity * i.unit_price_usd))));
   o.push(ln, two('Subtotal USD', fmt(s.subtotal_usd)));
   if (+s.discount_usd) o.push(two('Descuento', '-' + fmt(s.discount_usd)));
@@ -72,59 +50,12 @@ function printTicket(text, paper) {
   f.contentDocument.write(`<pre style="font:12px/1.3 monospace;margin:0;width:${paper === '80mm' ? '80mm' : '58mm'}">${esc(text)}</pre>`); f.contentDocument.close();
   f.contentWindow.focus(); f.contentWindow.print(); setTimeout(() => f.remove(), 3000);
 }
-function buildOfflineSaleDetail(rec) {
-  const p = rec.payload || {}, d = rec.display || {};
-  return {
-    s: {
-      id: rec.local_id,
-      sale_date: rec.sale_date,
-      created_at: rec.created_at,
-      doc_type: p.p_doc_type || 'nota_entrega',
-      exchange_rate: Number(p.p_rate || S.rate || 1),
-      subtotal_usd: Number(d.subtotal_usd || 0),
-      discount_usd: Number(p.p_discount_usd || 0),
-      tax_usd: Number(d.tax_usd || 0),
-      total_usd: Number(d.total_usd || 0),
-      status: Number(d.paid_usd || 0) >= Number(d.total_usd || 0) - 0.01 ? 'pagada' : 'pendiente',
-      notes: p.p_notes || '',
-      parties: {name: d.customer_name || 'Cliente general', phone: d.customer_phone || ''}
-    },
-    items: (d.items || []).map(i => ({
-      product_id: i.product_id, name: i.name, quantity: i.quantity,
-      unit_price_usd: i.unit_price_usd, unit_cost_usd: 0, tax_percent: i.tax_percent || 0
-    })),
-    pays: (d.pays || []).map(x => ({
-      method: x.method, currency: x.currency, amount: x.amount, amount_usd: x.amount_usd,
-      reference: x.reference || '', account_id: x.account_id, accounts: {name: x.account_name || ''}
-    })),
-    ret: [],
-    rit: []
-  };
-}
-
-async function showOfflineTicket(rec) {
-  const d = buildOfflineSaleDetail(rec);
-  const snap = typeof OFF !== 'undefined' ? await OFF.getSnapshot() : {};
-  const set = snap?.settings || {business_name: 'Mi negocio', ticket_paper: '58mm', ticket_show_bs: true};
-  const text = ticketText(d, set);
-  const blobP = docBlob(saleDoc(d), text, set).catch(() => null);
-  openSheet('Ticket ' + rec.local_id + ' (Sin conexión)', `<p class="mut" style="margin:0 0 .6rem">Guardada en este dispositivo. Se sincronizará automáticamente al recuperar señal.</p>
-    <div id="tPrev"><pre class="ticket">${esc(text)}</pre></div>
-    <div class="row"><button class="btn" id="tI">Enviar como foto</button><button class="btn ghost" id="tD">Descargar foto</button></div>
-    <div class="row"><button class="btn ghost" id="tP">Imprimir</button><button class="btn ghost" id="tW">Enviar como texto</button></div>`);
-  showPrev(blobP, set);
-  $('#tI').onclick = () => run(async () => shareImage(await blobP, d.s.parties?.phone, 'ticket-' + rec.local_id));
-  $('#tD').onclick = () => run(async () => { const b = await blobP; if (!b) throw new Error('No se pudo crear la imagen'); downloadBlob(b, 'ticket-' + rec.local_id + '.png'); });
-  $('#tP').onclick = () => printTicket(text, set.ticket_paper);
-  $('#tW').onclick = () => window.open(`https://wa.me/${waDigits(d.s.parties?.phone)}?text=${encodeURIComponent(text)}`, '_blank');
-}
-
 async function showTicket(id) {
   const [d, set] = await Promise.all([saleDetail(id), q(db.from('settings').select('*').eq('id', 1).single())]);
-  if (typeof OFF !== 'undefined' && set) OFF.saveSnapshot({settings: set});
   const text = ticketText(d, set);
   const blobP = docBlob(saleDoc(d), text, set).catch(() => null);
-  openSheet('Ticket de venta #' + id, `<div id="tPrev"><pre class="ticket">${esc(text)}</pre></div><div class="row"><button class="btn" id="tI">Enviar como foto</button><button class="btn ghost" id="tD">Descargar foto</button></div>
+  const dispId = Number(id) < 0 ? 'LOC-' + Math.abs(id) + ' (Sin conexión)' : '#' + id;
+  openSheet('Ticket de venta ' + dispId, `<div id="tPrev"><pre class="ticket">${esc(text)}</pre></div><div class="row"><button class="btn" id="tI">Enviar como foto</button><button class="btn ghost" id="tD">Descargar foto</button></div>
     <div class="row"><button class="btn ghost" id="tP">Imprimir</button><button class="btn ghost" id="tW">Enviar como texto</button></div>`);
   showPrev(blobP, set);
   $('#tI').onclick = () => run(async () => shareImage(await blobP, d.s.parties?.phone, 'ticket-' + id));
@@ -247,33 +178,9 @@ async function viewVenta() {
   };
   if ($('#vCancel')) $('#vCancel').onclick = () => { V.edit = null; render(); };
   $('#vNewC').onclick = () => run(async () => {
-    const name = prompt('Nombre del cliente'); if (!name || !name.trim()) return;
-    const phone = prompt('Teléfono (opcional)') || null;
-    if (typeof OFF !== 'undefined' && OFF.isOffline()) {
-      const tc = await OFF.addTempCustomer(name, phone);
-      D.custs.push(tc);
-      $('#vCust').insertAdjacentHTML('beforeend', `<option value="${esc(tc.id)}">${esc(tc.name)} (local)</option>`);
-      $('#vCust').value = tc.id;
-      toast('Cliente guardado localmente (se creará al sincronizar)');
-      return;
-    }
-    try {
-      const c = await (typeof OFF !== 'undefined'
-        ? OFF.withTimeout(q(db.from('parties').insert({name: name.trim(), phone, is_customer: true, is_supplier: false}).select('id,name,phone').single()), 8000)
-        : q(db.from('parties').insert({name: name.trim(), phone, is_customer: true, is_supplier: false}).select('id,name,phone').single()));
-      D.custs.push(c);
-      $('#vCust').insertAdjacentHTML('beforeend', `<option value="${c.id}">${esc(c.name)}</option>`); $('#vCust').value = c.id;
-    } catch (e) {
-      if (typeof OFF !== 'undefined' && OFF.isNetError(e)) {
-        const tc = await OFF.addTempCustomer(name, phone);
-        D.custs.push(tc);
-        $('#vCust').insertAdjacentHTML('beforeend', `<option value="${esc(tc.id)}">${esc(tc.name)} (local)</option>`);
-        $('#vCust').value = tc.id;
-        toast('Sin señal: cliente guardado localmente');
-      } else {
-        throw e;
-      }
-    }
+    const name = prompt('Nombre del cliente'); if (!name) return;
+    const c = await q(db.from('parties').insert({name: name.trim(), phone: prompt('Teléfono (opcional)') || null, is_customer: true, is_supplier: false}).select('id').single());
+    $('#vCust').insertAdjacentHTML('beforeend', `<option value="${c.id}">${esc(name)}</option>`); $('#vCust').value = c.id;
   });
   $('#vGo').onclick = () => run(async () => {
     if (!V.cart.length) throw new Error('Agrega al menos un producto');
@@ -286,169 +193,31 @@ async function viewVenta() {
       cash.amount = Math.round((cash.amount - ch) * 100) / 100;
     }
     if (V.cart.some(c => !c.svc && c.qty > (D.st[c.pid] || 0)) && !confirm('Hay productos con inventario insuficiente. ¿Registrar la venta de todos modos?')) return;
-
-    const rawCustVal = $('#vCust').value;
-    const isTempCust = String(rawCustVal).startsWith('OFFC-');
-    const custObj = D.custs.find(c => String(c.id) === String(rawCustVal));
-    const p_customer_id = rawCustVal && !isTempCust ? +rawCustVal : null;
-    const clientTxId = typeof OFF !== 'undefined' ? OFF.uuid() : null;
-    const saleDate = caracasDate();
-
-    const baseParams = {
-      p_customer_id,
-      p_doc_type: $('#vDoc').value,
-      p_rate: t.rate,
-      p_discount_usd: t.disc,
-      p_due_date: $('#vDue').value || null,
-      p_notes: $('#vNotes').value.trim() || null,
+    const id = await q(db.rpc('registrar_venta', {p_id: V.edit, p_customer_id: +$('#vCust').value || null, p_doc_type: $('#vDoc').value, p_rate: t.rate, p_discount_usd: t.disc,
+      p_due_date: $('#vDue').value || null, p_notes: $('#vNotes').value.trim() || null,
       p_items: V.cart.map(c => ({product_id: c.pid, quantity: c.qty, unit_price_usd: c.price})),
-      p_payments: pays.map(p => ({account_id: +p.acc, method: p.method, amount: p.amount, reference: p.ref}))
-    };
-
-    const saveOfflineAndShow = async (reasonMsg) => {
-      if (V.edit) throw new Error('No se puede corregir una venta existente sin internet. Intenta cuando vuelva la señal.');
-      const paidUsdFinal = pays.reduce((a, p) => a + payUsd(p, t.rate), 0);
-      const rec = await OFF.queueSale({
-        client_tx_id: clientTxId,
-        sale_date: saleDate,
-        from_quote_id: fq || null,
-        temp_customer: isTempCust && custObj ? {name: custObj.name, phone: custObj.phone || null} : null,
-        payload: baseParams,
-        display: {
-          customer_name: custObj?.name || 'Cliente general',
-          customer_phone: custObj?.phone || '',
-          subtotal_usd: t.sub,
-          tax_usd: t.tax,
-          total_usd: t.total,
-          paid_usd: Math.min(paidUsdFinal, t.total),
-          items: V.cart.map(c => ({product_id: c.pid, name: c.name, quantity: c.qty, unit_price_usd: c.price, tax_percent: c.pct})),
-          pays: pays.map(p => {
-            const acc = D.accs.find(x => x.id === +p.acc);
-            return {account_id: +p.acc, account_name: acc?.name || '', currency: acc?.currency || 'USD', method: p.method, amount: p.amount, amount_usd: payUsd(p, t.rate), reference: p.ref};
-          })
-        }
-      });
-      toast(reasonMsg || 'Venta guardada sin internet (se subirá al volver la señal)');
-      V.edit = null;
-      await showOfflineTicket(rec);
-      render();
-    };
-
-    if (typeof OFF !== 'undefined' && (OFF.isOffline() || isTempCust)) {
-      if (isTempCust && !OFF.isOffline()) {
-        // Crear cliente nuevo online primero si volvió la señal
-        try {
-          const ins = await OFF.withTimeout(q(db.from('parties').insert({name: custObj.name, phone: custObj.phone || null, is_customer: true, is_supplier: false}).select('id').single()), 8000);
-          baseParams.p_customer_id = ins.id;
-        } catch (e) {
-          if (OFF.isNetError(e)) return await saveOfflineAndShow('Señal débil: venta guardada localmente');
-          throw e;
-        }
-      } else {
-        return await saveOfflineAndShow();
-      }
-    }
-
-    try {
-      let id;
-      if (!V.edit && clientTxId) {
-        try {
-          id = await OFF.withTimeout(q(db.rpc('registrar_venta_offline', {
-            ...baseParams,
-            p_client_tx_id: clientTxId,
-            p_sale_date: saleDate
-          })), 10000);
-        } catch (rpcErr) {
-          const em = String(rpcErr?.message || '');
-          if (rpcErr?.code === 'PGRST202' || /registrar_venta_offline|could not find the function/i.test(em)) {
-            id = await OFF.withTimeout(q(db.rpc('registrar_venta', {p_id: null, ...baseParams})), 10000);
-          } else {
-            throw rpcErr;
-          }
-        }
-      } else {
-        id = await (typeof OFF !== 'undefined'
-          ? OFF.withTimeout(q(db.rpc('registrar_venta', {p_id: V.edit, ...baseParams})), 12000)
-          : q(db.rpc('registrar_venta', {p_id: V.edit, ...baseParams})));
-      }
-      if (fq) await q(db.from('quotes').update({status: 'convertida', sale_id: id}).eq('id', fq));
-      toast(V.edit ? 'Venta corregida' : 'Venta registrada'); V.edit = null; await showTicket(id); render();
-    } catch (err) {
-      if (!V.edit && typeof OFF !== 'undefined' && OFF.isNetError(err)) {
-        return await saveOfflineAndShow('Señal inestable: venta guardada sin conexión (se subirá automáticamente)');
-      }
-      throw err;
-    }
+      p_payments: pays.map(p => ({account_id: +p.acc, method: p.method, amount: p.amount, reference: p.ref}))}));
+    if (fq) await q(db.from('quotes').update({status: 'convertida', sale_id: id}).eq('id', fq));
+    toast(V.edit ? 'Venta corregida' : 'Venta registrada'); V.edit = null; await showTicket(id); render();
   });
 }
 
-// ---------- Historial (incluye ventas pendientes sin conexión) ----------
+// ---------- Historial ----------
 async function viewHistVentas() {
-  const qList = typeof OFF !== 'undefined' ? await OFF.getQueue() : [];
-  let rows = [], isOffMode = false;
-  if (typeof OFF !== 'undefined' && OFF.isOffline()) {
-    isOffMode = true;
-  } else {
-    try {
-      rows = await (typeof OFF !== 'undefined'
-        ? OFF.withTimeout(q(db.from('ventas_resumen').select('*').order('id', {ascending: false}).limit(80)), 9000)
-        : q(db.from('ventas_resumen').select('*').order('id', {ascending: false}).limit(80)));
-    } catch (e) {
-      if (typeof OFF !== 'undefined' && OFF.isNetError(e)) isOffMode = true;
-      else throw e;
-    }
-  }
+  const rows = await q(db.from('ventas_resumen').select('*').order('id', {ascending: false}).limit(80));
   const list = rows.filter(r => VH.f === 'all' || r.status === 'pendiente'), ST = {pagada: 'Pagada', pendiente: 'Por cobrar', anulada: 'Anulada'};
-  const offHtml = qList.length ? `<div class="card stack" style="border-left:4px solid var(--tag);margin-bottom:.9rem">
-      <div class="title-row"><h2>Pendientes de subir (${qList.length})</h2>${!isOffMode ? '<button class="btn ghost" id="hSyncNow" style="min-height:36px;padding:.3rem .8rem;font-size:.85rem">Sincronizar</button>' : ''}</div>
-      <div class="list" id="hOffL">${qList.slice().reverse().map(rec => {
-        const d = rec.display || {};
-        return `<button class="item" data-lid="${esc(rec.local_id)}"><span><b>${esc(rec.local_id)} · ${esc(d.customer_name || 'Cliente general')}</b>
-          <small>${rec.sale_date} · ${fdate(rec.created_at)}</small>
-          <small>${fmt(d.total_usd)} USD (${fmt(d.total_usd * Number(rec.payload?.p_rate || S.rate || 0))} Bs)${rec.last_error ? ' · <span class="bad">Error</span>' : ''}</small></span>
-          <span class="badge low">Sin subir</span></button>`;
-      }).join('')}</div></div>` : '';
-
-  $('#view').innerHTML = `${offHtml}
-    ${isOffMode ? '<p class="mut">Sin conexión: mostrando las ventas locales guardadas en este dispositivo.</p>' : `<div class="chips sub" id="hF"><button data-f="all" class="${VH.f === 'all' ? 'on' : ''}">Todas</button><button data-f="pend" class="${VH.f === 'pend' ? 'on' : ''}">Por cobrar</button></div>
-    <div class="list" id="hL">${list.map(r => `<button class="item" data-id="${r.id}"><span><b>#${r.id} ${esc(r.customer || 'Cliente general')}</b>
+  $('#view').innerHTML = `<div class="chips sub" id="hF"><button data-f="all" class="${VH.f === 'all' ? 'on' : ''}">Todas</button><button data-f="pend" class="${VH.f === 'pend' ? 'on' : ''}">Por cobrar</button></div>
+    <div class="list" id="hL">${list.map(r => `<button class="item" data-id="${r.id}"><span><b>${Number(r.id) < 0 ? 'LOC-' + Math.abs(r.id) : '#' + r.id} ${esc(r.customer || 'Cliente general')}</b>
       <small>${r.sale_date} | ${r.doc_type === 'factura' ? 'Factura' : 'Nota de entrega'}</small>
       <small>${r.status === 'pendiente' ? 'Debe ' + fmt(r.total_usd - r.paid_usd) + ' USD (' + fmt((r.total_usd - r.paid_usd) * (S.rate || r.exchange_rate)) + ' Bs hoy)' : fmt(r.total_usd) + ' USD (' + fmt(r.total_usd * r.exchange_rate) + ' Bs)'}</small></span>
-      <span class="badge ${r.status === 'pagada' ? 'ok' : r.status === 'pendiente' ? 'low' : 'out'}">${ST[r.status] || r.status}</span></button>`).join('') || '<p class="mut">No hay ventas en esta lista.</p>'}</div>`}`;
-
-  if ($('#hSyncNow')) $('#hSyncNow').onclick = () => run(() => OFF.syncNow(true));
-  if ($('#hOffL')) $('#hOffL').onclick = (e) => {
-    const b = e.target.closest('[data-lid]'); if (!b) return;
-    const rec = qList.find(x => x.local_id === b.dataset.lid);
-    if (rec) offlineSaleSheet(rec);
-  };
-  if ($('#hF')) $('#hF').onclick = (e) => { const b = e.target.closest('button'); if (b) { VH.f = b.dataset.f; render(); } };
-  if ($('#hL')) $('#hL').onclick = (e) => { const b = e.target.closest('[data-id]'); if (b) run(() => saleSheet(+b.dataset.id)); };
-}
-
-function offlineSaleSheet(rec) {
-  const d = buildOfflineSaleDetail(rec), s = d.s, paid = Number(rec.display?.paid_usd || 0), bal = s.total_usd - paid;
-  openSheet('Venta local ' + rec.local_id, `<p>${esc(s.parties?.name || 'Cliente general')} | ${s.sale_date} | <span class="badge low">Pendiente de subir</span></p>
-    ${rec.last_error ? `<p class="bad"><b>Error al subir:</b> ${esc(rec.last_error)}</p>` : ''}
-    <div class="scroll"><table><thead><tr><th>Producto</th><th class="n">Cant.</th><th class="n">Precio</th><th class="n">Total</th></tr></thead><tbody>${d.items.map(i => `<tr><td>${esc(i.name)}</td><td class="n">${qty(i.quantity)}</td><td class="n">${fmt(i.unit_price_usd)}</td><td class="n">${fmt(i.quantity * i.unit_price_usd)}</td></tr>`).join('')}</tbody></table></div>
-    <p>Subtotal ${fmt(s.subtotal_usd)} | Desc. ${fmt(s.discount_usd)} | IVA ${fmt(s.tax_usd)}<br><b>Total ${fmt(s.total_usd)} USD</b> (${fmt(s.total_usd * s.exchange_rate)} Bs)<br>Pagado ${fmt(paid)} USD${bal > 0.01 ? ` | <span class="warn">A crédito: ${fmt(bal)} USD</span>` : ''}</p>
-    ${d.pays.length ? `<p class="mut">${d.pays.map(p => `${METHODS[p.method] || p.method} (${esc(p.accounts?.name || '')}): ${fmt(p.amount)} ${p.currency}`).join('<br>')}</p>` : ''}
-    <div class="row">
-      <button class="btn" id="osT">Ticket</button>
-      <button class="btn ghost" id="osS">Subir ahora</button>
-      <button class="btn ghost" id="osD" style="color:var(--bad)">Eliminar</button>
-    </div>`);
-  $('#osT').onclick = () => run(() => showOfflineTicket(rec));
-  $('#osS').onclick = () => run(async () => { closeSheet(); await OFF.syncNow(true); render(); });
-  $('#osD').onclick = () => run(async () => {
-    if (!confirm('¿Eliminar esta venta pendiente? No se subirá al servidor.')) return;
-    await OFF.removeQueueItem(rec.local_id); closeSheet(); toast('Venta local eliminada'); render();
-  });
+      <span class="badge ${Number(r.id) < 0 ? 'low' : r.status === 'pagada' ? 'ok' : r.status === 'pendiente' ? 'low' : 'out'}">${Number(r.id) < 0 ? 'Sin subir' : (ST[r.status] || r.status)}</span></button>`).join('') || '<p class="mut">No hay ventas en esta lista.</p>'}</div>`;
+  $('#hF').onclick = (e) => { const b = e.target.closest('button'); if (b) { VH.f = b.dataset.f; render(); } };
+  $('#hL').onclick = (e) => { const b = e.target.closest('[data-id]'); if (b) run(() => saleSheet(+b.dataset.id)); };
 }
 
 async function saleSheet(id) {
   const d = await saleDetail(id), s = d.s, paid = covered(d), bal = s.total_usd - paid, anul = s.status === 'anulada';
-  openSheet('Venta #' + id, `<p>${esc(s.parties?.name || 'Cliente general')} | ${s.sale_date} | ${s.doc_type === 'factura' ? 'Factura' : 'Nota de entrega'}${anul ? ' | <b class="warn">ANULADA</b>' : ''}</p>
+  openSheet('Venta ' + (Number(id) < 0 ? 'LOC-' + Math.abs(id) + ' (Sin subir)' : '#' + id), `<p>${esc(s.parties?.name || 'Cliente general')} | ${s.sale_date} | ${s.doc_type === 'factura' ? 'Factura' : 'Nota de entrega'}${anul ? ' | <b class="warn">ANULADA</b>' : ''}</p>
     <div class="scroll"><table><thead><tr><th>Producto</th><th class="n">Cant.</th><th class="n">Precio</th><th class="n">Total</th></tr></thead><tbody>${d.items.map(i => `<tr><td>${esc(i.name)}</td><td class="n">${qty(i.quantity)}</td><td class="n">${fmt(i.unit_price_usd)}</td><td class="n">${fmt(i.quantity * i.unit_price_usd)}</td></tr>`).join('')}</tbody></table></div>
     <p>Subtotal ${fmt(s.subtotal_usd)} | Desc. ${fmt(s.discount_usd)} | IVA ${fmt(s.tax_usd)}<br><b>Total ${fmt(s.total_usd)} USD</b> (${fmt(s.total_usd * s.exchange_rate)} Bs)<br>Pagado ${fmt(paid)} USD${!anul && bal > 0.01 ? ` | <span class="warn">Debe ${fmt(bal)} USD (${fmt(bal * (S.rate || s.exchange_rate))} Bs a la tasa de hoy)</span>` : ''}</p>
     ${d.pays.length ? `<p class="mut">${d.pays.map(p => `${METHODS[p.method] || p.method} (${esc(p.accounts?.name || '')}): ${fmt(p.amount)} ${p.currency}`).join('<br>')}</p>` : ''}

@@ -95,6 +95,7 @@ th.n{text-align:right}
 </div>
 
 <script src="config.js"></script>
+<script src="offline.js"></script>
 <script>
 // Las claves de Supabase están en config.js
 
@@ -285,7 +286,7 @@ const render = () => run(async () => {
       OFF.paintBar();
       $('#view').innerHTML = `<div class="card stack" style="border-left:5px solid var(--tag)">
         <h2>Sin conexión a internet</h2>
-        <p class="mut" style="margin:0">Esta sección requiere conexión con el servidor, pero puedes seguir vendiendo y consultando tu inventario guardado sin parar.</p>
+        <p class="mut" style="margin:0">Aún no hay datos descargados de esta sección en este dispositivo. Conéctate una vez a internet y pulsa Actualizar réplica offline para usar todo sin señal.</p>
         <div class="row">
           <button class="btn" data-go="ventas">Ir a Ventas</button>
           <button class="btn ghost" data-go="inventario">Ver Inventario</button>
@@ -335,8 +336,8 @@ $('#loginForm').onsubmit = (e) => {
 };
 async function safeSignOut() {
   if (typeof OFF !== 'undefined') {
-    const qList = await OFF.getQueue();
-    if (qList.length && !confirm(`Tienes ${qList.length} venta(s) sin subir al servidor. ¿Seguro que quieres cerrar sesión?`)) return;
+    await OFF.ensureReady();
+    if (OFF.ops.length && !confirm(`Tienes ${OFF.ops.length} cambio(s) sin subir a Supabase. ¿Seguro que quieres cerrar sesión?`)) return;
     OFF.clearSessionHint();
   }
   try { await db.auth.signOut(); } catch (e) {}
@@ -386,11 +387,11 @@ async function enter() {
 
   applyRoleUI();
   if (typeof OFF !== 'undefined') {
-    await OFF.getQueue();
+    await OFF.ensureReady();
     OFF.paintBar();
     if (!off) {
-      OFF.refreshSnapshot(true);
-      if (OFF.queueCache.length) setTimeout(() => OFF.syncNow(false), 1500);
+      if (OFF.ops.length) setTimeout(() => OFF.syncNow(false), 1200);
+      else setTimeout(() => OFF.refreshAll(true), 800);
     }
   }
   render();
@@ -401,7 +402,9 @@ run(async () => {
   if (SUPABASE_URL.startsWith('PEGA')) {
     document.body.innerHTML = '<p style="padding:2rem;font-family:sans-serif">Falta configurar SUPABASE_URL y SUPABASE_ANON_KEY dentro de index.html.</p>'; return;
   }
-  db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  const rawDb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  db = typeof OFF !== 'undefined' ? OFF.wrapClient(rawDb) : rawDb;
+  if (typeof OFF !== 'undefined') await OFF.ensureReady();
   db.auth.onAuthStateChange((ev) => {
     if (ev === 'SIGNED_OUT') {
       if (typeof OFF !== 'undefined' && OFF.isOffline() && OFF.loadBoot()?.sessionEmail) return;
@@ -422,7 +425,6 @@ run(async () => {
   }
 });
 </script>
-<script src="offline.js"></script>
 <script src="escaner.js"></script>
 <script src="compras.js"></script>
 <script src="inventario.js"></script>

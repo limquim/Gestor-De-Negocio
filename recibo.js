@@ -2,14 +2,14 @@
 const dmy = (d) => d ? String(d).split('T')[0].split('-').reverse().join('/') : '';
 function saleDoc(d) {
   const s = d.s, paid = covered(d), bal = s.total_usd - paid;
-  return {title: s.doc_type === 'factura' ? 'FACTURA' : 'NOTA DE ENTREGA', number: s.id, date: s.sale_date, customer: s.parties?.name || 'Cliente general', phone: s.parties?.phone,
+  return {title: s.doc_type === 'factura' ? 'FACTURA' : 'NOTA DE ENTREGA', number: Number(s.id) < 0 ? 'LOC-' + Math.abs(s.id) : s.id, date: s.sale_date, customer: s.parties?.name || 'Cliente general', phone: s.parties?.phone,
     items: d.items.map(i => ({name: i.name, qty: +i.quantity, price: +i.unit_price_usd})), subtotal: +s.subtotal_usd, discount: +s.discount_usd, tax: +s.tax_usd, total: +s.total_usd, rate: +s.exchange_rate,
     pays: d.pays.map(p => ({label: METHODS[p.method] || p.method, amount: +p.amount, cur: p.currency})), balance: bal > 0.01 ? bal : 0,
     status: s.status === 'anulada' ? 'ANULADA' : bal > 0.01 ? 'POR COBRAR' : 'PAGADO', notes: s.notes};
 }
 function quoteDoc(d) {
   const s = d.s;
-  return {title: 'COTIZACIÓN', number: s.id, date: s.quote_date, valid: s.valid_until, customer: s.parties?.name || 'Cliente general', phone: s.parties?.phone,
+  return {title: 'COTIZACIÓN', number: Number(s.id) < 0 ? 'LOC-' + Math.abs(s.id) : s.id, date: s.quote_date, valid: s.valid_until, customer: s.parties?.name || 'Cliente general', phone: s.parties?.phone,
     items: d.items.map(i => ({name: i.name, qty: +i.quantity, price: +i.unit_price_usd})), subtotal: +s.subtotal_usd, discount: +s.discount_usd, tax: +s.tax_usd, total: +s.total_usd,
     rate: +s.exchange_rate, pays: [], balance: 0, status: '', notes: s.notes, quote: true};
 }
