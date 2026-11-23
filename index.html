@@ -366,12 +366,16 @@ async function enter() {
     }
   }
 
-  // Flags y rol con respaldo offline
+  // Flags, reglas de negocio y rol con respaldo offline
   try {
     if (off) throw new Error('offline');
     await (typeof OFF !== 'undefined' ? OFF.withTimeout(loadFlags(), 8000) : loadFlags());
     if (typeof OFF !== 'undefined') OFF.saveBoot({flags: S.flags});
   } catch (e) { S.flags = boot?.flags || {planning: true, payroll: true}; }
+
+  try {
+    if (typeof loadBusinessRules === 'function') await loadBusinessRules();
+  } catch (e) {}
 
   try {
     await loadRole();
@@ -445,6 +449,7 @@ run(async () => {
 <script src="seguridad.js"></script>
 <script src="importar.js"></script>
 <script src="apertura.js"></script>
+<script src="configuracion.js"></script>
 <script src="shell.js"></script>
 </body>
 </html>

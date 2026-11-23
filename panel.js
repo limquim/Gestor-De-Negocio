@@ -28,6 +28,7 @@ async function viewInicio() {
   const soldSet = new Set(sold.map(x => x.product_id)), slow = stock.filter(x => +x.stock > 0 && x.sells_regularly && !soldSet.has(x.product_id)), slowV = slow.reduce((a, x) => a + +x.valor_usd, 0);
   const gastoTop = mes.gastos_por_tipo.slice(0, 4), maxG = Math.max(0, ...gastoTop.map(x => +x.total));
 
+  if (typeof applyRulesObj === 'function') applyRulesObj(set);
   const showWelcome = set.apertura_completada === false;
   const welcomeCard = showWelcome ? `<div class="card" style="border-left:5px solid var(--pri)">
     <h2>¿Tu negocio ya estaba en marcha?</h2>
@@ -38,10 +39,35 @@ async function viewInicio() {
     </div>
   </div>` : '';
 
-  $('#view').innerHTML = `<p class="mut" style="margin:0 0 .6rem">${esc(set.business_name || 'Mi negocio')} | ${dmy(hoy)}${set.fecha_apertura ? ' | Inicio: ' + dmy(set.fecha_apertura) : ''}</p>
+  const goal = Number(set.monthly_sales_goal_usd || S.rules?.monthly_sales_goal_usd || 0);
+  let goalCard = '';
+  if (goal > 0) {
+    const pct = Math.min(999, Math.round((mes.ingresos / goal) * 100));
+    const rem = Math.max(0, goal - mes.ingresos);
+    const daysInMonth = new Date(y, m + 1, 0).getDate();
+    const daysLeft = Math.max(1, daysInMonth - dd + 1);
+    const perDay = rem / daysLeft;
+    goalCard = `<div class="card goal-card">
+      <div class="title-row">
+        <span style="font-weight:800">Meta mensual de ventas</span>
+        <span class="badge ${pct >= 100 ? 'ok' : pct >= 60 ? 'low' : ''}">${pct}%</span>
+      </div>
+      <div class="goal-bar"><i style="width:${Math.min(100, pct)}%" class="${pct >= 100 ? 'done' : ''}"></i></div>
+      <div class="title-row" style="margin-top:.35rem">
+        <small class="mut"><b>${U(mes.ingresos)}</b> de ${U(goal)}</small>
+        <small class="mut">${rem > 0 ? `Faltan ${U(rem)} (≈ ${U(perDay)}/día)` : 'Meta alcanzada'}</small>
+      </div>
+    </div>`;
+  }
+
+  $('#view').innerHTML = `<div class="title-row" style="margin:0 0 .6rem">
+    <p class="mut" style="margin:0">${esc(set.business_name || 'Mi negocio')} | ${dmy(hoy)}${set.fecha_apertura ? ' | Inicio: ' + dmy(set.fecha_apertura) : ''}</p>
+    <button class="lnk" id="pWaSum" style="font-size:.85rem">Enviar resumen</button>
+  </div>
   ${welcomeCard}
   <div class="hero"><span>Ganancia neta del mes</span><b class="${U1 < 0 ? 'neg2' : ''}">${U(U1)}</b><small>${S.rate ? fmt(U1 * S.rate) + ' Bs | ' : ''}${dtxt(U1, ut(ant), 'vs el mismo período del mes pasado') || 'después de costos y gastos'}</small>
     <div class="hero3"><div><span>Ventas</span><b>${U(mes.ingresos)}</b><small>${dtxt(mes.ingresos, ant.ingresos, 'vs mes pasado')}</small></div><div><span>Gastos</span><b>${U(mes.gastos)}</b></div><div><span>Margen neto</span><b>${fmt(mg, 0)}%</b></div></div></div>
+  ${goalCard}
   <div class="tiles">
     <button class="tile main" data-go="ventas">${ico('<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>')}<span>Vender</span><small>Nueva venta</small></button>
     <button class="tile" data-go="compras">${ico('<path d="M6 7h12l-1 13H7z"/><path d="M9 7a3 3 0 016 0"/>')}<span>Comprar</span><small>Registrar compra</small></button>
@@ -65,6 +91,25 @@ async function viewInicio() {
   <div class="stats"><button class="stat" data-go="inventario"><span>Valor del inventario</span><b>${U(inv)}</b><span>${S.rate ? fmt(inv * S.rate) + ' Bs' : ''}</span></button>
     <button class="stat bad" data-go="inventario"><span>Por reponer</span><b>${bajos}</b><span>en el mínimo o agotados</span></button>
     <button class="stat warn" data-go="inventario"><span>Sin vender en 30 días</span><b>${slow.length}</b><span>${U(slowV)} detenidos (sin contar materia prima)</span></button></div>`;
+  if ($('#pWaSum') && typeof shareExecutiveSummaryWhatsApp === 'function') {
+    $('#pWaSum').onclick = () => shareExecutiveSummaryWhatsApp({
+      business: set.business_name || 'Mi negocio',
+      phone: set.business_phone || '',
+      hoy,
+      hoyIngresos: h.ingresos,
+      hoyVentas: h.num_ventas,
+      hoyBruta: gHoy,
+      mesIngresos: mes.ingresos,
+      mesGastos: mes.gastos,
+      mesNeta: U1,
+      caja,
+      porCobrar: mes.por_cobrar,
+      porPagar: mes.por_pagar,
+      inv,
+      bajos,
+      cap
+    });
+  }
   $('#pPend').onclick = () => { VH.f = 'pend'; SUB.ven = 'historial'; go('ventas'); };
   $('#pPag').onclick = () => { CH.f = 'pend'; SUB.com = 'historial'; go('compras'); };
   if ($('#pSkipAp')) $('#pSkipAp').onclick = () => run(async () => {

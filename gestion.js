@@ -156,11 +156,22 @@ async function descargarRespaldo() {
   const out = {fecha: new Date().toISOString(), tablas: {}};
   toast('Preparando el respaldo...');
   for (const t of T) { try { out.tablas[t] = await all(t); } catch (e) { out.tablas[t] = 'no disponible'; } }
-  downloadBlob(new Blob([JSON.stringify(out)], {type: 'application/json'}), 'respaldo_' + caracasDate() + '.json'); toast('Respaldo descargado');
+  downloadBlob(new Blob([JSON.stringify(out)], {type: 'application/json'}), 'respaldo_' + caracasDate() + '.json');
+  const nowIso = new Date().toISOString();
+  try { localStorage.setItem('gdn_last_backup_at', nowIso); } catch (e) {}
+  if (S.rules) S.rules.last_backup_at = nowIso;
+  try { await db.from('settings').update({last_backup_at: nowIso}).eq('id', 1); } catch (e) {}
+  toast('Respaldo descargado');
+  if (tab === 'configuracion' && SUB.cfg === 'respaldo') render();
 }
 async function viewRespaldo() {
-  $('#view').innerHTML = `<div class="card stack"><h2>Respaldo de tus datos</h2><p class="mut">Descarga una copia de toda tu información (productos, ventas, compras, cuentas, clientes, producción, nómina, etc.) en un archivo. Guárdala en un lugar seguro, por ejemplo una vez por semana.</p>
-    <button class="btn" id="bkGo">Descargar respaldo</button></div>`;
+  let set = {};
+  try { set = await q(db.from('settings').select('last_backup_at').eq('id', 1).single()); } catch (e) {}
+  const last = typeof getLastBackupDate === 'function' ? getLastBackupDate(set) : set?.last_backup_at;
+  $('#view').innerHTML = `<div class="card stack"><h2>Respaldo de tus datos</h2>
+    <p class="mut">Descarga una copia de toda tu información (productos, ventas, compras, cuentas, clientes, producción, nómina, cierres de caja, etc.) en un archivo. Guárdala en un lugar seguro, por ejemplo una vez por semana.</p>
+    <div class="rl"><span>Último respaldo registrado</span><b>${last ? fdate(last) : 'Aún sin respaldo'}</b></div>
+    <button class="btn" id="bkGo">Descargar respaldo ahora</button></div>`;
   $('#bkGo').onclick = () => run(descargarRespaldo);
 }
 

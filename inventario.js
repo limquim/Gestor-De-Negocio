@@ -290,7 +290,23 @@ function prodForm(p, D, preSku = '') {
     continuous: false,
     onCode: (code) => { el.sku.value = code; return {ok: true, msg: 'Código asignado: ' + code}; }
   });
-  const mg = () => { const c = p && p.auto_cost_usd != null ? +p.auto_cost_usd : (+el.cost.value || 0), pr = +el.price.value || 0; $('#pMargin').textContent = pr > 0 ? `Margen sobre el costo: ${fmt((pr - c) / pr * 100, 0)}% (ganancia de ${fmt(pr - c)} USD por unidad)` : ''; };
+  const mg = () => {
+    const c = p && p.auto_cost_usd != null ? +p.auto_cost_usd : (+el.cost.value || 0);
+    const pr = +el.price.value || 0;
+    const minM = Number(S.rules?.min_margin_percent || 0);
+    const sug = (minM > 0 && minM < 95 && c > 0) ? Math.ceil((c / (1 - minM / 100)) * 100) / 100 : 0;
+    const curM = pr > 0 ? ((pr - c) / pr * 100) : 0;
+    const parts = [];
+    if (pr > 0) {
+      const low = minM > 0 && curM < minM - 0.1;
+      parts.push(`<span class="${low ? 'warn' : ''}">Margen: <b>${fmt(curM, 0)}%</b> (ganancia de ${fmt(pr - c)} USD/u)${low ? ` · por debajo del objetivo (${qty(minM)}%)` : ''}</span>`);
+    }
+    if (sug > 0) {
+      parts.push(`Precio sugerido para ${qty(minM)}%: <b>${fmt(sug)} USD</b> <button type="button" class="lnk" id="pApplySug" style="padding:0 .3rem">Aplicar</button>`);
+    }
+    $('#pMargin').innerHTML = parts.join('<br>');
+    if ($('#pApplySug')) $('#pApplySug').onclick = () => { el.price.value = sug.toFixed(2); mg(); };
+  };
   f.addEventListener('input', mg); mg();
   f.onsubmit = (e) => {
     e.preventDefault();

@@ -1,5 +1,5 @@
-// Service Worker v24: caché completa para que toda la herramienta funcione sin internet
-const CACHE_NAME = 'gestor-negocio-v24';
+// Service Worker v25: caché completa para que toda la herramienta funcione sin internet
+const CACHE_NAME = 'gestor-negocio-v25';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -31,6 +31,7 @@ const CORE_ASSETS = [
   './seguridad.js',
   './importar.js',
   './apertura.js',
+  './configuracion.js',
   './shell.js'
 ];
 const CDN_HOSTS = ['cdn.jsdelivr.net', 'fonts.googleapis.com', 'fonts.gstatic.com'];

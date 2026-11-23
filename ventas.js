@@ -85,10 +85,15 @@ async function viewVenta() {
     <p id="vBal"></p><label id="vDueW" class="hidden">Fecha límite del saldo<input id="vDue" type="date"></label></div>
   <label>Nota<input id="vNotes"></label>
   <div class="row"><button class="btn" id="vGo">${V.edit ? 'Guardar corrección' : 'Registrar venta'}</button></div>`;
+  const rules = S.rules || {};
+  const lockSellerPrice = (S.role === 'vendedor') && rules.allow_seller_price_edit === false;
   $('#vRate').value = old ? old.s.exchange_rate : (S.rate || '');
+  if (!old && !qd && rules.default_doc_type) $('#vDoc').value = rules.default_doc_type;
   if (old) { $('#vCust').value = old.s.customer_id || ''; $('#vDoc').value = old.s.doc_type; $('#vDisc').value = old.s.discount_usd; $('#vDue').value = old.s.due_date || ''; $('#vNotes').value = old.s.notes || ''; }
 
   if (qd) { $('#vCust').value = qd.s.customer_id || ''; $('#vDoc').value = qd.s.doc_type; $('#vDisc').value = qd.s.discount_usd; }
+  let dueTouched = !!(old && old.s.due_date);
+  $('#vDue').addEventListener('input', () => { dueTouched = true; });
   const calc = () => {
     const rate = +$('#vRate').value || 0, sub = V.cart.reduce((a, c) => a + c.qty * c.price, 0), disc = Math.min(+$('#vDisc').value || 0, sub);
     let tax = $('#vDoc').value === 'factura' ? V.cart.reduce((a, c) => a + c.qty * c.price * c.pct / 100, 0) : 0;
@@ -98,16 +103,22 @@ async function viewVenta() {
   const payUsd = (p, rate) => { const a = D.accs.find(x => x.id === +p.acc); return !a ? 0 : a.currency === 'USD' ? p.amount : (rate ? p.amount / rate : 0); };
   const totals = () => {
     const t = calc(), paid = V.pays.reduce((a, p) => a + payUsd(p, t.rate), 0), bal = t.total - paid;
-    $('#vTot').innerHTML = `Subtotal: ${fmt(t.sub)} USD${t.disc ? ' | Descuento: -' + fmt(t.disc) : ''}${t.tax ? ' | IVA: ' + fmt(t.tax) : ''}<br><span class="big">${fmt(t.total)} USD</span><br><span class="mut">${fmt(t.total * t.rate)} Bs</span>`;
+    const discPct = t.sub > 0 ? (t.disc / t.sub * 100) : 0;
+    const maxDisc = Number(rules.max_discount_percent || 0);
+    const overDisc = maxDisc > 0 && discPct > maxDisc + 0.05 && (S.role || 'admin') !== 'admin';
+    $('#vTot').innerHTML = `Subtotal: ${fmt(t.sub)} USD${t.disc ? ' | Descuento: -' + fmt(t.disc) + ' (' + fmt(discPct, 1) + '%)' : ''}${t.tax ? ' | IVA: ' + fmt(t.tax) : ''}${overDisc ? `<br><span class="warn">Supera el tope máximo permitido de descuento (${qty(maxDisc)}%)</span>` : ''}<br><span class="big">${fmt(t.total)} USD</span><br><span class="mut">${fmt(t.total * t.rate)} Bs</span>`;
     $('#vBal').innerHTML = `Pagado: <b>${fmt(paid)} USD</b> | ` + (bal > 0.01 ? `<span class="warn">Queda a crédito: <b>${fmt(bal)} USD</b> (${fmt(bal * t.rate)} Bs)</span>` : bal < -0.01 ? `Vuelto: <b>${fmt(-bal)} USD</b> (${fmt(-bal * t.rate)} Bs)` : 'Pago completo');
     $('#vDueW').classList.toggle('hidden', !(bal > 0.01));
+    if (bal > 0.01 && !dueTouched && !$('#vDue').value && Number(rules.default_credit_days || 0) > 0 && typeof addDaysISO === 'function') {
+      $('#vDue').value = addDaysISO(caracasDate(), rules.default_credit_days);
+    }
     document.querySelectorAll('#vPays .payl').forEach(l => { const u = payUsd(V.pays[+l.dataset.i], t.rate); l.querySelector('.eq').textContent = '≈ ' + fmt(u) + ' USD | ' + fmt(u * t.rate) + ' Bs'; });
     document.querySelectorAll('#vCart .pl').forEach(l => { const c = V.cart[+l.dataset.i]; l.querySelector('.lt').textContent = 'Total: ' + fmt(c.qty * c.price) + ' USD'; });
     return {...t, paid, bal};
   };
   const drawCart = () => {
     $('#vCart').innerHTML = V.cart.map((c, i) => `<div class="pl" data-i="${i}"><div><b>${esc(c.name)}</b><small>${c.svc ? 'Servicio (sin inventario)' : 'Disponible: ' + qty(D.st[c.pid] || 0) + ' ' + esc(c.unit)}</small><small class="lt"></small>${c.svc ? `<button class="lnk" data-free="${i}">${c.price > 0 ? 'Asumirlo yo (no cobrar)' : 'Cobrarlo al cliente'}</button>` : ''}<button class="lnk bad" data-rm="${i}">Quitar</button></div>
-      <div class="stack" style="gap:.3rem"><label>Cant.<input data-f="qty" type="number" step="0.001" min="0.001" value="${c.qty}"></label><label>Precio USD<input data-f="price" type="number" step="0.01" min="0" value="${c.price}"></label></div></div>`).join('') || '<p class="mut">Busca y agrega productos.</p>';
+      <div class="stack" style="gap:.3rem"><label>Cant.<input data-f="qty" type="number" step="0.001" min="0.001" value="${c.qty}"></label><label>Precio USD<input data-f="price" type="number" step="0.01" min="0" value="${c.price}" ${lockSellerPrice ? 'disabled' : ''}></label></div></div>`).join('') || '<p class="mut">Busca y agrega productos.</p>';
     totals();
   };
   const drawPays = () => {
@@ -192,7 +203,17 @@ async function viewVenta() {
       if (ch > cash.amount + 0.005) throw new Error('El pago supera el total. Ajusta los montos.');
       cash.amount = Math.round((cash.amount - ch) * 100) / 100;
     }
-    if (V.cart.some(c => !c.svc && c.qty > (D.st[c.pid] || 0)) && !confirm('Hay productos con inventario insuficiente. ¿Registrar la venta de todos modos?')) return;
+    const discPctGo = t.sub > 0 ? (t.disc / t.sub * 100) : 0;
+    if (Number(rules.max_discount_percent || 0) > 0 && discPctGo > Number(rules.max_discount_percent) + 0.05 && (S.role || 'admin') !== 'admin') {
+      throw new Error(`El descuento (${fmt(discPctGo, 1)}%) supera el máximo permitido (${qty(rules.max_discount_percent)}%).`);
+    }
+    const lacking = V.cart.filter(c => !c.svc && c.qty > (D.st[c.pid] || 0));
+    if (lacking.length) {
+      if (rules.block_negative_stock) {
+        throw new Error('Stock insuficiente para: ' + lacking.map(c => `${c.name} (disp: ${qty(D.st[c.pid] || 0)})`).join(', ') + '. Regla activa en Configuración.');
+      }
+      if (!confirm('Hay productos con inventario insuficiente. ¿Registrar la venta de todos modos?')) return;
+    }
     const id = await q(db.rpc('registrar_venta', {p_id: V.edit, p_customer_id: +$('#vCust').value || null, p_doc_type: $('#vDoc').value, p_rate: t.rate, p_discount_usd: t.disc,
       p_due_date: $('#vDue').value || null, p_notes: $('#vNotes').value.trim() || null,
       p_items: V.cart.map(c => ({product_id: c.pid, quantity: c.qty, unit_price_usd: c.price})),

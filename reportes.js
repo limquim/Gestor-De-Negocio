@@ -69,8 +69,13 @@ async function alertasHtml() {
   if (bajos) A.push(['inventario', `${bajos} ${bajos === 1 ? 'producto' : 'productos'} por reponer`]);
   if (sc) A.push(['inventario', `${sc} ${sc === 1 ? 'producto sin costo' : 'productos sin costo'}: la utilidad saldrá incompleta`]);
   if (ng) A.push(['inventario', `${ng} ${ng === 1 ? 'producto' : 'productos'} con precio menor al costo`]);
-  if (!rate[0] || rate[0].rate_date < hoy) A.push(['configuracion', 'La tasa de cambio no se ha actualizado hoy']);
+  if (!rate[0] || rate[0].rate_date < hoy) A.push(['configuracion', 'La tasa de cambio no se ha actualizado hoy', 'tasa']);
   if (neg.length) A.push(['finanzas', 'Saldo negativo en: ' + neg.map(a => a.name).join(', ')]);
   if (enp.length) A.push(['produccion', `${enp.length} ${enp.length === 1 ? 'orden de producción en proceso' : 'órdenes de producción en proceso'}`]);
-  return `<div class="card"><h2>${A.length ? 'Requiere atención' : 'Todo en orden'}</h2>${A.length ? A.map(([g, t]) => `<button class="alert" data-go="${g}"><span>${esc(t)}</span><span>&rsaquo;</span></button>`).join('') : '<p class="mut">No hay alertas por ahora.</p>'}</div>`;
+  if ((S.role || 'admin') === 'admin' && typeof getLastBackupDate === 'function') {
+    const lb = getLastBackupDate();
+    const dBk = lb ? Math.floor((Date.now() - new Date(lb).getTime()) / 864e5) : null;
+    if (dBk !== null && dBk >= 14) A.push(['configuracion', `Llevas ${dBk} días sin descargar un respaldo de tus datos`, 'respaldo']);
+  }
+  return `<div class="card"><h2>${A.length ? 'Requiere atención' : 'Todo en orden'}</h2>${A.length ? A.map(([g, t, scCfg]) => `<button class="alert" data-go="${g}" ${scCfg ? `onclick="SUB.cfg='${scCfg}'"` : ''}><span>${esc(t)}</span><span>&rsaquo;</span></button>`).join('') : '<p class="mut">No hay alertas por ahora.</p>'}</div>`;
 }
