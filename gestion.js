@@ -16,7 +16,7 @@ async function viewAjusteMasivo() {
   const [rows, types, accs] = await Promise.all([
     q(db.from('stock_actual').select('product_id,sku,name,category_id,category,unit,stock,avg_cost_usd').order('name')),
     q(db.from('expense_types').select('id,name').eq('active', true).order('name')),
-    q(db.from('accounts').select('id,name,currency').eq('active', true).order('id'))
+    loadActiveAccounts()
   ]);
   const cats = [...new Map(rows.filter(x => x.category_id).map(x => [String(x.category_id), x.category])).entries()], m = AJ.mode, rs = AJREASON[m];
   if (!rs.includes(AJ.reason)) AJ.reason = rs[0];
@@ -38,7 +38,7 @@ async function viewAjusteMasivo() {
     <div class="grid"><label>Motivo<select id="ajR">${rs.map(x => `<option ${x === AJ.reason ? 'selected' : ''}>${x}</option>`).join('')}</select></label><label>Nota<input id="ajN" value="${esc(AJ.note)}" placeholder="Ej: inventario de octubre"></label></div>
     <label>¿Afecta financieramente?<select id="ajF">${Object.entries(finOpts).map(([k, v]) => `<option value="${k}" ${k === AJ.fin ? 'selected' : ''}>${v}</option>`).join('')}</select></label>
     ${AJ.fin === 'gasto' ? `<label>Tipo de gasto<select id="ajT">${types.map(t => `<option value="${t.id}" ${String(t.id) === AJ.etype ? 'selected' : ''}>${esc(t.name)}</option>`).join('')}</select></label>` : ''}
-    ${AJ.fin === 'pago' ? `<label>Pagado desde<select id="ajA">${acctOpts(accs, AJ.acc)}</select></label>` : ''}
+    ${AJ.fin === 'pago' ? `<label>Pagado desde<select id="ajA">${acctOpts(accs, AJ.acc)}</select></label><small id="ajAccBal" style="display:block;margin-top:-.45rem"></small>` : ''}
     <div class="scan-row"><input id="ajQ" type="search" placeholder="Buscar producto o escanear para sumar +1" value="${esc(AJ.q)}"><button type="button" class="icon-btn scan-btn" id="ajScan" title="Escanear código de barras (suma +1)" aria-label="Escanear código de barras">${SCAN_ICO}</button></div>
     <div class="chips" id="ajC"><button data-c="all" class="${AJ.cat === 'all' ? 'on' : ''}">Todos</button>${cats.map(([id, n]) => `<button data-c="${id}" class="${AJ.cat === id ? 'on' : ''}">${esc(n)}</button>`).join('')}</div></div>
     <div class="card"><div class="list" id="ajL"></div></div><div class="card"><div id="ajS"></div></div>
@@ -64,6 +64,10 @@ async function viewAjusteMasivo() {
     $('#ajS').innerHTML = P.length
       ? `${ent.length ? `Entran ${ent.length} productos por <b>${fmt(val(ent))} USD</b>.<br>` : ''}${sal.length ? `Salen ${sal.length} productos por <b>${fmt(val(sal))} USD</b> (al costo actual).${AJ.fin === 'gasto' ? ' <b>Se registrará como gasto.</b>' : ''}<br>` : ''}${AJ.fin === 'pago' && ent.length ? `Se descontarán <b>${fmt(val(ent))} USD</b> de la cuenta elegida.` : ''}`
       : '<span class="mut">Aún no hay cambios.</span>';
+    if ($('#ajAccBal') && AJ.fin === 'pago') {
+      const a = accs.find(x => String(x.id) === AJ.acc), totIn = val(ent);
+      $('#ajAccBal').innerHTML = accBalanceLine(a, a?.currency === 'VES' ? totIn * (S.rate || 0) : totIn, true);
+    }
     $('#ajGo').textContent = `Aplicar (${P.length})`;
   };
 
@@ -88,7 +92,7 @@ async function viewAjusteMasivo() {
   $('#ajN').oninput = (e) => { AJ.note = e.target.value; };
   $('#ajF').onchange = (e) => { AJ.fin = e.target.value; render(); };
   if ($('#ajT')) $('#ajT').onchange = (e) => { AJ.etype = e.target.value; };
-  if ($('#ajA')) $('#ajA').onchange = (e) => { AJ.acc = e.target.value; };
+  if ($('#ajA')) $('#ajA').onchange = (e) => { AJ.acc = e.target.value; upd(); };
   $('#ajL').addEventListener('input', (e) => {
     const id = e.target.dataset.c, cid = e.target.dataset.cost;
     if (id) { AJ.vals[id] = e.target.value; upd(); }
@@ -212,13 +216,14 @@ async function viewDeudas() {
 async function debtSheet(c) {
   let qb = db.from('ventas_resumen').select('id,sale_date,total_usd,paid_usd,due_date').eq('status', 'pendiente').order('sale_date').order('id');
   qb = c.customer_id === null ? qb.is('customer_id', null) : qb.eq('customer_id', c.customer_id);
-  const [sales, accs, payTxt] = await Promise.all([q(qb), db.from('accounts').select('id,name,currency,methods,is_default').eq('active', true).order('is_default', {ascending: false}).order('id').then(r => r.error ? q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id')) : r.data), getPaymentDetailsText()]);
+  const [sales, accs, payTxt] = await Promise.all([q(qb), loadActiveAccounts(), getPaymentDetailsText()]);
   const hoy = caracasDate(), bal = (s) => s.total_usd - s.paid_usd, total = sales.reduce((a, s) => a + bal(s), 0);
   openSheet(esc(c.customer), `<form id="dcF" class="stack"><p><b>Deuda total: ${fmt(total)} USD</b>${S.rate ? ' (' + fmt(total * S.rate) + ' Bs a la tasa de hoy)' : ''}</p>
     <p class="mut">Marca las ventas que quieres pagar. Si el monto no alcanza para todas, se pagan completas las más antiguas y la siguiente queda con un abono y lo que falta abierto.</p>
     <div class="list" id="dcS">${sales.map(s => `<div class="item"><label class="chk" style="flex:1"><input type="checkbox" data-s="${s.id}" checked><span><b>Venta #${s.id}</b>
       <small>${s.sale_date}${s.due_date && s.due_date < hoy ? ' | vencida' : ''} | debe ${fmt(bal(s))} USD</small><small class="al" style="display:block"></small></span></label></div>`).join('')}</div>
     <label>Cuenta<select name="acc">${acctOpts(accs)}</select></label>
+    <small id="dcAccBal" style="display:block;margin-top:-.45rem"></small>
     <label>Tasa de cambio (Bs por USD)<input name="rate" type="number" step="0.0001" min="0.0001" value="${S.rate || ''}"></label>
     <label>Método<select name="method"></select></label>
     <label>Monto a cobrar<input name="amount" type="number" step="0.01" min="0.01" required></label><p class="mut" id="dcSum"></p>
@@ -232,6 +237,7 @@ async function debtSheet(c) {
     al.forEach(x => { const l = document.querySelector(`[data-s="${x.s.id}"]`).closest('.item').querySelector('.al'); l.className = 'al ' + (x.st === 'full' ? 'in' : x.st === 'part' ? 'warn' : 'mut'); l.style.display = 'block';
       l.textContent = x.st === 'full' ? 'Se paga completa' : x.st === 'part' ? `Abono de ${fmt(x.a)} USD: queda abierta debiendo ${fmt(bal(x.s) - x.a)} USD` : x.st === 'none' ? 'No alcanza: queda pendiente' : ''; });
     $('#dcSum').textContent = over > 0.02 ? `El monto supera la deuda de las ventas elegidas por ${fmt(over)} USD.` : `Cobrarás ${fmt(usd)} USD. Quedan pendientes ${fmt(Math.max(sel - usd, 0))} USD de las ventas elegidas.`;
+    if ($('#dcAccBal')) $('#dcAccBal').innerHTML = accBalanceLine(accs.find(a => String(a.id) === el.acc.value), 0, false);
   };
   const fillM = () => { el.method.innerHTML = optList(accMethods(accs.find(a => String(a.id) === el.acc.value))); };
   let pf = factor();

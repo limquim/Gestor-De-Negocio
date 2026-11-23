@@ -27,14 +27,15 @@ async function viewNomina() {
   const [emps, advs, accs] = await Promise.all([
     q(db.from('employees').select('*').eq('active', true).order('name')),
     q(db.from('employee_advances').select('id,employee_id,amount_usd').is('discounted_run_id', null)),
-    q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id'))
+    loadActiveAccounts()
   ]);
   const list = emps.filter(e => NOM.freq === 'todos' || e.pay_type === NOM.freq), [p0, p1] = periodDefaults(NOM.freq);
   const advOf = (id) => advs.filter(a => a.employee_id === id), advSum = (id) => advOf(id).reduce((a, x) => a + +x.amount_usd, 0);
   $('#view').innerHTML = `<div class="chips sub" id="nmF">${Object.entries(PAYT).map(([k, v]) => `<button data-f="${k}" class="${k === NOM.freq ? 'on' : ''}">${v}</button>`).join('')}</div>
   ${list.length ? `<div class="card stack"><h2>Periodo y pago</h2>
     <div class="grid"><label>Desde<input id="nmS" type="date" value="${p0}"></label><label>Hasta<input id="nmE" type="date" value="${p1}"></label><label>Fecha de pago<input id="nmD" type="date" value="${caracasDate()}"></label></div>
-    <div class="grid"><label>Pagar desde<select id="nmA">${acctOpts(accs)}</select></label><label>Tasa (Bs por USD)<input id="nmR" type="number" step="0.0001" min="0.0001" value="${S.rate || ''}"></label></div></div>
+    <div class="grid"><label>Pagar desde<select id="nmA">${acctOpts(accs)}</select></label><label>Tasa (Bs por USD)<input id="nmR" type="number" step="0.0001" min="0.0001" value="${S.rate || ''}"></label></div>
+    <small id="nmAccBal" style="display:block;margin-top:-.35rem"></small></div>
   <div class="card"><h2>Empleados (${list.length})</h2><div id="nmL">${list.map(e => { const adv = advSum(e.id); return `<div class="pl nrow" data-e="${e.id}"><div><b>${esc(e.name)}</b><small>${esc(e.position || 'Sin cargo')} | ${PAYT[e.pay_type]}</small><small class="nt"></small></div>
     <div class="stack" style="gap:.3rem"><label>Sueldo USD<input data-f="base" type="number" step="0.01" min="0" value="${e.salary_usd}"></label><label>Bono USD<input data-f="bonus" type="number" step="0.01" min="0" value="0"></label>
       <label>Descuento USD<input data-f="ded" type="number" step="0.01" min="0" value="0"></label>${adv ? `<label class="chk"><input type="checkbox" data-f="adv" checked> Descontar adelantos (${fmt(adv)} USD)</label>` : ''}</div></div>`; }).join('')}</div></div>
@@ -52,10 +53,13 @@ async function viewNomina() {
       return {id, base, bonus, ded, net, advIds: ac && ac.checked ? advOf(id).map(x => x.id) : []};
     });
     $('#nmT').innerHTML = `Sueldos y bonos: <b>${fmt(g)} USD</b> | Descuentos: ${fmt(d)} | Adelantos descontados: ${fmt(a)}<br><span class="big">${fmt(n)} USD</span> <span class="mut">${rt ? fmt(n * rt) + ' Bs a pagar ahora' : ''}</span>`;
+    const selA = accs.find(x => String(x.id) === $('#nmA').value);
+    const payInCur = selA?.currency === 'VES' ? n * rt : n;
+    if ($('#nmAccBal')) $('#nmAccBal').innerHTML = accBalanceLine(selA, payInCur, true);
     return {res, n};
   };
   calc();
-  $('#nmL').addEventListener('input', calc); $('#nmL').addEventListener('change', calc); $('#nmR').addEventListener('input', calc);
+  $('#nmL').addEventListener('input', calc); $('#nmL').addEventListener('change', calc); $('#nmR').addEventListener('input', calc); $('#nmA').onchange = calc;
   $('#nmGo').onclick = () => run(async () => {
     const {res, n} = calc(), items = res.filter(r => r.base + r.bonus > 0).map(r => ({employee_id: r.id, base: r.base, bonus: r.bonus, deduction: r.ded, advance_ids: r.advIds, note: ''}));
     if (!items.length) throw new Error('No hay montos para pagar');
@@ -92,7 +96,7 @@ async function viewAdelantos() {
   const [rows, emps, accs] = await Promise.all([
     q(db.from('employee_advances').select('id,advance_date,amount_usd,note,discounted_run_id,employees(name)').order('id', {ascending: false}).limit(60)),
     q(db.from('employees').select('id,name').eq('active', true).order('name')),
-    q(db.from('accounts').select('id,name,currency').eq('active', true).order('id'))
+    loadActiveAccounts()
   ]);
   $('#view').innerHTML = `<div class="list">${rows.map(a => `<div class="item"><span style="flex:1"><b>${esc(a.employees?.name)}</b><small>${dmy(a.advance_date)}${a.note ? ' | ' + esc(a.note) : ''}</small></span>
     <span class="n"><b>${fmt(a.amount_usd)} USD</b><small>${a.discounted_run_id ? 'Descontado en nómina #' + a.discounted_run_id : 'Pendiente de descontar'}</small></span></div>`).join('') || '<p class="mut">No hay adelantos registrados. Pulsa + para dar uno.</p>'}</div>
@@ -101,7 +105,14 @@ async function viewAdelantos() {
     if (!emps.length) return toast('Primero agrega empleados', true);
     openSheet('Nuevo adelanto', `<form id="adF" class="stack"><label>Empleado<select name="emp">${emps.map(e => `<option value="${e.id}">${esc(e.name)}</option>`).join('')}</select></label>
       <label>Monto en USD<input name="amt" type="number" step="0.01" min="0.01" required></label><label>Entregado desde<select name="acc">${acctOpts(accs)}</select></label>
+      <small id="adAccBal" style="display:block;margin-top:-.45rem"></small>
       <label>Nota<input name="note" placeholder="Ej: adelanto para medicinas"></label><p class="mut">Se descuenta en la próxima nómina. Si la cuenta es en Bs, se convierte con la tasa de hoy.</p><button class="btn" type="submit">Registrar adelanto</button></form>`);
+    const adEl = $('#adF').elements;
+    const paintAdBal = () => {
+      const a = accs.find(x => String(x.id) === adEl.acc.value), u = num(adEl.amt.value) || 0;
+      $('#adAccBal').innerHTML = accBalanceLine(a, a?.currency === 'VES' ? u * (S.rate || 0) : u, true);
+    };
+    paintAdBal(); adEl.acc.onchange = paintAdBal; adEl.amt.oninput = paintAdBal;
     $('#adF').onsubmit = (e) => {
       e.preventDefault(); const el = e.target.elements;
       run(async () => { await q(db.rpc('registrar_adelanto', {p_employee_id: +el.emp.value, p_account_id: +el.acc.value, p_amount_usd: num(el.amt.value), p_note: el.note.value.trim() || null, p_rate: S.rate})); closeSheet(); toast('Adelanto registrado'); render(); });

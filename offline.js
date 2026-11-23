@@ -1050,6 +1050,7 @@ const OFF = {
           amount_usd: usd,
           exchange_rate: rate,
           reference: py.reference || null,
+          paid_at: now,
           created_at: now
         });
         await this.bumpAccount(py.account_id, amt, 'cobro', 'Venta #' + saleId);
@@ -1150,7 +1151,7 @@ const OFF = {
       const amt = this.r2(P.p_amount);
       const usd = this.r2(this.toUsdLocal(amt, cur, rate));
       const pays = this.mem.payments || [];
-      pays.push({id: this.nextTempId(), sale_id: sid, purchase_id: null, account_id: Number(P.p_account_id), method: P.p_method || 'efectivo', currency: cur, amount: amt, amount_usd: usd, exchange_rate: rate, reference: P.p_reference || null, created_at: now});
+      pays.push({id: this.nextTempId(), sale_id: sid, purchase_id: null, account_id: Number(P.p_account_id), method: P.p_method || 'efectivo', currency: cur, amount: amt, amount_usd: usd, exchange_rate: rate, reference: P.p_reference || null, paid_at: now, created_at: now});
       await this.saveTable('payments', pays);
       await this.bumpAccount(P.p_account_id, amt, 'cobro', 'Cobro venta #' + sid);
       const vr = (this.mem.ventas_resumen || []).find(x => Number(x.id) === sid);
@@ -1182,7 +1183,7 @@ const OFF = {
         remUsd = this.r2(remUsd - app);
         if (app > 0.004) {
           const origAmt = cur === 'USD' ? app : this.r2(app * rate);
-          pays.push({id: this.nextTempId(), sale_id: sid, purchase_id: null, account_id: Number(P.p_account_id), method: P.p_method || 'efectivo', currency: cur, amount: origAmt, amount_usd: this.r2(app), exchange_rate: rate, reference: P.p_reference || null, created_at: now});
+          pays.push({id: this.nextTempId(), sale_id: sid, purchase_id: null, account_id: Number(P.p_account_id), method: P.p_method || 'efectivo', currency: cur, amount: origAmt, amount_usd: this.r2(app), exchange_rate: rate, reference: P.p_reference || null, paid_at: now, created_at: now});
           vr.paid_usd = this.r2(Number(vr.paid_usd || 0) + app);
           if (vr.paid_usd >= Number(vr.total_usd || 0) - 0.01) {
             vr.status = 'pagada'; pagadas++;
@@ -1276,7 +1277,7 @@ const OFF = {
       const acc = accById(P.p_account_id), cur = acc?.currency || 'USD';
       const amt = this.r2(P.p_amount), usd = this.r2(this.toUsdLocal(amt, cur, rate));
       const pays = this.mem.payments || [];
-      pays.push({id: this.nextTempId(), sale_id: null, purchase_id: pid, account_id: Number(P.p_account_id), method: P.p_method || 'efectivo', currency: cur, amount: amt, amount_usd: usd, exchange_rate: rate, reference: P.p_reference || null, created_at: now});
+      pays.push({id: this.nextTempId(), sale_id: null, purchase_id: pid, account_id: Number(P.p_account_id), method: P.p_method || 'efectivo', currency: cur, amount: amt, amount_usd: usd, exchange_rate: rate, reference: P.p_reference || null, paid_at: now, created_at: now});
       await this.saveTable('payments', pays);
       await this.bumpAccount(P.p_account_id, -amt, 'pago', 'Pago compra #' + pid);
       const cr = (this.mem.compras_resumen || []).find(x => Number(x.id) === pid);
@@ -2076,10 +2077,7 @@ const OFF = {
       });
     }
 
-    window.addEventListener('beforeinstallprompt', (e) => {
-      e.preventDefault();
-      this.installPrompt = e;
-    });
+    // Dejamos que el navegador muestre su botón nativo de instalación sin bloquear el evento
 
     window.addEventListener('online', () => {
       this.paintBar();

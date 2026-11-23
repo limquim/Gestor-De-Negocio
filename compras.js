@@ -6,7 +6,7 @@ async function cData() {
   const [products, sups, accs] = await Promise.all([
     q(db.from('products').select('id,name,sku,unit,avg_cost_usd,last_cost_usd').eq('active', true).order('name')),
     q(db.from('parties').select('id,name,phone').eq('is_supplier', true).eq('active', true).order('name')),
-    db.from('accounts').select('id,name,currency,methods,is_default').eq('active', true).order('is_default', {ascending: false}).order('id').then(r => r.error ? q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id')) : r.data)
+    loadActiveAccounts()
   ]);
   return {products, sups, accs};
 }
@@ -36,7 +36,12 @@ async function viewCompra() {
     $('#cBal').innerHTML = `Pagado: <b>${fmt(paid)} USD</b> | ` + (bal > 0.01 ? `<span class="warn">Queda por pagar: <b>${fmt(bal)} USD</b> (${fmt(bal * rt)} Bs)</span>` : bal < -0.01 ? `<span class="warn">El pago supera el total por ${fmt(-bal)} USD</span>` : 'Pago completo');
     $('#cDueW').classList.toggle('hidden', !(bal > 0.01));
     document.querySelectorAll('#cCart .pl').forEach(l => { const c = CV.cart[+l.dataset.i]; l.querySelector('.lt').textContent = 'Total: ' + fmt(c.qty * c.cost) + (cur() === 'USD' ? ' USD' : ' Bs'); });
-    document.querySelectorAll('#cPays .payl').forEach(l => { const u = payUsd(CV.pays[+l.dataset.i]); l.querySelector('.eq').textContent = '≈ ' + fmt(u) + ' USD | ' + fmt(u * rt) + ' Bs'; });
+    document.querySelectorAll('#cPays .payl').forEach(l => {
+      const p = CV.pays[+l.dataset.i], a = D.accs.find(x => x.id === +p.acc), u = payUsd(p);
+      l.querySelector('.eq').textContent = '≈ ' + fmt(u) + ' USD | ' + fmt(u * rt) + ' Bs';
+      const bl = l.querySelector('.abal');
+      if (bl) bl.innerHTML = accBalanceLine(a, p.amount, true);
+    });
     return {tot, paid, bal};
   };
   const drawCart = () => {
@@ -48,6 +53,7 @@ async function viewCompra() {
   const drawPays = () => {
     $('#cPays').innerHTML = CV.pays.map((p, i) => `<div class="stack payl" data-i="${i}">
       <div class="ln2"><label>Cuenta<select data-f="acc">${acctOpts(D.accs, p.acc)}</select></label><label>Método<select data-f="method">${optList(accMethods(D.accs.find(x => x.id === +p.acc)), p.method)}</select></label></div>
+      <small class="abal" style="display:block;margin-top:-.3rem"></small>
       <div class="ln2"><label>Monto<input data-f="amount" type="number" step="0.01" min="0" value="${p.amount}"></label><label>Referencia<input data-f="ref" value="${esc(p.ref)}"></label></div>
       <small class="mut eq"></small><button class="lnk bad" data-rmp="${i}">Quitar pago</button></div>`).join('') || '<p class="mut">Sin pagos: la compra quedará por pagar.</p>';
     totals();
@@ -155,18 +161,23 @@ async function purchaseSheet(id) {
 
 // ---------- Cobro o pago de una deuda: queda en USD y se convierte con la tasa del día de pago ----------
 async function debtForm(cfg) {
-  const accs = await db.from('accounts').select('id,name,currency,methods,is_default').eq('active', true).order('is_default', {ascending: false}).order('id').then(r => r.error ? q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id')) : r.data), bal = cfg.bal;
+  const accs = await loadActiveAccounts(), bal = cfg.bal, isOut = cfg.rpc === 'registrar_pago_compra';
   openSheet(cfg.title, `<form id="dF" class="stack"><p>${cfg.label}: <b>${fmt(bal)} USD</b> (${fmt(bal * (S.rate || 0))} Bs a la tasa de hoy)<br>
     <span class="mut">El precio en dólares no cambia. Lo que se paga en Bs depende de la tasa del día del pago; puedes modificarla.</span></p>
     <label>Cuenta<select name="acc">${acctOpts(accs)}</select></label>
+    <small id="dAccBal" style="display:block;margin-top:-.45rem"></small>
     <label>Tasa de cambio (Bs por USD)<input name="rate" type="number" step="0.0001" min="0.0001" value="${S.rate || ''}"></label>
     <label>Método<select name="method"></select></label>
     <label>Monto<input name="amount" type="number" step="0.01" min="0.01" required></label><p class="mut" id="dEq"></p>
     <label>Referencia<input name="ref"></label><button class="btn" type="submit">${cfg.title}</button></form>`);
-  const el = $('#dF').elements, cur = () => accs.find(a => String(a.id) === el.acc.value).currency;
-  const eq = () => { const r = +el.rate.value || 0, a = num(el.amount.value) || 0, usd = cur() === 'USD' ? a : (r ? a / r : 0); $('#dEq').textContent = `Equivale a ${fmt(usd)} USD | quedaría debiendo ${fmt(Math.max(bal - usd, 0))} USD`; };
+  const el = $('#dF').elements, curAcc = () => accs.find(a => String(a.id) === el.acc.value), cur = () => curAcc().currency;
+  const eq = () => {
+    const r = +el.rate.value || 0, a = num(el.amount.value) || 0, usd = cur() === 'USD' ? a : (r ? a / r : 0);
+    $('#dEq').textContent = `Equivale a ${fmt(usd)} USD | quedaría debiendo ${fmt(Math.max(bal - usd, 0))} USD`;
+    $('#dAccBal').innerHTML = accBalanceLine(curAcc(), a, isOut);
+  };
   const full = () => { el.amount.value = (bal * (cur() === 'USD' ? 1 : (+el.rate.value || 0))).toFixed(2); eq(); };
-  const fillM = () => { el.method.innerHTML = optList(accMethods(accs.find(a => String(a.id) === el.acc.value))); };
+  const fillM = () => { el.method.innerHTML = optList(accMethods(curAcc())); };
   fillM(); full(); let pf = cur() === 'USD' ? 1 : (+el.rate.value || 0);
   const conv = () => { const nf = cur() === 'USD' ? 1 : (+el.rate.value || 0), usd = pf ? (num(el.amount.value) || 0) / pf : bal; pf = nf; el.amount.value = (usd * nf).toFixed(2); eq(); };
   el.acc.onchange = () => { fillM(); conv(); }; el.rate.oninput = conv; el.amount.oninput = eq;

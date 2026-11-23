@@ -52,7 +52,7 @@ async function returnSheet(id) {
 async function returnForm(saleId) {
   const [d, accs, prev] = await Promise.all([
     saleDetail(saleId),
-    q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id')),
+    loadActiveAccounts(),
     q(db.from('sale_return_items').select('product_id,quantity,sale_returns!inner(sale_id,status)').eq('sale_returns.sale_id', saleId).eq('sale_returns.status', 'activa'))
   ]);
   const s = d.s; if (s.status === 'anulada') throw new Error('La venta #' + saleId + ' está anulada');
@@ -69,7 +69,9 @@ async function returnForm(saleId) {
     <label>Motivo<select name="reason">${REASONS.map(x => `<option>${x}</option>`).join('')}</select></label><label>Nota<input name="notes"></label>
     <div id="rTot"></div>
     <div id="rRef" class="stack hidden"><h2>Reembolso al cliente</h2>
-      <label>Devolver desde<select name="acc">${acctOpts(accs)}</select></label><label>Método<select name="method"></select></label>
+      <label>Devolver desde<select name="acc">${acctOpts(accs)}</select></label>
+      <small id="rAccBal" style="display:block;margin-top:-.45rem"></small>
+      <label>Método<select name="method"></select></label>
       <label>Monto<input name="amount" type="number" step="0.01" min="0"></label><label>Referencia<input name="ref"></label></div>
     <button class="btn" type="submit">Registrar devolución</button></form>`);
   const el = $('#rF').elements, rate = S.rate || s.exchange_rate, cur = () => accs.find(a => String(a.id) === el.acc.value).currency;
@@ -81,9 +83,10 @@ async function returnForm(saleId) {
     return {tot, due};
   };
   const fillM = () => { el.method.innerHTML = optList(accMethods(accs.find(a => String(a.id) === el.acc.value))); };
-  const fillA = () => { const {due} = calc(); el.amount.value = due > 0.01 ? (due * (cur() === 'USD' ? 1 : rate)).toFixed(2) : ''; };
-  fillM(); calc();
-  $('#rF').addEventListener('input', (e) => { if (e.target.dataset.q !== undefined || e.target.dataset.r !== undefined) fillA(); });
+  const paintRBal = () => { const a = accs.find(x => String(x.id) === el.acc.value); $('#rAccBal').innerHTML = accBalanceLine(a, num(el.amount.value) || 0, true); };
+  const fillA = () => { const {due} = calc(); el.amount.value = due > 0.01 ? (due * (cur() === 'USD' ? 1 : rate)).toFixed(2) : ''; paintRBal(); };
+  fillM(); calc(); paintRBal();
+  $('#rF').addEventListener('input', (e) => { if (e.target.dataset.q !== undefined || e.target.dataset.r !== undefined) fillA(); else if (e.target.name === 'amount') paintRBal(); });
   el.acc.onchange = () => { fillM(); fillA(); };
   $('#rF').onsubmit = (e) => {
     e.preventDefault();

@@ -2,7 +2,32 @@
 const num = (v) => +String(v ?? '').replace(',', '.');
 const toUsd = (amt, cur) => cur === 'USD' ? +amt : (S.rate ? amt / S.rate : 0);
 const money = (n, cur) => fmt(n) + (cur === 'USD' ? ' USD' : ' Bs');
-const acctOpts = (accs, sel) => accs.map(a => `<option value="${a.id}" ${String(a.id) === String(sel) ? 'selected' : ''}>${esc(a.name)} (${a.currency})</option>`).join('');
+const acctOpts = (accs, sel) => accs.map(a => {
+  const bTxt = a.balance !== undefined && a.balance !== null ? ` · Disp: ${money(a.balance, a.currency)}` : '';
+  return `<option value="${a.id}" ${String(a.id) === String(sel) ? 'selected' : ''}>${esc(a.name)} (${a.currency})${bTxt}</option>`;
+}).join('');
+
+function accBalanceLine(acc, payAmt = 0, isOutgoing = true) {
+  if (!acc || acc.balance === undefined || acc.balance === null) return '';
+  const bal = Number(acc.balance || 0);
+  const amt = Math.max(0, Number(payAmt || 0));
+  const cur = acc.currency || 'USD';
+  const eq = cur === 'VES' && S.rate ? ` (≈ ${fmt(bal / S.rate)} USD)` : '';
+  if (!isOutgoing) {
+    return `<span class="mut">Saldo actual en cuenta: <b>${money(bal, cur)}</b>${eq}</span>`;
+  }
+  if (bal <= 0 || (amt > 0 && amt > bal + 0.009)) {
+    const falta = Math.max(0, amt - Math.max(bal, 0));
+    return `<span class="bad">Saldo en cuenta: <b>${money(bal, cur)}</b>${eq} · ${amt > 0 ? `Saldo insuficiente (faltan ${money(falta, cur)})` : 'Sin saldo disponible'}</span>`;
+  }
+  const rest = bal - amt;
+  return `<span class="in">Saldo disponible: <b>${money(bal, cur)}</b>${eq}${amt > 0 ? ` · Quedará: ${money(rest, cur)}` : ''}</span>`;
+}
+
+async function loadActiveAccounts() {
+  const list = await loadAccountsRich();
+  return list.filter(a => a.active !== false);
+}
 const MOVK = {
   cobro: 'Cobro', anulacion: 'Anulación', pago: 'Pago', gasto: 'Gasto',
   transferencia: 'Transferencia', ajuste: 'Ajuste', aporte: 'Aporte de capital',
@@ -291,6 +316,7 @@ function capitalForm(accs, preId) {
       <option value="retiro">Retiro del dueño / socio (sale dinero de la cuenta)</option>
     </select></label>
     <label>Cuenta<select name="acc">${acctOpts(accs, preId)}</select></label>
+    <small id="cpBal" style="display:block;margin-top:-.45rem"></small>
     <label>Monto (en la moneda de la cuenta)<input name="amt" type="number" step="0.01" min="0.01" required></label>
     <p class="mut" id="cpEq" style="margin:0"></p>
     <label>Nota<input name="note" placeholder="Ej: inyección para mercancía / retiro semanal"></label>
@@ -299,12 +325,14 @@ function capitalForm(accs, preId) {
   const f = $('#cpF'), el = f.elements;
   const updEq = () => {
     const a = accs.find(x => String(x.id) === el.acc.value), v = num(el.amt.value) || 0;
+    $('#cpBal').innerHTML = accBalanceLine(a, v, el.kind.value === 'retiro');
     if (!a || !v) { $('#cpEq').textContent = ''; return; }
     $('#cpEq').textContent = a.currency === 'USD'
       ? (S.rate ? `Equivale a ${fmt(v * S.rate)} Bs` : '')
       : (S.rate ? `Equivale a ${fmt(v / S.rate)} USD` : '');
   };
-  el.acc.onchange = updEq; el.amt.oninput = updEq;
+  updEq();
+  el.kind.onchange = updEq; el.acc.onchange = updEq; el.amt.oninput = updEq;
   f.onsubmit = (e) => {
     e.preventDefault();
     run(async () => {
@@ -324,14 +352,20 @@ function capitalForm(accs, preId) {
 function transferForm(accs) {
   if (accs.length < 2) return toast('Necesitas al menos dos cuentas', true);
   openSheet('Transferir entre cuentas', `<form id="tF" class="stack"><label>Desde<select name="from">${acctOpts(accs)}</select></label>
+    <small id="tFromBal" style="display:block;margin-top:-.45rem"></small>
     <label>Hacia<select name="to">${acctOpts(accs, accs[1].id)}</select></label>
     <label>Monto que sale<input name="out" type="number" step="0.01" min="0.01" required></label>
     <label>Monto que entra<input name="inn" type="number" step="0.01" min="0.01" required></label>
     <p class="mut">Si cambias de moneda, el monto que entra se calcula con la tasa del día y puedes corregirlo.</p>
     <label>Nota<input name="note" placeholder="Ej: cambio de dólares a bolívares"></label><button class="btn" type="submit">Transferir</button></form>`);
   const el = $('#tF').elements, cur = (id) => accs.find(a => String(a.id) === id)?.currency;
-  const conv = () => { const o = num(el.out.value), f = cur(el.from.value), t = cur(el.to.value); if (o) el.inn.value = (f === t ? o : f === 'USD' ? o * (S.rate || 0) : o / (S.rate || 1)).toFixed(2); };
-  ['out', 'from', 'to'].forEach(k => el[k].addEventListener('input', conv));
+  const conv = () => {
+    const o = num(el.out.value) || 0, fa = accs.find(a => String(a.id) === el.from.value), f = fa?.currency, t = cur(el.to.value);
+    $('#tFromBal').innerHTML = accBalanceLine(fa, o, true);
+    if (o) el.inn.value = (f === t ? o : f === 'USD' ? o * (S.rate || 0) : o / (S.rate || 1)).toFixed(2);
+  };
+  conv();
+  ['out', 'from', 'to'].forEach(k => { el[k].addEventListener('input', conv); el[k].addEventListener('change', conv); });
   $('#tF').onsubmit = (e) => {
     e.preventDefault();
     run(async () => {
@@ -345,20 +379,35 @@ function transferForm(accs) {
 async function viewCierreCaja() {
   if (!CC.date) CC.date = caracasDate();
   const day = CC.date, fromTs = day + 'T00:00:00-04:00', toTs = day + 'T23:59:59-04:00';
-  const [accsAll, pays, moves, closings] = await Promise.all([
+  const toCaracasDay = (v) => {
+    if (!v) return '';
+    const s = String(v);
+    if (/^\d{4}-\d{2}-\d{2}$/.test(s)) return s;
+    const d = new Date(s);
+    return isNaN(d.getTime()) ? s.slice(0, 10) : d.toLocaleDateString('en-CA', {timeZone: 'America/Caracas'});
+  };
+  const [accsAll, allPays, moves, closings] = await Promise.all([
     loadAccountsRich(),
-    q(db.from('payments').select('method,currency,amount,amount_usd,sale_id,purchase_id,account_id,created_at').gte('created_at', fromTs).lte('created_at', toTs).order('id')),
+    db.from('payments').select('*').order('id', {ascending: false}).limit(500).then(r => r.error ? [] : (r.data || [])),
     q(db.from('account_movements').select('account_id,kind,amount,note,created_at,accounts(name,currency)').gte('created_at', fromTs).lte('created_at', toTs).order('id')),
     db.from('cash_closings').select('*').order('closing_date', {ascending: false}).order('id', {ascending: false}).limit(15).then(r => r.error ? [] : (r.data || []))
   ]);
-  const saleIds = [...new Set(pays.filter(p => p.sale_id).map(p => p.sale_id))];
-  const purIds = [...new Set(pays.filter(p => p.purchase_id).map(p => p.purchase_id))];
-  const [anulSales, anulPurs] = await Promise.all([
-    saleIds.length ? q(db.from('sales').select('id').in('id', saleIds).eq('status', 'anulada')) : [],
-    purIds.length ? q(db.from('purchases').select('id').in('id', purIds).eq('status', 'anulada')) : []
+  const rawSaleIds = [...new Set(allPays.filter(p => p.sale_id).map(p => p.sale_id))];
+  const rawPurIds = [...new Set(allPays.filter(p => p.purchase_id).map(p => p.purchase_id))];
+  const [salesMeta, pursMeta] = await Promise.all([
+    rawSaleIds.length ? q(db.from('sales').select('id,status,sale_date').in('id', rawSaleIds)) : [],
+    rawPurIds.length ? q(db.from('purchases').select('id,status,purchase_date').in('id', rawPurIds)) : []
   ]);
-  const badSales = new Set(anulSales.map(x => x.id));
-  const badPurs = new Set(anulPurs.map(x => x.id));
+  const saleInfo = new Map(salesMeta.map(x => [x.id, x]));
+  const purInfo = new Map(pursMeta.map(x => [x.id, x]));
+  const badSales = new Set(salesMeta.filter(x => x.status === 'anulada').map(x => x.id));
+  const badPurs = new Set(pursMeta.filter(x => x.status === 'anulada').map(x => x.id));
+  const pays = allPays.filter(p => {
+    const rawDt = p.paid_at || p.payment_date || p.created_at || p.date || p.fecha
+      || (p.sale_id ? saleInfo.get(p.sale_id)?.sale_date : null)
+      || (p.purchase_id ? purInfo.get(p.purchase_id)?.purchase_date : null);
+    return toCaracasDay(rawDt) === day;
+  });
   const accs = accsAll.filter(a => a.active);
   accs.forEach(a => {
     if (CC.counts[a.id] === undefined) CC.counts[a.id] = Number(a.balance || 0).toFixed(2);
@@ -591,13 +640,21 @@ async function viewGastos() {
     openSheet('Nuevo gasto', `<form id="gF" class="stack"><label>Tipo de gasto<select name="type">${types.map(t => `<option value="${t.id}">${esc(t.name)}${t.is_fixed ? ' (fijo)' : ''}</option>`).join('')}</select></label>
       <label>Descripción<input name="desc" placeholder="Ej: pago de alquiler de octubre"></label>
       <label>Pagado desde<select name="acc">${acctOpts(accs)}</select></label>
+      <small id="gAccBal" style="display:block;margin-top:-.45rem"></small>
       <label>Monto (en la moneda de la cuenta)<input name="amount" type="number" step="0.01" min="0.01" required></label>
       <label>Fecha<input name="date" type="date" value="${caracasDate()}"></label><button class="btn" type="submit">Registrar gasto</button></form>`);
     const el = $('#gF').elements; let pc = accs[0]?.currency;
+    const paintGBal = () => {
+      const a = accs.find(x => String(x.id) === el.acc.value);
+      $('#gAccBal').innerHTML = accBalanceLine(a, num(el.amount.value) || 0, true);
+    };
+    paintGBal();
+    el.amount.oninput = paintGBal;
     el.acc.onchange = () => {
       const nc = accs.find(a => String(a.id) === el.acc.value)?.currency, v = num(el.amount.value);
       if (v && nc !== pc) el.amount.value = (nc === 'VES' ? v * (S.rate || 0) : v / (S.rate || 1)).toFixed(2);
       pc = nc;
+      paintGBal();
     };
     $('#gF').onsubmit = (e) => {
       e.preventDefault();
