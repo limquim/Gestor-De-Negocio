@@ -62,7 +62,7 @@ views.produccion = page('Producciones', async () => {
 }, false);
 views.marketing = page('Marketing', viewMarketing);
 views.nomina = page('Nómina', withSubs('nom', {pagar: 'Pagar nómina', empleados: 'Empleados', adelantos: 'Adelantos', historial: 'Historial'}, {pagar: viewNomina, empleados: () => viewDir('empleados'), adelantos: viewAdelantos, historial: viewNominaHist}));
-views.finanzas = page('Finanzas', withSubs('fin', {cuentas: 'Cuentas', gastos: 'Gastos'}, {cuentas: viewCuentas, gastos: viewGastos}));
+views.finanzas = page('Finanzas', withSubs('fin', {cuentas: 'Cuentas', cierre: 'Cierre de caja', gastos: 'Gastos'}, {cuentas: viewCuentas, cierre: viewCierreCaja, gastos: viewGastos}));
 views.contabilidad = page('Reportes', viewReportes);
 views.directorios = page('Directorios', async () => {
   const ok = {vendedor: ['terceros', 'plantillas'], almacen: ['terceros', 'unidades', 'categorias'], contador: ['terceros']}[S.role], subs = {}, fns = {};

@@ -10,7 +10,7 @@ async function vData() {
     q(db.from('products').select('id,name,sku,unit,sale_price_usd,is_service,taxes(percent)').eq('active', true).order('name')),
     q(db.from('stock_actual').select('product_id,stock')),
     q(db.from('parties').select('id,name,phone').eq('is_customer', true).eq('active', true).order('name')),
-    q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id'))
+    db.from('accounts').select('id,name,currency,methods,is_default').eq('active', true).order('is_default', {ascending: false}).order('id').then(r => r.error ? q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id')) : r.data)
   ]);
   return {products, st: Object.fromEntries(stock.map(s => [s.product_id, Number(s.stock)])), custs, accs};
 }

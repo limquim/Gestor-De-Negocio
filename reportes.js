@@ -21,7 +21,7 @@ async function viewReportes() {
   const fijos = r.gastos_por_tipo.filter(x => x.fijo).reduce((a, x) => a + +x.total, 0), pe = mb > 0 && fijos > 0 ? fijos / (mb / 100) : 0;
   const U = (n) => fmt(n) + ' USD', sg = (n) => n >= 0 ? 'pos' : 'neg';
   const L = (a, b, c = '') => `<div class="rl ${c}"><span>${a}</span><b>${b}</b></div>`;
-  const MV = {cobro: 'Cobros', anulacion: 'Cobros', pago: 'Pagos de compras', gasto: 'Gastos', transferencia: 'Transferencias', ajuste: 'Ajustes'}, mvA = {};
+  const MV = {cobro: 'Cobros', anulacion: 'Cobros', pago: 'Pagos de compras', gasto: 'Gastos', transferencia: 'Transferencias', ajuste: 'Ajustes', aporte: 'Aportes de capital', retiro: 'Retiros del dueño', nomina: 'Nómina', adelanto: 'Adelantos', reembolso: 'Reembolsos'}, mvA = {};
   mv.forEach(m => { const n = m.accounts?.name || '?', a = mvA[n] || (mvA[n] = {cur: m.accounts?.currency, k: {}, net: 0}), k = MV[m.kind] || m.kind; a.k[k] = (a.k[k] || 0) + +m.amount; a.net += +m.amount; });
   const cajaMov = `<div class="card"><h2>Movimiento de caja del período</h2>${Object.entries(mvA).map(([n, a]) => `<div class="mvb"><b>${esc(n)}</b>${Object.entries(a.k).map(([k, v]) => L(k, (v >= 0 ? '+' : '') + money(v, a.cur))).join('')}${L('Variación', money(a.net, a.cur), 'tot ' + sg(a.net))}</div>`).join('') || '<p class="mut">Sin movimientos de dinero en este período.</p>'}</div>`;
   const B = (lab, val, max, right) => `<div class="bl"><div class="rl" style="border:0;padding:.2rem 0"><span>${esc(lab)}</span><b>${right}</b></div><div class="bar w"><i style="width:${max > 0 ? Math.max(2, val / max * 100) : 0}%"></i></div></div>`;

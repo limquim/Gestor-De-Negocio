@@ -131,7 +131,7 @@ async function viewSugerida() {
 async function descargarRespaldo() {
   const T = ['settings', 'products', 'product_categories', 'units', 'taxes', 'parties', 'accounts', 'account_movements', 'payments', 'sales', 'sale_items', 'sale_returns', 'sale_return_items', 'purchases', 'purchase_items',
     'inventory_movements', 'recipes', 'recipe_items', 'production_orders', 'production_items', 'expenses', 'expense_types', 'quotes', 'quote_items', 'price_lists', 'payment_methods', 'message_templates', 'exchange_rates',
-    'employees', 'employee_advances', 'payroll_runs', 'payroll_items'];
+    'employees', 'employee_advances', 'payroll_runs', 'payroll_items', 'cash_closings'];
   const all = async (t) => { let r = [], f = 0; for (;;) { const d = await q(db.from(t).select('*').range(f, f + 999)); r = r.concat(d); if (d.length < 1000) return r; f += 1000; } };
   const out = {fecha: new Date().toISOString(), tablas: {}};
   toast('Preparando el respaldo...');
@@ -181,7 +181,7 @@ async function viewDeudas() {
 async function debtSheet(c) {
   let qb = db.from('ventas_resumen').select('id,sale_date,total_usd,paid_usd,due_date').eq('status', 'pendiente').order('sale_date').order('id');
   qb = c.customer_id === null ? qb.is('customer_id', null) : qb.eq('customer_id', c.customer_id);
-  const [sales, accs] = await Promise.all([q(qb), q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id'))]);
+  const [sales, accs, payTxt] = await Promise.all([q(qb), db.from('accounts').select('id,name,currency,methods,is_default').eq('active', true).order('is_default', {ascending: false}).order('id').then(r => r.error ? q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id')) : r.data), getPaymentDetailsText()]);
   const hoy = caracasDate(), bal = (s) => s.total_usd - s.paid_usd, total = sales.reduce((a, s) => a + bal(s), 0);
   openSheet(esc(c.customer), `<form id="dcF" class="stack"><p><b>Deuda total: ${fmt(total)} USD</b>${S.rate ? ' (' + fmt(total * S.rate) + ' Bs a la tasa de hoy)' : ''}</p>
     <p class="mut">Marca las ventas que quieres pagar. Si el monto no alcanza para todas, se pagan completas las más antiguas y la siguiente queda con un abono y lo que falta abierto.</p>
@@ -216,7 +216,7 @@ async function debtSheet(c) {
       closeSheet(); toast(`Cobro registrado: ${res.pagadas} ${res.pagadas === 1 ? 'venta pagada completa' : 'ventas pagadas completas'}${res.abonadas ? ' y 1 con abono (queda abierta)' : ''}. Pendiente: ${fmt(res.pendiente_usd)} USD`); render();
     });
   };
-  if (c.phone) $('#dcWa').onclick = () => window.open(waLink(c, `Hola ${(c.customer || '').split(' ')[0]}, te recordamos que tienes un saldo pendiente de ${fmt(total)} USD${S.rate ? ' (' + fmt(total * S.rate) + ' Bs a la tasa de hoy)' : ''}. Gracias por tu atención.`), '_blank');
+  if (c.phone) $('#dcWa').onclick = () => window.open(waLink(c, `Hola ${(c.customer || '').split(' ')[0]}, te recordamos que tienes un saldo pendiente de ${fmt(total)} USD${S.rate ? ' (' + fmt(total * S.rate) + ' Bs a la tasa de hoy)' : ''}.${payTxt ? '\n\n' + payTxt : ''}\n\nGracias por tu atención.`), '_blank');
 }
 
 // ---------- Módulos opcionales (se activan en Configuración > Negocio) ----------

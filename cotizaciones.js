@@ -38,15 +38,17 @@ async function viewCotizaciones() {
 }
 
 async function quoteSheet(id) {
-  const [d, set] = await Promise.all([quoteDetail(id), q(db.from('settings').select('*').eq('id', 1).single())]);
+  const [d, set, payTxt] = await Promise.all([quoteDetail(id), q(db.from('settings').select('*').eq('id', 1).single()), getPaymentDetailsText()]);
   const s = d.s, text = quoteText(d, set), blobP = docBlob(quoteDoc(d), text, set).catch(() => null), open = s.status === 'abierta';
   openSheet('Cotización #' + id, `<div id="tPrev"><pre class="ticket">${esc(text)}</pre></div>
     <div class="row"><button class="btn" id="qI">Enviar como foto</button><button class="btn ghost" id="qD">Descargar foto</button></div>
+    ${payTxt ? '<div class="row"><button class="btn ghost" id="qPay">Enviar datos de pago (WhatsApp)</button></div>' : ''}
     ${open ? '<div class="row"><button class="btn" id="qV">Convertir en venta</button><button class="btn ghost" id="qE">Editar</button><button class="btn ghost" id="qA">Anular</button></div>'
       : `<p class="mut">Estado: ${s.status === 'convertida' ? 'convertida en la venta #' + s.sale_id : 'anulada'}</p>`}`);
   showPrev(blobP, set);
   $('#qI').onclick = () => run(async () => shareImage(await blobP, s.parties?.phone, 'cotizacion-' + id));
   $('#qD').onclick = () => run(async () => { const b = await blobP; if (!b) throw new Error('No se pudo crear la imagen'); downloadBlob(b, 'cotizacion-' + id + '.png'); });
+  if (payTxt) $('#qPay').onclick = () => window.open(`https://wa.me/${waDigits(s.parties?.phone)}?text=${encodeURIComponent(`Hola, te comparto nuestros datos para concretar la cotización #${id}:\n\n${payTxt}`)}`, '_blank');
   if (!open) return;
   $('#qV').onclick = () => { V.fromQ = id; V.edit = null; SUB.ven = 'nueva'; closeSheet(); go('ventas'); };
   $('#qE').onclick = () => run(() => quoteForm(id));

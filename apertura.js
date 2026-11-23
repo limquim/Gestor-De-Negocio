@@ -253,30 +253,46 @@ async function viewApertura() {
     if (e.target.dataset.rmcxp !== undefined) { AP.cxp.splice(+e.target.dataset.rmcxp, 1); drawCxp(); paintSummary(); }
   });
 
-  // Crear cuenta rápida desde apertura
+  // Crear cuenta rápida desde apertura (con métodos de pago y tipos al vuelo)
   $('#apNewAcc').onclick = () => {
     openSheet('Nueva cuenta inicial', `<form id="apAccF" class="stack">
       <label>Nombre (ej: Caja Efectivo, Banco Venezuela, Zelle)<input name="aname" required></label>
-      <label>Tipo<select name="type_id">${types.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select></label>
-      <label>Moneda<select name="cur"><option value="USD">Dólares (USD)</option><option value="VES">Bolívares (Bs)</option></select></label>
-      <label>Saldo inicial<input name="open" type="number" step="0.01" value="0" required></label>
-      <div class="stack"><b class="mut">Métodos de pago</b>${Object.entries(METHODS).filter(([k]) => !M_OFF.has(k)).map(([k, v]) => `<label class="chk"><input type="checkbox" name="m_${k}" ${k === 'efectivo' ? 'checked' : ''}> ${v}</label>`).join('')}</div>
+      <div class="row0" style="align-items:end">
+        <label style="flex:1">Tipo<select name="type_id">${types.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('')}</select></label>
+        <button type="button" class="btn ghost" data-t-add="1" aria-label="Nuevo tipo de cuenta" style="flex:none">+</button>
+      </div>
+      <div class="grid">
+        <label>Moneda<select name="cur"><option value="USD">Dólares (USD)</option><option value="VES">Bolívares (Bs)</option></select></label>
+        <label>Saldo inicial<input name="open" type="number" step="0.01" value="0" required></label>
+      </div>
+      ${renderMethodsField(['efectivo'])}
+      <label>Datos para recibir pagos (opcional)<textarea name="pdet" rows="2" placeholder="Ej: Pago Móvil, correo Zelle, Binance ID..."></textarea></label>
       <button class="btn" type="submit">Agregar cuenta</button>
     </form>`);
-    $('#apAccF').onsubmit = (e) => {
+    const f = $('#apAccF');
+    bindQuickAccountHelpers(f);
+    f.onsubmit = (e) => {
       e.preventDefault();
-      const el = e.target.elements;
-      const methods = Object.keys(METHODS).filter(k => el['m_' + k]?.checked);
+      const el = f.elements;
+      const methods = [...f.querySelectorAll('[data-m-list] input[type="checkbox"]:checked')].map(c => c.name.slice(2));
       if (!methods.length) return toast('Elige al menos un método de pago', true);
+      const baseRow = {
+        name: el.aname.value.trim(),
+        type_id: +el.type_id.value || null,
+        currency: el.cur.value,
+        opening_balance: num(el.open.value) || 0,
+        methods,
+        active: true
+      };
+      const det = el.pdet.value.trim() || null;
       run(async () => {
-        const ins = await q(db.from('accounts').insert({
-          name: el.aname.value.trim(),
-          type_id: +el.type_id.value || null,
-          currency: el.cur.value,
-          opening_balance: num(el.open.value) || 0,
-          methods,
-          active: true
-        }).select('id,opening_balance').single());
+        let ins;
+        try {
+          ins = await q(db.from('accounts').insert({...baseRow, payment_details: det}).select('id,opening_balance').single());
+        } catch (err) {
+          if (/payment_details/i.test(err.message || '')) ins = await q(db.from('accounts').insert(baseRow).select('id,opening_balance').single());
+          else throw err;
+        }
         AP.accs[ins.id] = Number(ins.opening_balance || 0);
         closeSheet();
         toast('Cuenta agregada');

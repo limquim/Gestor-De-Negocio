@@ -6,7 +6,7 @@ async function cData() {
   const [products, sups, accs] = await Promise.all([
     q(db.from('products').select('id,name,sku,unit,avg_cost_usd,last_cost_usd').eq('active', true).order('name')),
     q(db.from('parties').select('id,name,phone').eq('is_supplier', true).eq('active', true).order('name')),
-    q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id'))
+    db.from('accounts').select('id,name,currency,methods,is_default').eq('active', true).order('is_default', {ascending: false}).order('id').then(r => r.error ? q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id')) : r.data)
   ]);
   return {products, sups, accs};
 }
@@ -134,7 +134,7 @@ async function purchaseSheet(id) {
 
 // ---------- Cobro o pago de una deuda: queda en USD y se convierte con la tasa del día de pago ----------
 async function debtForm(cfg) {
-  const accs = await q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id')), bal = cfg.bal;
+  const accs = await db.from('accounts').select('id,name,currency,methods,is_default').eq('active', true).order('is_default', {ascending: false}).order('id').then(r => r.error ? q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id')) : r.data), bal = cfg.bal;
   openSheet(cfg.title, `<form id="dF" class="stack"><p>${cfg.label}: <b>${fmt(bal)} USD</b> (${fmt(bal * (S.rate || 0))} Bs a la tasa de hoy)<br>
     <span class="mut">El precio en dólares no cambia. Lo que se paga en Bs depende de la tasa del día del pago; puedes modificarla.</span></p>
     <label>Cuenta<select name="acc">${acctOpts(accs)}</select></label>
