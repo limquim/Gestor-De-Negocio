@@ -4,6 +4,12 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Gestor de Negocio</title>
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#0b7285">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Gestor">
+<link rel="apple-touch-icon" href="icon-192.png">
 <script>try{var t=localStorage.getItem('tema');if(t)document.documentElement.setAttribute('data-theme',t)}catch(e){}</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -77,6 +83,7 @@ th.n{text-align:right}
     <button class="icon-btn" id="themeBtn" aria-label="Cambiar entre fondo claro y oscuro"></button>
     <button class="btn ghost" id="logout">Salir</button>
   </header>
+  <div id="netBar" class="hidden" role="status"></div>
   <nav id="tabs">
     <button data-tab="inicio" class="on"><svg class="ic" viewBox="0 0 24 24"><path d="M3 11l9-8 9 8M5 10v10h14V10"/></svg><span>Inicio</span></button>
     <button data-tab="ventas"><svg class="ic" viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/></svg><span>Ventas</span></button>
@@ -111,16 +118,36 @@ const run = async (fn) => { try { await fn(); } catch (e) { console.error(e); if
 const q = async (p) => { const {data, error} = await p; if (error) throw error; return data; };
 
 // ---------- Tasa ----------
-async function loadRate() {
-  const [set, rate, hist] = await Promise.all([
-    q(db.from('settings').select('rate_mode').eq('id', 1).single()),
-    q(db.rpc('current_rate', {p_currency: 'USD'})),
-    q(db.from('exchange_rates').select('*').eq('currency', 'USD').order('rate_date', {ascending: false}).order('created_at', {ascending: false}).limit(10))
-  ]);
-  S.mode = set?.rate_mode || 'auto'; S.rate = rate ? Number(rate) : null; S.rates = hist || [];
+function paintRateChip() {
   $('#rateChip').innerHTML = S.rate
     ? `<span class="price-tag">1 USD = <b>${fmt(S.rate, 4)} Bs</b><small>${S.mode === 'auto' ? 'BCV auto' : 'manual'}</small></span>`
     : '<span class="bad">Sin tasa: configúrala en la pestaña Tasa</span>';
+}
+async function loadRate() {
+  if (typeof OFF !== 'undefined' && OFF.isOffline()) {
+    const b = OFF.loadBoot();
+    if (b) { S.mode = b.mode || 'auto'; S.rate = b.rate ? Number(b.rate) : null; S.rates = b.rates || []; }
+    paintRateChip();
+    return;
+  }
+  try {
+    const req = Promise.all([
+      q(db.from('settings').select('rate_mode').eq('id', 1).single()),
+      q(db.rpc('current_rate', {p_currency: 'USD'})),
+      q(db.from('exchange_rates').select('*').eq('currency', 'USD').order('rate_date', {ascending: false}).order('created_at', {ascending: false}).limit(10))
+    ]);
+    const [set, rate, hist] = await (typeof OFF !== 'undefined' ? OFF.withTimeout(req, 9000) : req);
+    S.mode = set?.rate_mode || 'auto'; S.rate = rate ? Number(rate) : null; S.rates = hist || [];
+    if (typeof OFF !== 'undefined') OFF.saveBoot({mode: S.mode, rate: S.rate, rates: S.rates});
+  } catch (e) {
+    if (typeof OFF !== 'undefined' && OFF.isNetError(e)) {
+      const b = OFF.loadBoot();
+      if (b) { S.mode = b.mode || 'auto'; S.rate = b.rate ? Number(b.rate) : null; S.rates = b.rates || []; }
+    } else {
+      throw e;
+    }
+  }
+  paintRateChip();
 }
 
 async function fetchBCV() {
@@ -134,7 +161,7 @@ async function fetchBCV() {
 }
 
 async function autoRate() {
-  if (S.mode !== 'auto') return;
+  if (S.mode !== 'auto' || (typeof OFF !== 'undefined' && OFF.isOffline())) return;
   const last = await q(db.from('exchange_rates').select('rate_date').eq('currency', 'USD').eq('source', 'bcv_auto').order('rate_date', {ascending: false}).limit(1));
   if (last[0]?.rate_date === caracasDate()) return;
   try { await fetchBCV(); await loadRate(); }
@@ -249,7 +276,28 @@ async function viewTasa() {
 
 // ---------- Navegación y eventos ----------
 const views = {productos: viewProductos, inventario: viewInventario, tasa: viewTasa};
-const render = () => run(async () => { $('#view').innerHTML = '<p class="mut">Cargando...</p>'; await views[tab](); });
+const render = () => run(async () => {
+  $('#view').innerHTML = '<p class="mut">Cargando...</p>';
+  try {
+    await views[tab]();
+  } catch (e) {
+    if (typeof OFF !== 'undefined' && OFF.isNetError(e)) {
+      OFF.paintBar();
+      $('#view').innerHTML = `<div class="card stack" style="border-left:5px solid var(--tag)">
+        <h2>Sin conexión a internet</h2>
+        <p class="mut" style="margin:0">Esta sección requiere conexión con el servidor, pero puedes seguir vendiendo y consultando tu inventario guardado sin parar.</p>
+        <div class="row">
+          <button class="btn" data-go="ventas">Ir a Ventas</button>
+          <button class="btn ghost" data-go="inventario">Ver Inventario</button>
+          <button class="btn ghost" id="offRetryBtn">Reintentar</button>
+        </div>
+      </div>`;
+      $('#offRetryBtn').onclick = () => render();
+      return;
+    }
+    throw e;
+  }
+});
 
 $('#tabs').onclick = (e) => {
   const b = e.target.closest('button'); if (!b) return;
@@ -285,11 +333,67 @@ $('#loginForm').onsubmit = (e) => {
     await enter();
   });
 };
-$('#logout').onclick = () => db.auth.signOut();
+async function safeSignOut() {
+  if (typeof OFF !== 'undefined') {
+    const qList = await OFF.getQueue();
+    if (qList.length && !confirm(`Tienes ${qList.length} venta(s) sin subir al servidor. ¿Seguro que quieres cerrar sesión?`)) return;
+    OFF.clearSessionHint();
+  }
+  try { await db.auth.signOut(); } catch (e) {}
+  showLogin();
+}
+$('#logout').onclick = safeSignOut;
 
 async function enter() {
   $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
-  await loadRate(); await autoRate(); await loadMethods(); await loadFlags(); await loadRole(); applyRoleUI(); render();
+  const off = typeof OFF !== 'undefined' && OFF.isOffline();
+  const boot = typeof OFF !== 'undefined' ? OFF.loadBoot() : null;
+
+  try { await loadRate(); } catch (e) {}
+  if (!off) { try { await autoRate(); } catch (e) {} }
+
+  // Métodos de pago con respaldo offline
+  try {
+    if (off) throw new Error('offline');
+    await (typeof OFF !== 'undefined' ? OFF.withTimeout(loadMethods(), 8000) : loadMethods());
+    if (typeof OFF !== 'undefined') OFF.saveBoot({methods: {...METHODS}, mOff: [...M_OFF]});
+  } catch (e) {
+    if (boot?.methods) {
+      Object.keys(METHODS).forEach(k => delete METHODS[k]);
+      Object.assign(METHODS, boot.methods);
+      M_OFF.clear(); (boot.mOff || []).forEach(k => M_OFF.add(k));
+    }
+  }
+
+  // Flags y rol con respaldo offline
+  try {
+    if (off) throw new Error('offline');
+    await (typeof OFF !== 'undefined' ? OFF.withTimeout(loadFlags(), 8000) : loadFlags());
+    if (typeof OFF !== 'undefined') OFF.saveBoot({flags: S.flags});
+  } catch (e) { S.flags = boot?.flags || {planning: true, payroll: true}; }
+
+  try {
+    await loadRole();
+  } catch (e) {
+    S.role = boot?.role || 'admin';
+    S.userName = boot?.userName || boot?.sessionEmail || '';
+  }
+
+  // Guardar correo de sesión para poder abrir sin internet luego
+  if (!off && typeof OFF !== 'undefined') {
+    db.auth.getUser().then(({data}) => { if (data?.user?.email) OFF.saveBoot({sessionEmail: data.user.email}); }).catch(() => {});
+  }
+
+  applyRoleUI();
+  if (typeof OFF !== 'undefined') {
+    await OFF.getQueue();
+    OFF.paintBar();
+    if (!off) {
+      OFF.refreshSnapshot(true);
+      if (OFF.queueCache.length) setTimeout(() => OFF.syncNow(false), 1500);
+    }
+  }
+  render();
 }
 function showLogin() { $('#app').classList.add('hidden'); $('#login').classList.remove('hidden'); }
 
@@ -298,11 +402,27 @@ run(async () => {
     document.body.innerHTML = '<p style="padding:2rem;font-family:sans-serif">Falta configurar SUPABASE_URL y SUPABASE_ANON_KEY dentro de index.html.</p>'; return;
   }
   db = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  db.auth.onAuthStateChange((ev) => { if (ev === 'SIGNED_OUT') showLogin(); });
-  const {data: {session}} = await db.auth.getSession();
-  session ? await enter() : showLogin();
+  db.auth.onAuthStateChange((ev) => {
+    if (ev === 'SIGNED_OUT') {
+      if (typeof OFF !== 'undefined' && OFF.isOffline() && OFF.loadBoot()?.sessionEmail) return;
+      showLogin();
+    }
+  });
+  let session = null;
+  try {
+    const res = await db.auth.getSession();
+    session = res?.data?.session || null;
+  } catch (e) { session = null; }
+
+  const hasOfflineSession = typeof OFF !== 'undefined' && OFF.isOffline() && !!OFF.loadBoot()?.sessionEmail;
+  if (session || hasOfflineSession) {
+    await enter();
+  } else {
+    showLogin();
+  }
 });
 </script>
+<script src="offline.js"></script>
 <script src="escaner.js"></script>
 <script src="compras.js"></script>
 <script src="inventario.js"></script>

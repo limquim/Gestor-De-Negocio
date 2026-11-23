@@ -39,6 +39,7 @@ const soon = (note, items) => async () => {
 
 views.inicio = () => (['admin', 'contador'].includes(S.role || 'admin') ? viewInicio() : viewInicioBasico());
 views.apertura = page('Saldos iniciales (Arranque)', viewApertura);
+views.offline = page('Modo sin conexión', viewOffline);
 
 const MODS = [['compras', 'Compras', 'Proveedores y entrada de mercancía'], ['marketing', 'Marketing', 'Clientes, ofertas y WhatsApp'],
   ['nomina', 'Nómina', 'Empleados, adelantos y pagos'], ['finanzas', 'Finanzas', 'Cajas, cuentas y gastos'], ['contabilidad', 'Reportes', 'Rentabilidad, caja y resultados'],
@@ -46,7 +47,7 @@ const MODS = [['compras', 'Compras', 'Proveedores y entrada de mercancía'], ['m
 views.mas = async () => {
   $('#view').innerHTML = `<h1 class="pt">Más módulos</h1><div class="menu" style="margin-top:.8rem">${MODS.filter(m => canSee(m[0]) && (m[0] !== 'nomina' || S.flags?.payroll !== false)).map(([k, t, d]) => `<button data-go="${k}"><b>${t}</b><small>${d}</small></button>`).join('')}</div>
     <div class="row"><button class="btn ghost" id="mOut">Cerrar sesión</button></div>`;
-  $('#mOut').onclick = () => db.auth.signOut();
+  $('#mOut').onclick = () => (typeof safeSignOut === 'function' ? safeSignOut() : db.auth.signOut());
 };
 
 views.inventario = page('Inventario', async () => {
@@ -70,8 +71,8 @@ views.directorios = page('Directorios', async () => {
   Object.keys(DIRS).forEach(k => { if (!ok || ok.includes(k)) { subs[k] = DIR_LABELS[k]; fns[k] = () => viewDir(k); } });
   await withSubs('dir', subs, fns)();
 });
-views.configuracion = page('Configuración', withSubs('cfg', {tasa: 'Tasa', negocio: 'Negocio', apertura: 'Saldos iniciales', ticket: 'Ticket', importar: 'Importar datos', respaldo: 'Respaldo', bitacora: 'Bitácora', estado: 'Estado del sistema', reinicio: 'Comenzar desde 0'},
-  {tasa: viewTasa, negocio: () => viewSettings('negocio'), apertura: viewApertura, ticket: () => viewSettings('ticket'), importar: viewImportar, respaldo: viewRespaldo, bitacora: viewBitacora, estado: viewEstado, reinicio: viewReinicio}));
+views.configuracion = page('Configuración', withSubs('cfg', {offline: 'Sin conexión', tasa: 'Tasa', negocio: 'Negocio', apertura: 'Saldos iniciales', ticket: 'Ticket', importar: 'Importar datos', respaldo: 'Respaldo', bitacora: 'Bitácora', estado: 'Estado del sistema', reinicio: 'Comenzar desde 0'},
+  {offline: viewOffline, tasa: viewTasa, negocio: () => viewSettings('negocio'), apertura: viewApertura, ticket: () => viewSettings('ticket'), importar: viewImportar, respaldo: viewRespaldo, bitacora: viewBitacora, estado: viewEstado, reinicio: viewReinicio}));
 
 // Fondo claro / oscuro (se recuerda la elección)
 const SUN = '<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';

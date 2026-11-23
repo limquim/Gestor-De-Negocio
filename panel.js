@@ -1,6 +1,8 @@
 // Panel del dueño: cómo va el negocio de un vistazo + asistente de apertura
 const ico = (d) => `<svg class="ic" viewBox="0 0 24 24">${d}</svg>`;
 async function viewInicio() {
+  if (typeof OFF !== 'undefined' && OFF.isOffline()) return OFF.renderOfflineHome();
+  try {
   const hoy = caracasDate(), t = new Date(hoy + 'T12:00:00'), y = t.getFullYear(), m = t.getMonth(), dd = t.getDate();
   const m0 = dstr(new Date(y, m, 1)), p0 = dstr(new Date(y, m - 1, 1)), p1 = dstr(new Date(y, m - 1, Math.min(dd, new Date(y, m, 0).getDate())));
   const d14 = dstr(new Date(y, m, dd - 13)), d30 = dstr(new Date(y, m, dd - 30));
@@ -70,4 +72,9 @@ async function viewInicio() {
     toast('Configuración inicial omitida. Puedes abrirla cuando quieras desde Configuración > Saldos iniciales.');
     render();
   });
+
+  } catch (e) {
+    if (typeof OFF !== 'undefined' && OFF.isNetError(e)) return OFF.renderOfflineHome();
+    throw e;
+  }
 }

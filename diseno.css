@@ -99,3 +99,10 @@ input[type=color]{padding:.2rem;cursor:pointer}
 .scan-status.ok{background:rgba(27,127,75,.94)}
 .scan-status.bad{background:rgba(180,56,26,.94)}
 #toast{z-index:95}
+
+/* Barra de estado sin conexión / sincronización */
+.netbar{display:flex;align-items:center;justify-content:space-between;gap:.6rem;padding:.55rem 1rem;font-size:.86rem;font-weight:600;border-bottom:1px solid var(--line)}
+.netbar.off{background:var(--tag);color:var(--tag-ink)}
+.netbar.pend{background:var(--pri);color:var(--pri-ink)}
+.netbar.sync{background:var(--card);color:var(--pri)}
+.netbar-btn{padding:.32rem .75rem;border-radius:99px;border:1px solid currentColor;background:rgba(255,255,255,.16);color:inherit;font:inherit;font-size:.8rem;font-weight:800;cursor:pointer;flex:none;white-space:nowrap}

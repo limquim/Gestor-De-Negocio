@@ -5,10 +5,45 @@ const refLabel = (m) => m.ref_type ? (REF[m.ref_type] ? `${REF[m.ref_type]}${m.r
 const fdate = (d) => new Date(d).toLocaleString('es-VE', {dateStyle: 'short', timeStyle: 'short'});
 
 async function viewInventario2() {
-  const [rows, moves] = await Promise.all([
-    q(db.from('stock_actual').select('*').order('name')),
-    q(db.from('inventory_movements').select('movement_type,quantity,unit_cost_usd,ref_type,ref_id,notes,created_at,products(name)').order('created_at', {ascending: false}).limit(10))
-  ]);
+  let rows = [], moves = [], isOffInv = false, cacheAt = null;
+  const loadInvCache = async () => {
+    const snap = typeof OFF !== 'undefined' ? await OFF.getSnapshot() : {};
+    const adj = typeof OFF !== 'undefined' ? await OFF.getAdjustedStockMap(snap.st || {}) : {};
+    cacheAt = snap.updatedAt || null;
+    if (snap.stockRows && snap.stockRows.length) {
+      rows = snap.stockRows.map(r => {
+        const st = adj[r.product_id] !== undefined ? adj[r.product_id] : Number(r.stock || 0);
+        return {...r, stock: st, valor_usd: Math.max(st, 0) * Number(r.avg_cost_usd || 0), bajo_minimo: Number(r.min_stock || 0) > 0 && st <= Number(r.min_stock || 0)};
+      });
+    } else if (snap.products && snap.products.length) {
+      rows = snap.products.filter(p => !p.is_service).map(p => ({
+        product_id: p.id, sku: p.sku, name: p.name, category_id: null, category: '-', unit: p.unit,
+        stock: adj[p.id] ?? 0, min_stock: 0, avg_cost_usd: 0, valor_usd: 0, bajo_minimo: false
+      }));
+    } else {
+      throw new Error('Sin conexión y sin inventario guardado en este dispositivo.');
+    }
+    isOffInv = true;
+  };
+
+  if (typeof OFF !== 'undefined' && OFF.isOffline()) {
+    await loadInvCache();
+  } else {
+    try {
+      const req = Promise.all([
+        q(db.from('stock_actual').select('*').order('name')),
+        q(db.from('inventory_movements').select('movement_type,quantity,unit_cost_usd,ref_type,ref_id,notes,created_at,products(name)').order('created_at', {ascending: false}).limit(10))
+      ]);
+      [rows, moves] = await (typeof OFF !== 'undefined' ? OFF.withTimeout(req, 9000) : req);
+      if (typeof OFF !== 'undefined') {
+        const st = Object.fromEntries(rows.map(s => [s.product_id, Number(s.stock)]));
+        OFF.saveSnapshot({stockRows: rows, st});
+      }
+    } catch (e) {
+      if (typeof OFF !== 'undefined' && OFF.isNetError(e)) await loadInvCache();
+      else throw e;
+    }
+  }
   INV.rows = rows;
   const valor = rows.reduce((a, x) => a + Number(x.valor_usd || 0), 0);
   const agotados = rows.filter(x => Number(x.stock) <= 0).length;
@@ -21,6 +56,7 @@ async function viewInventario2() {
     <td class="n">${m.unit_cost_usd != null ? fmt(m.unit_cost_usd) : '-'}</td><td>${esc(m.notes)}</td></tr>`).join('');
 
   $('#view').innerHTML = `
+  ${isOffInv ? `<div class="card" style="border-left:4px solid var(--tag)"><p style="margin:0"><b>Modo sin conexión (solo consulta)</b>${cacheAt ? ' · Actualizado: ' + fdate(cacheAt) : ''}</p></div>` : ''}
   <div class="stats">
     <div class="stat"><span>Valor del inventario</span><b>${fmt(valor)} USD</b><span>${S.rate ? fmt(valor * S.rate) + ' Bs' : 'Sin tasa cargada'}</span></div>
     <div class="stat"><span>Productos activos</span><b>${rows.length}</b></div>

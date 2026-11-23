@@ -1,25 +1,45 @@
 // Seguridad: roles y permisos, bitácora de cambios y estado del sistema
-const APP_VERSION = '21';
+const APP_VERSION = '22';
 const ROLE_NAMES = {admin: 'Administrador', vendedor: 'Vendedor', almacen: 'Almacén', contador: 'Contador'};
 const ACCESS = {   // secciones que ve cada rol (el administrador ve todo)
   vendedor: ['ventas', 'inventario', 'marketing', 'directorios'],
   almacen: ['inventario', 'produccion', 'compras', 'directorios'],
   contador: ['finanzas', 'contabilidad', 'ventas', 'compras', 'nomina', 'directorios', 'apertura']
 };
-const canSee = (m) => { if (m === 'inicio' || m === 'mas') return true; const a = ACCESS[S.role || 'admin']; return !a || a.includes(m); };
+const canSee = (m) => { if (m === 'inicio' || m === 'mas' || m === 'offline') return true; const a = ACCESS[S.role || 'admin']; return !a || a.includes(m); };
 
 async function loadRole() {
+  if (typeof OFF !== 'undefined' && OFF.isOffline()) {
+    const b = OFF.loadBoot();
+    S.role = b?.role || 'admin';
+    S.userName = b?.userName || b?.sessionEmail || '';
+    return;
+  }
   try {
-    const u = (await db.auth.getUser()).data.user, p = await q(db.from('profiles').select('role,full_name,active').eq('id', u.id).single());
+    const u = (await (typeof OFF !== 'undefined' ? OFF.withTimeout(db.auth.getUser(), 8000) : db.auth.getUser())).data.user;
+    const p = await (typeof OFF !== 'undefined'
+      ? OFF.withTimeout(q(db.from('profiles').select('role,full_name,active').eq('id', u.id).single()), 8000)
+      : q(db.from('profiles').select('role,full_name,active').eq('id', u.id).single()));
     S.userName = p.full_name || u.email;
     if (!p.active) { S.role = 'bloqueado'; toast('Tu usuario está desactivado. Habla con el administrador.', true); setTimeout(() => db.auth.signOut(), 2500); return; }
     S.role = p.role;
-  } catch (e) { S.role = e.code === 'PGRST116' ? 'vendedor' : 'admin'; }   // sin perfil: acceso mínimo; si aún no existe la tabla: sin restricciones
+    if (typeof OFF !== 'undefined') OFF.saveBoot({role: S.role, userName: S.userName});
+  } catch (e) {
+    if (typeof OFF !== 'undefined' && OFF.isNetError(e)) {
+      const b = OFF.loadBoot();
+      S.role = b?.role || 'admin';
+      S.userName = b?.userName || b?.sessionEmail || '';
+    } else {
+      S.role = e.code === 'PGRST116' ? 'vendedor' : 'admin';
+    }
+  }
 }
 function applyRoleUI() { document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('hidden', !canSee(b.dataset.tab))); }
 
 // ---------- Panel sencillo para vendedor y almacén ----------
 async function viewInicioBasico() {
+  if (typeof OFF !== 'undefined' && OFF.isOffline()) return OFF.renderOfflineHome();
+  try {
   const hoy = caracasDate();
   const [v, stock, alertHtml, set] = await Promise.all([
     q(db.from('ventas_resumen').select('total_usd,exchange_rate').eq('sale_date', hoy).neq('status', 'anulada')),
@@ -34,6 +54,10 @@ async function viewInicioBasico() {
     <div class="tiles">${tiles.map((t, i) => `<button class="tile ${i === 0 ? 'main' : ''}" data-go="${t[0]}">${ico(t[3])}<span>${t[1]}</span><small>${t[2]}</small></button>`).join('')}</div>${alertHtml}
     <div class="stats">${canSee('ventas') ? `<div class="stat"><span>Vendido hoy</span><b>${fmt(vend)} USD</b><span>${v.length} ${v.length === 1 ? 'venta' : 'ventas'}</span></div>` : ''}
       ${canSee('inventario') ? `<button class="stat bad" data-go="inventario"><span>Por reponer</span><b>${stock.filter(x => x.bajo_minimo).length}</b><span>en el mínimo o agotados</span></button>` : ''}</div>`;
+  } catch (e) {
+    if (typeof OFF !== 'undefined' && OFF.isNetError(e)) return OFF.renderOfflineHome();
+    throw e;
+  }
 }
 
 // ---------- Bitácora (solo administrador) ----------
@@ -64,7 +88,7 @@ async function viewBitacora() {
 
 // ---------- Estado del sistema ----------
 const FILES = {'01': '01_esquema_base.sql', '02': '02_compras.sql (o 12_reparar_compras.sql)', '04': '04_base.sql', '05': '05_produccion.sql', '06': '06_productos.sql', '07': '07_ventas.sql', '08': '08_finanzas.sql', '09': '09_cotizaciones_marketing.sql',
-  '10': '10_ticket_y_compras.sql', '11': '11_compras_cobros.sql', '13': '13_metodos_catalogo.sql', '14': '14_servicios_devoluciones.sql', '15': '15_costos_produccion_ajustes.sql', '16': '16_reinicio_nomina_deudas.sql', '17': '17_correcciones.sql', '18': '18_permisos_bitacora_estado.sql', '19': '19_ajustes_valorados_y_apertura.sql', '20': '20_cuentas_metodos_y_cierre_caja.sql', '21': '21_indice_codigo_barras.sql'};
+  '10': '10_ticket_y_compras.sql', '11': '11_compras_cobros.sql', '13': '13_metodos_catalogo.sql', '14': '14_servicios_devoluciones.sql', '15': '15_costos_produccion_ajustes.sql', '16': '16_reinicio_nomina_deudas.sql', '17': '17_correcciones.sql', '18': '18_permisos_bitacora_estado.sql', '19': '19_ajustes_valorados_y_apertura.sql', '20': '20_cuentas_metodos_y_cierre_caja.sql', '21': '21_indice_codigo_barras.sql', '22': '22_soporte_offline_idempotente.sql'};
 async function viewEstado() {
   let rows;
   try { rows = await q(db.rpc('estado_sistema')); }
