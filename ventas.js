@@ -1,7 +1,7 @@
 // Ventas: nueva venta o corrección, historial, cobros y ticket
 const METHODS = {efectivo: 'Efectivo', pago_movil: 'Pago móvil', transferencia: 'Transferencia', zelle: 'Zelle', punto: 'Punto de venta', otro: 'Otro'};
 const DOCS = {nota_entrega: 'Nota de entrega (sin IVA)', factura: 'Factura (con IVA)'};
-const V = {cart: [], pays: [], edit: null}, VH = {f: 'all'};
+const V = {cart: [], pays: [], edit: null}, VH = {f: 'all', q: '', from: '', to: ''};
 const waDigits = (t) => String(t || '').replace(/\D/g, '').replace(/^0/, '58');
 const optList = (obj, sel) => Object.entries(obj).map(([k, v]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${v}</option>`).join('');
 
@@ -212,16 +212,78 @@ async function viewVenta() {
   });
 }
 
-// ---------- Historial ----------
+// ---------- Historial de Ventas (con búsqueda, fechas, estado y totales) ----------
 async function viewHistVentas() {
-  const rows = await q(db.from('ventas_resumen').select('*').order('id', {ascending: false}).limit(80));
-  const list = rows.filter(r => VH.f === 'all' || r.status === 'pendiente'), ST = {pagada: 'Pagada', pendiente: 'Por cobrar', anulada: 'Anulada'};
-  $('#view').innerHTML = `<div class="chips sub" id="hF"><button data-f="all" class="${VH.f === 'all' ? 'on' : ''}">Todas</button><button data-f="pend" class="${VH.f === 'pend' ? 'on' : ''}">Por cobrar</button></div>
-    <div class="list" id="hL">${list.map(r => `<button class="item" data-id="${r.id}"><span><b>${Number(r.id) < 0 ? 'LOC-' + Math.abs(r.id) : '#' + r.id} ${esc(r.customer || 'Cliente general')}</b>
-      <small>${r.sale_date} | ${r.doc_type === 'factura' ? 'Factura' : 'Nota de entrega'}</small>
-      <small>${r.status === 'pendiente' ? 'Debe ' + fmt(r.total_usd - r.paid_usd) + ' USD (' + fmt((r.total_usd - r.paid_usd) * (S.rate || r.exchange_rate)) + ' Bs hoy)' : fmt(r.total_usd) + ' USD (' + fmt(r.total_usd * r.exchange_rate) + ' Bs)'}</small></span>
-      <span class="badge ${Number(r.id) < 0 ? 'low' : r.status === 'pagada' ? 'ok' : r.status === 'pendiente' ? 'low' : 'out'}">${Number(r.id) < 0 ? 'Sin subir' : (ST[r.status] || r.status)}</span></button>`).join('') || '<p class="mut">No hay ventas en esta lista.</p>'}</div>`;
+  const rows = await q(db.from('ventas_resumen').select('*').order('id', {ascending: false}).limit(200));
+  const hoy = caracasDate();
+  const ST = {pagada: 'Pagada', pendiente: 'Por cobrar', anulada: 'Anulada'};
+
+  $('#view').innerHTML = `
+    <div class="stats" id="vhStats"></div>
+    <div class="card stack" style="margin-bottom:.8rem">
+      <input id="hQ" type="search" placeholder="Buscar por cliente o N.° de venta..." value="${esc(VH.q)}">
+      <div class="chips" id="hF">
+        <button type="button" data-f="all" class="${VH.f === 'all' ? 'on' : ''}">Todas</button>
+        <button type="button" data-f="pend" class="${VH.f === 'pend' ? 'on' : ''}">Por cobrar</button>
+        <button type="button" data-f="pagada" class="${VH.f === 'pagada' ? 'on' : ''}">Pagadas</button>
+        <button type="button" data-f="anulada" class="${VH.f === 'anulada' ? 'on' : ''}">Anuladas</button>
+      </div>
+      <div class="grid">
+        <label>Desde<input id="hFrom" type="date" value="${esc(VH.from)}"></label>
+        <label>Hasta<input id="hTo" type="date" value="${esc(VH.to)}"></label>
+      </div>
+      ${VH.q || VH.from || VH.to || VH.f !== 'all' ? '<div class="row" style="margin:0"><button type="button" class="lnk" id="hClr" style="padding:0">Limpiar filtros</button></div>' : ''}
+    </div>
+    <div class="list" id="hL"></div>`;
+
+  const draw = () => {
+    const t = VH.q.trim().toLowerCase();
+    const list = rows.filter(r => {
+      if (VH.f === 'pend' && r.status !== 'pendiente') return false;
+      if (VH.f === 'pagada' && r.status !== 'pagada') return false;
+      if (VH.f === 'anulada' && r.status !== 'anulada') return false;
+      if (VH.from && r.sale_date && r.sale_date < VH.from) return false;
+      if (VH.to && r.sale_date && r.sale_date > VH.to) return false;
+      if (!t) return true;
+      const hay = `#${r.id} ${r.customer || 'Cliente general'} ${r.sale_date || ''}`.toLowerCase();
+      return hay.includes(t);
+    });
+
+    const actList = list.filter(r => r.status !== 'anulada');
+    const totUsd = actList.reduce((s, r) => s + Number(r.total_usd || 0), 0);
+    const totBsHist = actList.reduce((s, r) => s + Number(r.total_usd || 0) * Number(r.exchange_rate || S.rate || 0), 0);
+    const pendUsd = actList.filter(r => r.status === 'pendiente').reduce((s, r) => s + Math.max(0, Number(r.total_usd || 0) - Number(r.paid_usd || 0)), 0);
+
+    $('#vhStats').innerHTML = `
+      <div class="stat"><span>Total vendido</span><b>${fmt(totUsd)} USD</b><span>${actList.length} ${actList.length === 1 ? 'venta activa' : 'ventas activas'} · ${fmt(totBsHist)} Bs hist.</span></div>
+      <div class="stat ${pendUsd > 0.01 ? 'warn' : ''}"><span>Por cobrar</span><b>${fmt(pendUsd)} USD</b><span>${S.rate ? fmt(pendUsd * S.rate) + ' Bs a tasa hoy' : ''}</span></div>`;
+
+    $('#hL').innerHTML = list.map(r => {
+      const d = Math.max(0, Number(r.total_usd || 0) - Number(r.paid_usd || 0));
+      const isLoc = Number(r.id) < 0;
+      const venc = r.status === 'pendiente' && r.due_date && r.due_date < hoy;
+      const idLbl = isLoc ? 'LOC-' + Math.abs(r.id) : '#' + r.id;
+      const bCls = isLoc ? 'low' : r.status === 'pagada' ? 'ok' : venc ? 'out' : r.status === 'pendiente' ? 'low' : 'out';
+      const bTxt = isLoc ? 'Sin subir' : venc ? 'Vencida' : (ST[r.status] || r.status);
+      return `<button class="item" data-id="${r.id}">
+        <span>
+          <b>${idLbl} ${esc(r.customer || 'Cliente general')}</b>
+          <small>${dmy(r.sale_date)} | ${r.doc_type === 'factura' ? 'Factura' : 'Nota de entrega'}${r.due_date && r.status === 'pendiente' ? ' | vence ' + dmy(r.due_date) : ''}</small>
+          <small>${r.status === 'pendiente'
+            ? 'Debe ' + fmt(d) + ' USD (' + fmt(d * (S.rate || r.exchange_rate)) + ' Bs hoy)'
+            : fmt(r.total_usd) + ' USD (' + fmt(r.total_usd * r.exchange_rate) + ' Bs)'}</small>
+        </span>
+        <span class="badge ${bCls}">${bTxt}</span>
+      </button>`;
+    }).join('') || '<p class="mut">No hay ventas con ese filtro.</p>';
+  };
+  draw();
+
+  $('#hQ').oninput = (e) => { VH.q = e.target.value; draw(); };
+  $('#hFrom').onchange = (e) => { VH.from = e.target.value; render(); };
+  $('#hTo').onchange = (e) => { VH.to = e.target.value; render(); };
   $('#hF').onclick = (e) => { const b = e.target.closest('button'); if (b) { VH.f = b.dataset.f; render(); } };
+  if ($('#hClr')) $('#hClr').onclick = () => { VH.f = 'all'; VH.q = ''; VH.from = ''; VH.to = ''; render(); };
   $('#hL').onclick = (e) => { const b = e.target.closest('[data-id]'); if (b) run(() => saleSheet(+b.dataset.id)); };
 }
 

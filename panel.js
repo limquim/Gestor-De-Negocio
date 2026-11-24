@@ -7,8 +7,9 @@ async function viewInicio() {
   const m0 = dstr(new Date(y, m, 1)), p0 = dstr(new Date(y, m - 1, 1)), p1 = dstr(new Date(y, m - 1, Math.min(dd, new Date(y, m, 0).getDate())));
   const d14 = dstr(new Date(y, m, dd - 13)), d30 = dstr(new Date(y, m, dd - 30));
   const rp = (a, b) => q(db.rpc('reporte_resumen', {p_from: a, p_to: b}));
-  const [h, mes, ant, quin, accs, stock, alertHtml, vm, sold, set] = await Promise.all([
+  const [h, mes, ant, quin, mesBs, accs, stock, alertHtml, vm, sold, set] = await Promise.all([
     rp(hoy, hoy), rp(m0, hoy), rp(p0, p1), rp(d14, hoy),
+    typeof calcHistoricalBs === 'function' ? calcHistoricalBs(m0, hoy) : Promise.resolve({ok: false, netaBs: 0}),
     q(db.from('cuentas_saldo').select('balance,currency').eq('active', true)),
     q(db.from('stock_actual').select('product_id,name,stock,bajo_minimo,valor_usd,sells_regularly')),
     alertasHtml(),
@@ -18,7 +19,9 @@ async function viewInicio() {
   ]);
   const U = (n) => fmt(n) + ' USD', ut = (r) => r.ingresos - r.costo_ventas - r.gastos;
   const dl = (a, b) => b ? (a - b) / Math.abs(b) * 100 : null, dtxt = (a, b, l) => { const v = dl(a, b); return v === null ? '' : `${v >= 0 ? '+' : ''}${fmt(v, 0)}% ${l}`; };
-  const caja = accs.reduce((a, x) => a + toUsd(+x.balance, x.currency), 0), inv = stock.reduce((a, x) => a + +x.valor_usd, 0), cap = caja + inv + mes.por_cobrar - mes.por_pagar;
+  const cajaUsdReal = accs.filter(x => x.currency === 'USD').reduce((a, x) => a + Number(x.balance || 0), 0);
+  const cajaVesReal = accs.filter(x => x.currency !== 'USD').reduce((a, x) => a + Number(x.balance || 0), 0);
+  const caja = cajaUsdReal + (S.rate ? cajaVesReal / S.rate : 0), inv = stock.reduce((a, x) => a + +x.valor_usd, 0), cap = caja + inv + mes.por_cobrar - mes.por_pagar;
   const U1 = ut(mes), mg = mes.ingresos > 0 ? U1 / mes.ingresos * 100 : 0, gHoy = h.ingresos - h.costo_ventas, bajos = stock.filter(x => x.bajo_minimo).length;
   const bar = (lab, val, max, right) => `<div class="bl"><div class="rl" style="border:0;padding:.2rem 0"><span>${esc(lab)}</span><b>${right}</b></div><div class="bar w"><i style="width:${max > 0 ? Math.max(2, val / max * 100) : 0}%"></i></div></div>`;
   const byDay = Object.fromEntries(quin.por_dia.map(x => [x.dia, +x.total])), days = Array.from({length: 14}, (_, i) => dstr(new Date(y, m, dd - 13 + i))), maxD = Math.max(0, ...days.map(x => byDay[x] || 0));
@@ -65,7 +68,9 @@ async function viewInicio() {
     <button class="lnk" id="pWaSum" style="font-size:.85rem">Enviar resumen</button>
   </div>
   ${welcomeCard}
-  <div class="hero"><span>Ganancia neta del mes</span><b class="${U1 < 0 ? 'neg2' : ''}">${U(U1)}</b><small>${S.rate ? fmt(U1 * S.rate) + ' Bs | ' : ''}${dtxt(U1, ut(ant), 'vs el mismo período del mes pasado') || 'después de costos y gastos'}</small>
+  <div class="hero"><span>Ganancia neta del mes</span><b class="${U1 < 0 ? 'neg2' : ''}">${U(U1)}</b>
+    <small>${mesBs.ok ? `Bs históricos: <b>${fmt(mesBs.netaBs)} Bs</b>` : (S.rate ? fmt(U1 * S.rate) + ' Bs hoy' : '')}${mesBs.ok && S.rate ? ` · Equiv. hoy: ${fmt(U1 * S.rate)} Bs` : ''}</small>
+    <small>${dtxt(U1, ut(ant), 'vs el mismo período del mes pasado') || 'después de costos y gastos'}</small>
     <div class="hero3"><div><span>Ventas</span><b>${U(mes.ingresos)}</b><small>${dtxt(mes.ingresos, ant.ingresos, 'vs mes pasado')}</small></div><div><span>Gastos</span><b>${U(mes.gastos)}</b></div><div><span>Margen neto</span><b>${fmt(mg, 0)}%</b></div></div></div>
   ${goalCard}
   <div class="tiles">
@@ -78,7 +83,7 @@ async function viewInicio() {
   <div class="stats"><div class="stat"><span>Vendido hoy</span><b>${U(h.ingresos)}</b><span>${h.num_ventas} ${h.num_ventas === 1 ? 'venta' : 'ventas'}${S.rate ? ' | ' + fmt(h.ingresos * S.rate) + ' Bs' : ''}</span></div>
     <div class="stat ${gHoy < 0 ? 'bad' : ''}"><span>Ganancia bruta de hoy</span><b>${U(gHoy)}</b><span>ventas menos costo</span></div></div>
   <h2 class="sec">Tu dinero</h2>
-  <div class="stats"><button class="stat" data-go="finanzas"><span>Disponible en cuentas</span><b>${U(caja)}</b><span>${S.rate ? fmt(caja * S.rate) + ' Bs' : ''}</span></button>
+  <div class="stats"><button class="stat" data-go="finanzas"><span>Disponible en cuentas</span><b>${U(caja)}</b><span>${fmt(cajaUsdReal)} USD + ${fmt(cajaVesReal)} Bs</span></button>
     <button class="stat warn" id="pPend"><span>Te deben (por cobrar)</span><b>${U(mes.por_cobrar)}</b><span>${S.rate ? fmt(mes.por_cobrar * S.rate) + ' Bs a la tasa de hoy' : ''}</span></button>
     <button class="stat" id="pPag"><span>Debes (por pagar)</span><b>${U(mes.por_pagar)}</b><span>${S.rate ? fmt(mes.por_pagar * S.rate) + ' Bs a la tasa de hoy' : ''}</span></button>
     <button class="stat" data-go="apertura"><span>Capital del negocio</span><b>${U(cap)}</b><span>${Number(set.capital_inicial_usd || 0) > 0 ? 'Inicial: ' + U(set.capital_inicial_usd) + ' | ' : ''}Toca para editar saldos iniciales</span></button></div>
@@ -102,7 +107,10 @@ async function viewInicio() {
       mesIngresos: mes.ingresos,
       mesGastos: mes.gastos,
       mesNeta: U1,
+      mesNetaBs: mesBs.ok ? mesBs.netaBs : null,
       caja,
+      cajaUsdReal,
+      cajaVesReal,
       porCobrar: mes.por_cobrar,
       porPagar: mes.por_pagar,
       inv,
@@ -110,7 +118,7 @@ async function viewInicio() {
       cap
     });
   }
-  $('#pPend').onclick = () => { VH.f = 'pend'; SUB.ven = 'historial'; go('ventas'); };
+  $('#pPend').onclick = () => { SUB.ven = 'cobrar'; go('ventas'); };
   $('#pPag').onclick = () => { SUB.com = 'pagar'; go('compras'); };
   if ($('#pSkipAp')) $('#pSkipAp').onclick = () => run(async () => {
     await q(db.from('settings').update({apertura_completada: true, fecha_apertura: hoy, updated_at: new Date().toISOString()}).eq('id', 1));

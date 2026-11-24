@@ -139,3 +139,7 @@ input[type=color]{padding:.2rem;cursor:pointer}
 .color-picks{display:flex;align-items:center;gap:.45rem;flex-wrap:wrap;margin-top:.3rem}
 .cswatch{width:34px;height:34px;border-radius:50%;border:2px solid var(--card);box-shadow:0 0 0 1px var(--line);cursor:pointer;padding:0;flex:none}
 .cswatch:active{transform:scale(.92)}
+
+/* Barra de exposición cambiaria USD vs Bs */
+.fx-bar{width:100%;height:10px;border-radius:99px;background:var(--tag);overflow:hidden;margin-top:.55rem}
+.fx-bar i{display:block;height:100%;background:var(--ok);border-radius:99px 0 0 99px}
