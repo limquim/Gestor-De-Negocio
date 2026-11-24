@@ -39,6 +39,7 @@ const OFF_MIRROR_SPEC = [
   {t: 'compras_resumen', order: 'id', limit: 300},
   {t: 'payments', order: 'id', limit: 1000},
   {t: 'expenses', order: 'id', limit: 400},
+  {t: 'recurring_expenses'},
   {t: 'account_movements', order: 'id', limit: 800},
   {t: 'inventory_movements', order: 'id', limit: 1000},
   {t: 'inventory_adjustments', order: 'id', limit: 100},
@@ -60,6 +61,7 @@ const OFF_REL = {
   sale_returns: {sales: ['sale_id', 'id']},
   account_movements: {accounts: ['account_id', 'id']},
   expenses: {expense_types: ['expense_type_id', 'id'], accounts: ['account_id', 'id']},
+  recurring_expenses: {expense_types: ['expense_type_id', 'id'], accounts: ['account_id', 'id']},
   inventory_movements: {products: ['product_id', 'id']},
   employee_advances: {employees: ['employee_id', 'id']},
   payroll_items: {employees: ['employee_id', 'id'], payroll_runs: ['run_id', 'id']},
@@ -555,8 +557,12 @@ const OFF = {
     }
 
     const parsed = this.parseSelect(spec.selectCols || '*');
+    const untrSet = spec.table === 'stock_actual'
+      ? new Set((this.mem.products || []).filter(p => p.track_inventory === false || p.is_service).map(p => Number(p.id)))
+      : null;
     let rows = [];
     for (const raw of base) {
+      if (untrSet && untrSet.has(Number(raw.product_id))) continue;
       const hydrated = this.attachRelations(spec.table, raw, parsed);
       if (hydrated === null) continue;
       if (spec.filters.every(f => this.matchFilter(hydrated, f))) {

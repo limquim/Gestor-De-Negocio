@@ -57,8 +57,8 @@ views.mas = async () => {
 };
 
 views.inventario = page('Inventario', async () => {
-  const subs = {stock: 'Existencias', productos: 'Productos', catalogo: 'Catálogo', ajuste: 'Ajuste masivo'}, fns = {stock: viewInventario2, productos: viewProductos2, catalogo: viewCatalogo, ajuste: viewAjusteMasivo};
-  if (S.role === 'vendedor') { delete subs.productos; delete subs.ajuste; }
+  const subs = {stock: 'Existencias', productos: 'Productos', precios: 'Precios', catalogo: 'Catálogo', ajuste: 'Ajuste masivo'}, fns = {stock: viewInventario2, productos: viewProductos2, precios: viewPreciosMasivo, catalogo: viewCatalogo, ajuste: viewAjusteMasivo};
+  if (S.role === 'vendedor') { delete subs.productos; delete subs.precios; delete subs.ajuste; }
   await withSubs('inv', subs, fns)();
 }, false);
 views.compras = page('Compras', withSubs('com', {nueva: 'Nueva compra', sugerida: 'Reposición sugerida', historial: 'Historial', pagar: 'Por pagar'}, {nueva: viewCompra, sugerida: viewSugerida, historial: viewHistCompras, pagar: viewDeudasProv}));

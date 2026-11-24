@@ -1,5 +1,5 @@
 // Seguridad: roles y permisos, bitácora de cambios y estado del sistema
-const APP_VERSION = '31';
+const APP_VERSION = '32';
 const ROLE_NAMES = {admin: 'Administrador', vendedor: 'Vendedor', almacen: 'Almacén', contador: 'Contador'};
 const ACCESS = {   // secciones que ve cada rol (el administrador ve todo)
   vendedor: ['ventas', 'inventario', 'marketing', 'directorios'],
@@ -41,12 +41,14 @@ async function viewInicioBasico() {
   if (typeof OFF !== 'undefined' && OFF.isOffline() && !(OFF.mem.settings && OFF.mem.settings.length)) return OFF.renderOfflineHome();
   try {
   const hoy = caracasDate();
-  const [v, stock, alertHtml, set] = await Promise.all([
+  const [v, stockRaw, untrSet, alertHtml, set] = await Promise.all([
     q(db.from('ventas_resumen').select('total_usd,exchange_rate').eq('sale_date', hoy).neq('status', 'anulada')),
-    q(db.from('stock_actual').select('bajo_minimo')),
+    q(db.from('stock_actual').select('product_id,bajo_minimo')),
+    typeof getUntrackedIds === 'function' ? getUntrackedIds() : Promise.resolve(new Set()),
     alertasHtml(),
     q(db.from('settings').select('business_name').eq('id', 1).single())
   ]);
+  const stock = stockRaw.filter(x => !untrSet.has(Number(x.product_id)));
   const tiles = [['ventas', 'Vender', 'Nueva venta', '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>'], ['compras', 'Comprar', 'Registrar compra', '<path d="M6 7h12l-1 13H7z"/><path d="M9 7a3 3 0 016 0"/>'],
     ['produccion', 'Producir', 'Fabricar productos', '<path d="M9 3h6M10 3v6L4.5 19a1.5 1.5 0 001.3 2h12.4a1.5 1.5 0 001.3-2L14 9V3"/><path d="M7.5 15h9"/>'], ['inventario', 'Inventario', 'Existencias', '<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>']].filter(t => canSee(t[0]));
   const vend = v.reduce((a, r) => a + +r.total_usd, 0);
@@ -61,7 +63,7 @@ async function viewInicioBasico() {
 }
 
 // ---------- Bitácora (solo administrador) ----------
-const TBL = {sales: 'la venta', sale_returns: 'la devolución', purchases: 'la compra', expenses: 'el gasto', products: 'el producto', accounts: 'la cuenta', settings: 'la configuración', profiles: 'el usuario', payroll_runs: 'la nómina', employees: 'el empleado', employee_advances: 'el adelanto', cash_closings: 'el cierre de caja', payment_methods: 'el método de pago', inventory_adjustments: 'el ajuste masivo'};
+const TBL = {sales: 'la venta', sale_returns: 'la devolución', purchases: 'la compra', expenses: 'el gasto', products: 'el producto', accounts: 'la cuenta', settings: 'la configuración', profiles: 'el usuario', payroll_runs: 'la nómina', employees: 'el empleado', employee_advances: 'el adelanto', cash_closings: 'el cierre de caja', payment_methods: 'el método de pago', inventory_adjustments: 'el ajuste masivo', recurring_expenses: 'el gasto fijo'};
 const FLD = {status: 'estado', sale_price_usd: 'precio', manual_cost_usd: 'costo manual', name: 'nombre', active: 'activo', role: 'rol', total_usd: 'total', business_name: 'nombre del negocio', cost_method: 'método de costo', opening_balance: 'saldo inicial', payment_details: 'datos de pago', is_default: 'cuenta principal', monthly_sales_goal_usd: 'meta mensual', max_discount_percent: 'tope de descuento', block_negative_stock: 'bloquear sin stock', allow_seller_price_edit: 'editar precio vendedor', salary_usd: 'sueldo', full_name: 'nombre'};
 const av = (v) => v === null || v === undefined ? 'vacío' : typeof v === 'boolean' ? (v ? 'sí' : 'no') : typeof v === 'number' ? fmt(v) : String(v).slice(0, 30);
 function auditText(a) {
@@ -89,7 +91,7 @@ async function viewBitacora() {
 
 // ---------- Estado del sistema ----------
 const FILES = {'01': '01_esquema_base.sql', '02': '02_compras.sql (o 12_reparar_compras.sql)', '04': '04_base.sql', '05': '05_produccion.sql', '06': '06_productos.sql', '07': '07_ventas.sql', '08': '08_finanzas.sql', '09': '09_cotizaciones_marketing.sql',
-  '10': '10_ticket_y_compras.sql', '11': '11_compras_cobros.sql', '13': '13_metodos_catalogo.sql', '14': '14_servicios_devoluciones.sql', '15': '15_costos_produccion_ajustes.sql', '16': '16_reinicio_nomina_deudas.sql', '17': '17_correcciones.sql', '18': '18_permisos_bitacora_estado.sql', '19': '19_ajustes_valorados_y_apertura.sql', '20': '20_cuentas_metodos_y_cierre_caja.sql', '21': '21_indice_codigo_barras.sql', '22': '22_soporte_offline_idempotente.sql', '23': '23_sincronizacion_total_offline.sql', '25': '25_configuracion_reglas_y_metas.sql', '27': '27_ajustes_historial_y_ticket.sql', '28': '28_anular_compra.sql', '29': '29_pagar_compras_y_editar_compra.sql', '31': '31_insumos_sin_inventario_y_listas.sql'};
+  '10': '10_ticket_y_compras.sql', '11': '11_compras_cobros.sql', '13': '13_metodos_catalogo.sql', '14': '14_servicios_devoluciones.sql', '15': '15_costos_produccion_ajustes.sql', '16': '16_reinicio_nomina_deudas.sql', '17': '17_correcciones.sql', '18': '18_permisos_bitacora_estado.sql', '19': '19_ajustes_valorados_y_apertura.sql', '20': '20_cuentas_metodos_y_cierre_caja.sql', '21': '21_indice_codigo_barras.sql', '22': '22_soporte_offline_idempotente.sql', '23': '23_sincronizacion_total_offline.sql', '25': '25_configuracion_reglas_y_metas.sql', '27': '27_ajustes_historial_y_ticket.sql', '28': '28_anular_compra.sql', '29': '29_pagar_compras_y_editar_compra.sql', '31': '31_insumos_sin_inventario_y_listas.sql', '32': '32_fix_stock_actual_y_gastos_fijos.sql'};
 async function viewEstado() {
   let rows;
   try { rows = await q(db.rpc('estado_sistema')); }

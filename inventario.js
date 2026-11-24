@@ -4,11 +4,25 @@ const REF = {purchase: 'Compra', sale: 'Venta', production: 'Producción', apert
 const refLabel = (m) => m.ref_type ? (REF[m.ref_type] ? `${REF[m.ref_type]}${m.ref_id ? ' #' + m.ref_id : ''}` : `${m.ref_type}${m.ref_id ? ' #' + m.ref_id : ''}`) : '-';
 const fdate = (d) => new Date(d).toLocaleString('es-VE', {dateStyle: 'short', timeStyle: 'short'});
 
+
+// Devuelve un Set con IDs de productos que NO controlan inventario (insumos libres como agua o servicios)
+async function getUntrackedIds() {
+  try {
+    const res = await db.from('products').select('id,is_service,track_inventory').eq('active', true);
+    const list = res.error ? [] : (res.data || []);
+    return new Set(list.filter(p => p.track_inventory === false || p.is_service).map(p => Number(p.id)));
+  } catch (e) {
+    return new Set();
+  }
+}
+
 async function viewInventario2() {
-  const [rows, moves] = await Promise.all([
+  const [rawRows, moves, untrSet] = await Promise.all([
     q(db.from('stock_actual').select('*').order('name')),
-    q(db.from('inventory_movements').select('movement_type,quantity,unit_cost_usd,ref_type,ref_id,notes,created_at,products(name)').order('created_at', {ascending: false}).limit(10))
+    q(db.from('inventory_movements').select('movement_type,quantity,unit_cost_usd,ref_type,ref_id,notes,created_at,products(name)').order('created_at', {ascending: false}).limit(10)),
+    getUntrackedIds()
   ]);
+  const rows = rawRows.filter(x => !untrSet.has(Number(x.product_id)));
   INV.rows = rows;
   const valor = rows.reduce((a, x) => a + Number(x.valor_usd || 0), 0);
   const agotados = rows.filter(x => Number(x.stock) <= 0).length;
@@ -362,5 +376,221 @@ function prodForm(p, D, preSku = '') {
   if (p) $('#pfDel').onclick = () => run(async () => {
     if (!confirm('¿Desactivar este producto?')) return;
     await q(db.from('products').update({active: false}).eq('id', p.id)); closeSheet(); toast('Producto desactivado'); render();
+  });
+}
+
+
+// ---------- Actualización masiva de precios y márgenes ----------
+const PM = {
+  q: '',
+  cat: 'all',
+  flt: 'all',      // 'all' | 'low' | 'loss'
+  mode: 'pct',     // 'pct' | 'margin' | 'manual'
+  pct: '10',
+  margin: '',
+  round: 'none',   // 'none' | '0.5' | '1'
+  manual: {},      // { [pid]: string }
+  unchecked: {}    // { [pid]: true }
+};
+
+function roundPriceRule(val, mode) {
+  const n = Math.max(0, Number(val) || 0);
+  if (mode === '0.5') return Math.ceil(n * 2 - 1e-9) / 2;
+  if (mode === '1') return Math.ceil(n - 1e-9);
+  return Math.round(n * 100) / 100;
+}
+
+async function viewPreciosMasivo() {
+  const [prods, cats] = await Promise.all([
+    db.from('products').select('id,sku,name,category_id,unit,sale_price_usd,avg_cost_usd,auto_cost_usd,manual_cost_usd,is_service,track_inventory,product_categories(name)').eq('active', true).order('name')
+      .then(r => r.error ? q(db.from('products').select('id,sku,name,category_id,unit,sale_price_usd,avg_cost_usd,auto_cost_usd,manual_cost_usd,is_service,product_categories(name)').eq('active', true).order('name')) : r.data),
+    q(db.from('product_categories').select('id,name').eq('active', true).order('name'))
+  ]);
+
+  const targetMin = Number(S.rules?.min_margin_percent || 0) || 30;
+  if (PM.margin === '') PM.margin = String(targetMin);
+
+  // Excluir insumos sin inventario con precio 0 a menos que ya tengan precio de venta
+  const listAll = prods.filter(p => !(p.track_inventory === false && !(Number(p.sale_price_usd) > 0)));
+  const costOfP = (p) => Number(p.auto_cost_usd ?? p.avg_cost_usd ?? p.manual_cost_usd ?? 0);
+  const curMarginOf = (p) => {
+    const pr = Number(p.sale_price_usd || 0), c = costOfP(p);
+    return pr > 0 ? ((pr - c) / pr * 100) : 0;
+  };
+  const nextPriceOf = (p) => {
+    const oldP = Number(p.sale_price_usd || 0), c = costOfP(p);
+    if (PM.mode === 'manual') {
+      const raw = PM.manual[p.id];
+      if (raw === undefined || raw === '') return oldP;
+      return Math.max(0, num(raw) || 0);
+    }
+    if (PM.mode === 'pct') {
+      const k = 1 + (num(PM.pct) || 0) / 100;
+      return roundPriceRule(oldP * k, PM.round);
+    }
+    const mg = Math.min(95, Math.max(0, num(PM.margin) || 0));
+    if (c <= 0) return oldP;
+    return roundPriceRule(c / (1 - mg / 100), PM.round);
+  };
+
+  const visible = () => {
+    const t = PM.q.trim().toLowerCase();
+    return listAll.filter(p => {
+      if (PM.cat !== 'all' && String(p.category_id) !== PM.cat) return false;
+      const pr = Number(p.sale_price_usd || 0), c = costOfP(p), mg = curMarginOf(p);
+      if (PM.flt === 'low' && !(c > 0 && (pr <= 0 || mg < targetMin - 0.1))) return false;
+      if (PM.flt === 'loss' && !(c > 0 && pr < c)) return false;
+      return !t || (p.name + ' ' + (p.sku || '')).toLowerCase().includes(t);
+    });
+  };
+
+  const changedRows = () => visible().filter(p => {
+    if (PM.unchecked[p.id]) return false;
+    const oldP = Number(p.sale_price_usd || 0), newP = nextPriceOf(p);
+    return Math.abs(newP - oldP) >= 0.005;
+  });
+
+  $('#view').innerHTML = `
+    <div class="card stack">
+      <h2>Actualización masiva de precios</h2>
+      <p class="mut" style="margin:0">Ajusta precios por porcentaje, fija un margen objetivo sobre tu costo real o edita directamente en lista.</p>
+      <div class="chips" id="pmMode">
+        <button type="button" data-m="pct" class="${PM.mode === 'pct' ? 'on' : ''}">Ajuste %</button>
+        <button type="button" data-m="margin" class="${PM.mode === 'margin' ? 'on' : ''}">Margen objetivo</button>
+        <button type="button" data-m="manual" class="${PM.mode === 'manual' ? 'on' : ''}">Edición manual</button>
+      </div>
+      ${PM.mode !== 'manual' ? `<div class="grid">
+        ${PM.mode === 'pct'
+          ? `<label>Variación sobre precio actual (%)<input id="pmPct" type="number" step="0.5" value="${esc(PM.pct)}" placeholder="Ej: 10 ó -5"></label>`
+          : `<label>Margen de ganancia objetivo (%)<input id="pmMg" type="number" step="0.5" min="0" max="95" value="${esc(PM.margin)}" placeholder="Ej: 30"></label>`}
+        <label>Redondeo del precio USD
+          <select id="pmRnd">
+            <option value="none" ${PM.round === 'none' ? 'selected' : ''}>Exacto (2 decimales)</option>
+            <option value="0.5" ${PM.round === '0.5' ? 'selected' : ''}>Redondear al 0,50 arriba</option>
+            <option value="1" ${PM.round === '1' ? 'selected' : ''}>Redondear al 1,00 USD arriba</option>
+          </select>
+        </label>
+      </div>` : ''}
+    </div>
+
+    <div class="card stack">
+      <input id="pmQ" type="search" placeholder="Buscar producto o código..." value="${esc(PM.q)}">
+      <div class="chips" id="pmFlt">
+        <button type="button" data-f="all" class="${PM.flt === 'all' ? 'on' : ''}">Todos (${listAll.length})</button>
+        <button type="button" data-f="low" class="${PM.flt === 'low' ? 'on' : ''}">Bajo margen (&lt;${qty(targetMin)}%)</button>
+        <button type="button" data-f="loss" class="${PM.flt === 'loss' ? 'on' : ''}">Precio &lt; costo</button>
+      </div>
+      <div class="chips" id="pmCat">
+        <button type="button" data-c="all" class="${PM.cat === 'all' ? 'on' : ''}">Todas las categorías</button>
+        ${cats.map(c => `<button type="button" data-c="${c.id}" class="${PM.cat === String(c.id) ? 'on' : ''}">${esc(c.name)}</button>`).join('')}
+      </div>
+      <div class="title-row">
+        <small class="mut" id="pmCnt"></small>
+        <div class="row0" style="gap:.5rem">
+          <button type="button" class="lnk" id="pmSelAll" style="font-size:.82rem">Marcar todos</button>
+          <button type="button" class="lnk" id="pmSelNone" style="font-size:.82rem">Desmarcar</button>
+        </div>
+      </div>
+      <div class="list" id="pmList"></div>
+    </div>
+
+    <div class="card stack aj-footer">
+      <div id="pmSum"></div>
+      <div class="row" style="margin:0">
+        <button type="button" class="btn" id="pmApply">Aplicar precios (0)</button>
+      </div>
+    </div>`;
+
+  const paintSummary = () => {
+    const vis = visible(), ch = changedRows();
+    $('#pmCnt').textContent = `Mostrando ${vis.length} productos · ${ch.length} cambiarán de precio`;
+    if (ch.length) {
+      const avgOld = ch.reduce((s, p) => s + curMarginOf(p), 0) / ch.length;
+      const avgNew = ch.reduce((s, p) => {
+        const np = nextPriceOf(p), c = costOfP(p);
+        return s + (np > 0 ? (np - c) / np * 100 : 0);
+      }, 0) / ch.length;
+      $('#pmSum').innerHTML = `Se actualizarán <b>${ch.length}</b> ${ch.length === 1 ? 'producto' : 'productos'} · Margen promedio: <b>${fmt(avgOld, 0)}% &rarr; ${fmt(avgNew, 0)}%</b>`;
+    } else {
+      $('#pmSum').innerHTML = '<span class="mut">No hay cambios de precio pendientes con la selección actual.</span>';
+    }
+    $('#pmApply').textContent = `Aplicar precios (${ch.length})`;
+  };
+
+  const draw = () => {
+    const vis = visible();
+    $('#pmList').innerHTML = vis.map(p => {
+      const c = costOfP(p), oldP = Number(p.sale_price_usd || 0), newP = nextPriceOf(p);
+      const changed = Math.abs(newP - oldP) >= 0.005 && !PM.unchecked[p.id];
+      const oldM = oldP > 0 ? ((oldP - c) / oldP * 100) : 0;
+      const newM = newP > 0 ? ((newP - c) / newP * 100) : 0;
+      const cls = !changed ? '' : (newP >= oldP ? 'aj-in' : 'aj-out');
+      const chk = !PM.unchecked[p.id];
+      return `<div class="item aj-row ${cls}" data-pid="${p.id}">
+        <label class="chk" style="flex:1;min-width:155px">
+          <input type="checkbox" data-chk="${p.id}" ${chk ? 'checked' : ''}>
+          <span>
+            <b>${esc(p.name)}</b>
+            <small>Costo: ${fmt(c, 4)} USD | Actual: <b>${fmt(oldP)} USD</b> (${fmt(oldM, 0)}%)</small>
+            ${changed ? `<small class="df ${newP >= oldP ? 'in' : 'outq'}">Nuevo: ${fmt(newP)} USD${S.rate ? ' (' + fmt(newP * S.rate) + ' Bs)' : ''} · Margen ${fmt(newM, 0)}%</small>` : ''}
+          </span>
+        </label>
+        ${PM.mode === 'manual'
+          ? `<label style="width:6.8rem;margin:0">Nuevo USD<input data-mp="${p.id}" type="number" step="0.01" min="0" value="${PM.manual[p.id] ?? oldP.toFixed(2)}"></label>`
+          : `<span class="n" style="flex:none"><b>${fmt(newP)} USD</b><small class="${newM < targetMin - 0.1 && c > 0 ? 'warn' : 'mut'}">${fmt(newM, 0)}% margen</small></span>`}
+      </div>`;
+    }).join('') || '<p class="mut">No hay productos con ese filtro.</p>';
+    paintSummary();
+  };
+  draw();
+
+  $('#pmMode').onclick = (e) => { const b = e.target.closest('button'); if (b) { PM.mode = b.dataset.m; render(); } };
+  if ($('#pmPct')) $('#pmPct').oninput = (e) => { PM.pct = e.target.value; draw(); };
+  if ($('#pmMg')) $('#pmMg').oninput = (e) => { PM.margin = e.target.value; draw(); };
+  if ($('#pmRnd')) $('#pmRnd').onchange = (e) => { PM.round = e.target.value; draw(); };
+  $('#pmQ').oninput = (e) => { PM.q = e.target.value; draw(); };
+  $('#pmFlt').onclick = (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    PM.flt = b.dataset.f;
+    document.querySelectorAll('#pmFlt button').forEach(x => x.classList.toggle('on', x === b));
+    draw();
+  };
+  $('#pmCat').onclick = (e) => {
+    const b = e.target.closest('button'); if (!b) return;
+    PM.cat = b.dataset.c;
+    document.querySelectorAll('#pmCat button').forEach(x => x.classList.toggle('on', x === b));
+    draw();
+  };
+  $('#pmSelAll').onclick = () => { visible().forEach(p => { delete PM.unchecked[p.id]; }); draw(); };
+  $('#pmSelNone').onclick = () => { visible().forEach(p => { PM.unchecked[p.id] = true; }); draw(); };
+
+  $('#pmList').addEventListener('change', (e) => {
+    if (e.target.dataset.chk) {
+      const id = e.target.dataset.chk;
+      if (e.target.checked) delete PM.unchecked[id]; else PM.unchecked[id] = true;
+      draw();
+    }
+  });
+  $('#pmList').addEventListener('input', (e) => {
+    if (e.target.dataset.mp) {
+      const id = e.target.dataset.mp;
+      PM.manual[id] = e.target.value;
+      delete PM.unchecked[id];
+      paintSummary();
+    }
+  });
+
+  $('#pmApply').onclick = () => run(async () => {
+    const ch = changedRows();
+    if (!ch.length) throw new Error('No hay cambios de precio para aplicar');
+    if (!confirm(`Se actualizará el precio de venta de ${ch.length} ${ch.length === 1 ? 'producto' : 'productos'}. ¿Continuar?`)) return;
+    toast(`Actualizando ${ch.length} precios...`);
+    for (const p of ch) {
+      const np = nextPriceOf(p);
+      await q(db.from('products').update({sale_price_usd: np}).eq('id', p.id));
+    }
+    PM.manual = {};
+    toast(`${ch.length} ${ch.length === 1 ? 'precio actualizado' : 'precios actualizados'}`);
+    render();
   });
 }

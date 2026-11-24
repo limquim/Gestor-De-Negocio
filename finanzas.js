@@ -598,15 +598,138 @@ async function viewCierreCaja() {
   };
 }
 
-// ---------- Gastos (con búsqueda y filtros) ----------
+// ---------- Gastos (con gastos fijos recurrentes del mes, búsqueda y filtros) ----------
 async function viewGastos() {
-  const [rows, types, accs] = await Promise.all([
+  const hoy = caracasDate(), curYm = hoy.slice(0, 7), curDay = parseInt(hoy.slice(8, 10), 10) || 1;
+  const [rows, types, accs, recRes] = await Promise.all([
     q(db.from('expenses').select('*, expense_types(name,is_fixed), accounts(name)').order('id', {ascending: false}).limit(100)),
     q(db.from('expense_types').select('id,name,is_fixed').eq('active', true).order('name')),
-    loadAccountsRich().then(l => l.filter(a => a.active))
+    loadAccountsRich().then(l => l.filter(a => a.active)),
+    db.from('recurring_expenses').select('*').eq('active', true).order('due_day').order('name').then(r => ({rows: r.error ? [] : (r.data || []), missing: !!r.error}))
   ]);
+  const recs = recRes.rows;
 
-  $('#view').innerHTML = `<div class="card stack" style="margin-bottom:.8rem">
+  // Abre el formulario de gasto (nuevo o precargado desde un gasto fijo recurrente)
+  const openExpenseSheet = (preRec = null) => {
+    const defAcc = preRec?.account_id ? accs.find(a => String(a.id) === String(preRec.account_id)) : accs[0];
+    const defCur = defAcc?.currency || 'USD';
+    let defAmt = '';
+    if (preRec && Number(preRec.amount) > 0) {
+      if (preRec.currency === defCur) defAmt = Number(preRec.amount).toFixed(2);
+      else if (defCur === 'VES' && S.rate) defAmt = (Number(preRec.amount) * S.rate).toFixed(2);
+      else if (defCur === 'USD' && S.rate) defAmt = (Number(preRec.amount) / S.rate).toFixed(2);
+    }
+    const defDesc = preRec ? `${preRec.name} (${curYm})` : '';
+    openSheet(preRec ? 'Pagar gasto fijo: ' + esc(preRec.name) : 'Nuevo gasto', `<form id="gF" class="stack">
+      <label>Tipo de gasto<select name="type">${types.map(t => `<option value="${t.id}" ${preRec && String(t.id) === String(preRec.expense_type_id) ? 'selected' : ''}>${esc(t.name)}${t.is_fixed ? ' (fijo)' : ''}</option>`).join('')}</select></label>
+      <label>Descripción<input name="desc" value="${esc(defDesc)}" placeholder="Ej: pago de alquiler de octubre"></label>
+      <label>Pagado desde<select name="acc">${acctOpts(accs, defAcc?.id)}</select></label>
+      <small id="gAccBal" style="display:block;margin-top:-.45rem"></small>
+      <label>Monto (en la moneda de la cuenta)<input name="amount" type="number" step="0.01" min="0.01" value="${esc(defAmt)}" required></label>
+      <label>Fecha<input name="date" type="date" value="${hoy}"></label>
+      <button class="btn" type="submit">${preRec ? 'Registrar pago del mes' : 'Registrar gasto'}</button></form>`);
+    const el = $('#gF').elements; let pc = defCur;
+    const paintGBal = () => {
+      const a = accs.find(x => String(x.id) === el.acc.value);
+      $('#gAccBal').innerHTML = accBalanceLine(a, num(el.amount.value) || 0, true);
+    };
+    paintGBal();
+    el.amount.oninput = paintGBal;
+    el.acc.onchange = () => {
+      const nc = accs.find(a => String(a.id) === el.acc.value)?.currency, v = num(el.amount.value);
+      if (v && nc !== pc) el.amount.value = (nc === 'VES' ? v * (S.rate || 0) : v / (S.rate || 1)).toFixed(2);
+      pc = nc;
+      paintGBal();
+    };
+    $('#gF').onsubmit = (e) => {
+      e.preventDefault();
+      run(async () => {
+        const payDate = el.date.value || hoy;
+        await q(db.rpc('registrar_gasto', {p_type_id: +el.type.value || null, p_desc: el.desc.value.trim() || null, p_account_id: +el.acc.value, p_amount: num(el.amount.value), p_date: payDate, p_rate: S.rate}));
+        if (preRec) {
+          try { await q(db.from('recurring_expenses').update({last_paid_ym: payDate.slice(0, 7), last_paid_at: payDate}).eq('id', preRec.id)); } catch (err) {}
+        }
+        closeSheet(); toast(preRec ? `Gasto fijo "${preRec.name}" pagado` : 'Gasto registrado'); render();
+      });
+    };
+  };
+
+  // Formulario para crear o editar un gasto fijo recurrente
+  const openRecForm = (rec = null) => {
+    const fixedFirst = [...types].sort((a, b) => (b.is_fixed ? 1 : 0) - (a.is_fixed ? 1 : 0));
+    openSheet(rec ? 'Editar gasto fijo' : 'Nuevo gasto fijo mensual', `<form id="rcF" class="stack">
+      <p class="mut" style="margin:0">Configura gastos mensuales (alquiler, internet, luz, etc.) para recibir recordatorios y pagarlos en 1 toque.</p>
+      <label>Nombre del gasto fijo<input name="rname" value="${esc(rec?.name || '')}" placeholder="Ej: Alquiler del local, Internet" required></label>
+      <label>Tipo de gasto<select name="etype">${fixedFirst.map(t => `<option value="${t.id}" ${rec && String(t.id) === String(rec.expense_type_id) ? 'selected' : ''}>${esc(t.name)}${t.is_fixed ? ' (fijo)' : ''}</option>`).join('')}</select></label>
+      <div class="grid">
+        <label>Moneda<select name="cur"><option value="USD" ${(rec?.currency || 'USD') === 'USD' ? 'selected' : ''}>Dólares (USD)</option><option value="VES" ${rec?.currency === 'VES' ? 'selected' : ''}>Bolívares (Bs)</option></select></label>
+        <label>Monto estimado<input name="amt" type="number" step="0.01" min="0" value="${rec ? Number(rec.amount || 0) : ''}" required></label>
+      </div>
+      <div class="grid">
+        <label>Día de pago al mes (1-31)<input name="day" type="number" min="1" max="31" value="${rec?.due_day || 1}" required></label>
+        <label>Cuenta habitual<select name="acc"><option value="">Cualquiera</option>${acctOpts(accs, rec?.account_id)}</select></label>
+      </div>
+      <label>Nota (opcional)<input name="note" value="${esc(rec?.note || '')}" placeholder="Ej: transferir a propietario"></label>
+      <div class="row"><button class="btn" type="submit">Guardar</button>${rec ? '<button type="button" class="btn ghost" id="rcDel" style="color:var(--bad)">Eliminar</button>' : ''}</div>
+    </form>`);
+    const el = $('#rcF').elements;
+    $('#rcF').onsubmit = (e) => {
+      e.preventDefault();
+      const obj = {
+        name: el.rname.value.trim(),
+        expense_type_id: +el.etype.value || null,
+        account_id: +el.acc.value || null,
+        currency: el.cur.value,
+        amount: Math.max(0, num(el.amt.value) || 0),
+        due_day: Math.min(31, Math.max(1, parseInt(el.day.value, 10) || 1)),
+        note: el.note.value.trim() || null
+      };
+      run(async () => {
+        try {
+          await q(rec ? db.from('recurring_expenses').update(obj).eq('id', rec.id) : db.from('recurring_expenses').insert(obj));
+        } catch (err) {
+          if (/recurring_expenses/i.test(err.message || '')) {
+            throw new Error('Falta ejecutar 32_fix_stock_actual_y_gastos_fijos.sql en Supabase (SQL Editor).');
+          }
+          throw err;
+        }
+        closeSheet(); toast('Gasto fijo guardado'); render();
+      });
+    };
+    if (rec) $('#rcDel').onclick = () => run(async () => {
+      if (!confirm('¿Quitar este gasto fijo de los recordatorios mensuales?')) return;
+      await q(db.from('recurring_expenses').update({active: false}).eq('id', rec.id));
+      closeSheet(); toast('Gasto fijo eliminado'); render();
+    });
+  };
+
+  const paidRecCnt = recs.filter(r => r.last_paid_ym === curYm).length;
+  const pendRecUsd = recs.filter(r => r.last_paid_ym !== curYm).reduce((s, r) => s + toUsd(r.amount, r.currency), 0);
+  const recCard = `<div class="card stack" style="margin-bottom:.8rem">
+    <div class="title-row">
+      <h2>Gastos fijos del mes (${curYm})</h2>
+      <button type="button" class="lnk" id="rcAdd">+ Nuevo fijo</button>
+    </div>
+    ${recs.length ? `<small class="mut">Pagados <b>${paidRecCnt} de ${recs.length}</b>${pendRecUsd > 0.01 ? ` · Pendiente del mes: <b>${fmt(pendRecUsd)} USD</b>` : ' · Todo al día este mes'}</small>
+      <div class="list" id="rcL">${recs.map(r => {
+        const isPaid = r.last_paid_ym === curYm;
+        const overdue = !isPaid && r.due_day < curDay;
+        const soon = !isPaid && !overdue && r.due_day <= curDay + 3;
+        const bCls = isPaid ? 'ok' : overdue ? 'out' : soon ? 'low' : '';
+        const bTxt = isPaid ? 'Pagado' : overdue ? `Vencido (día ${r.due_day})` : soon ? `Vence día ${r.due_day}` : `Día ${r.due_day}`;
+        return `<div class="item" style="gap:.5rem;align-items:center">
+          <button type="button" class="lnk" data-redit="${r.id}" style="flex:1;text-align:left;padding:0;color:var(--ink);font-weight:400">
+            <b>${esc(r.name)}</b>
+            <small style="display:block;color:var(--mut)">${money(r.amount, r.currency)} · <span class="badge ${bCls}" style="font-size:.72rem">${bTxt}</span></small>
+          </button>
+          ${isPaid ? '<span class="pos" style="font-weight:700;font-size:.82rem">Listo</span>' : `<button type="button" class="btn" data-rpay="${r.id}" style="min-height:38px;padding:.35rem .75rem;font-size:.85rem">Pagar</button>`}
+        </div>`;
+      }).join('')}</div>`
+      : '<p class="mut" style="margin:0">Registra tus gastos fijos mensuales (alquiler, internet, luz, etc.) para recibir recordatorios y pagarlos en 1 toque.</p>'}
+  </div>`;
+
+  $('#view').innerHTML = `${recCard}
+    <div class="card stack" style="margin-bottom:.8rem">
       <input id="gQ" type="search" placeholder="Buscar gasto por descripción..." value="${esc(GF.q)}">
       <div class="grid">
         <label>Cuenta<select id="gFA"><option value="all">Todas las cuentas</option>${accs.map(a => `<option value="${a.id}" ${String(a.id) === GF.acc ? 'selected' : ''}>${esc(a.name)}</option>`).join('')}</select></label>
@@ -632,38 +755,20 @@ async function viewGastos() {
   };
   drawG();
 
+  $('#rcAdd').onclick = () => openRecForm(null);
+  if ($('#rcL')) {
+    $('#rcL').onclick = (e) => {
+      const payB = e.target.closest('[data-rpay]');
+      if (payB) { const r = recs.find(x => String(x.id) === payB.dataset.rpay); if (r) openExpenseSheet(r); return; }
+      const edB = e.target.closest('[data-redit]');
+      if (edB) { const r = recs.find(x => String(x.id) === edB.dataset.redit); if (r) openRecForm(r); }
+    };
+  }
   $('#gQ').oninput = (e) => { GF.q = e.target.value; drawG(); };
   $('#gFA').onchange = (e) => { GF.acc = e.target.value; drawG(); };
   $('#gFT').onchange = (e) => { GF.type = e.target.value; drawG(); };
+  $('#gAdd').onclick = () => openExpenseSheet(null);
 
-  $('#gAdd').onclick = () => {
-    openSheet('Nuevo gasto', `<form id="gF" class="stack"><label>Tipo de gasto<select name="type">${types.map(t => `<option value="${t.id}">${esc(t.name)}${t.is_fixed ? ' (fijo)' : ''}</option>`).join('')}</select></label>
-      <label>Descripción<input name="desc" placeholder="Ej: pago de alquiler de octubre"></label>
-      <label>Pagado desde<select name="acc">${acctOpts(accs)}</select></label>
-      <small id="gAccBal" style="display:block;margin-top:-.45rem"></small>
-      <label>Monto (en la moneda de la cuenta)<input name="amount" type="number" step="0.01" min="0.01" required></label>
-      <label>Fecha<input name="date" type="date" value="${caracasDate()}"></label><button class="btn" type="submit">Registrar gasto</button></form>`);
-    const el = $('#gF').elements; let pc = accs[0]?.currency;
-    const paintGBal = () => {
-      const a = accs.find(x => String(x.id) === el.acc.value);
-      $('#gAccBal').innerHTML = accBalanceLine(a, num(el.amount.value) || 0, true);
-    };
-    paintGBal();
-    el.amount.oninput = paintGBal;
-    el.acc.onchange = () => {
-      const nc = accs.find(a => String(a.id) === el.acc.value)?.currency, v = num(el.amount.value);
-      if (v && nc !== pc) el.amount.value = (nc === 'VES' ? v * (S.rate || 0) : v / (S.rate || 1)).toFixed(2);
-      pc = nc;
-      paintGBal();
-    };
-    $('#gF').onsubmit = (e) => {
-      e.preventDefault();
-      run(async () => {
-        await q(db.rpc('registrar_gasto', {p_type_id: +el.type.value || null, p_desc: el.desc.value.trim() || null, p_account_id: +el.acc.value, p_amount: num(el.amount.value), p_date: el.date.value || null, p_rate: S.rate}));
-        closeSheet(); toast('Gasto registrado'); render();
-      });
-    };
-  };
   $('#gL').onclick = (e) => {
     const b = e.target.closest('[data-id]'); if (!b) return;
     const g = rows.find(x => String(x.id) === b.dataset.id);

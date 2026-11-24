@@ -30,15 +30,17 @@ const AJREASON = {
 
 async function viewAjusteMasivo() {
   const isHist = AJ.sub === 'historial';
-  const [rows, types, accs, histBatches, legacyMoves] = await Promise.all([
+  const [rawRows, types, accs, histBatches, legacyMoves, untrSet] = await Promise.all([
     q(db.from('stock_actual').select('product_id,sku,name,category_id,category,unit,stock,avg_cost_usd').order('name')),
     q(db.from('expense_types').select('id,name').eq('active', true).order('name')),
     loadActiveAccounts(),
     db.from('inventory_adjustments').select('*').order('id', {ascending: false}).limit(80).then(r => r.error ? [] : (r.data || [])),
     isHist
       ? q(db.from('inventory_movements').select('id,movement_type,quantity,unit_cost_usd,ref_type,ref_id,notes,created_at,products(name,unit)').in('movement_type', ['ajuste', 'merma']).order('id', {ascending: false}).limit(60))
-      : Promise.resolve([])
+      : Promise.resolve([]),
+    typeof getUntrackedIds === 'function' ? getUntrackedIds() : Promise.resolve(new Set())
   ]);
+  const rows = rawRows.filter(x => !untrSet.has(Number(x.product_id)));
 
   const tabBar = `<div class="row" style="margin:0 0 .8rem">
     <button type="button" class="btn ${!isHist ? '' : 'ghost'}" data-ajsub="nuevo">Nuevo ajuste</button>
@@ -428,7 +430,11 @@ function renderAjusteHistorial(tabBar, batches, legacyMoves, accs, types) {
 
 // ---------- Reposición sugerida (productos en su mínimo) ----------
 async function viewSugerida() {
-  const rows = (await q(db.from('stock_actual').select('product_id,name,unit,stock,min_stock,avg_cost_usd').order('name'))).filter(r => +r.min_stock > 0 && +r.stock <= +r.min_stock);
+  const [rawSug, untrSet] = await Promise.all([
+    q(db.from('stock_actual').select('product_id,name,unit,stock,min_stock,avg_cost_usd').order('name')),
+    typeof getUntrackedIds === 'function' ? getUntrackedIds() : Promise.resolve(new Set())
+  ]);
+  const rows = rawSug.filter(r => !untrSet.has(Number(r.product_id)) && +r.min_stock > 0 && +r.stock <= +r.min_stock);
   const sug = (r) => Math.max(Math.ceil(+r.min_stock * 2 - +r.stock), 1);
   $('#view').innerHTML = rows.length ? `<div class="card"><p class="mut">Productos en su mínimo o por debajo. Ajusta las cantidades y llévalos a una nueva compra.</p><div class="list">${rows.map(r => `<div class="item">
     <label class="chk" style="flex:1"><input type="checkbox" data-s="${r.product_id}" checked><span><b>${esc(r.name)}</b><small>Hay ${qty(r.stock)} ${esc(r.unit)} | mínimo ${qty(r.min_stock)} | costo ${fmt(r.avg_cost_usd)} USD</small></span></label>
@@ -446,7 +452,7 @@ async function viewSugerida() {
 async function descargarRespaldo() {
   const T = ['settings', 'products', 'product_categories', 'units', 'taxes', 'parties', 'accounts', 'account_movements', 'payments', 'sales', 'sale_items', 'sale_returns', 'sale_return_items', 'purchases', 'purchase_items',
     'inventory_movements', 'recipes', 'recipe_items', 'production_orders', 'production_items', 'expenses', 'expense_types', 'quotes', 'quote_items', 'price_lists', 'payment_methods', 'message_templates', 'exchange_rates',
-    'employees', 'employee_advances', 'payroll_runs', 'payroll_items', 'cash_closings', 'inventory_adjustments'];
+    'employees', 'employee_advances', 'payroll_runs', 'payroll_items', 'cash_closings', 'inventory_adjustments', 'recurring_expenses'];
   const all = async (t) => { let r = [], f = 0; for (;;) { const d = await q(db.from(t).select('*').range(f, f + 999)); r = r.concat(d); if (d.length < 1000) return r; f += 1000; } };
   const out = {fecha: new Date().toISOString(), tablas: {}};
   toast('Preparando el respaldo...');

@@ -7,16 +7,18 @@ async function viewInicio() {
   const m0 = dstr(new Date(y, m, 1)), p0 = dstr(new Date(y, m - 1, 1)), p1 = dstr(new Date(y, m - 1, Math.min(dd, new Date(y, m, 0).getDate())));
   const d14 = dstr(new Date(y, m, dd - 13)), d30 = dstr(new Date(y, m, dd - 30));
   const rp = (a, b) => q(db.rpc('reporte_resumen', {p_from: a, p_to: b}));
-  const [h, mes, ant, quin, mesBs, accs, stock, alertHtml, vm, sold, set] = await Promise.all([
+  const [h, mes, ant, quin, mesBs, accs, stockRaw, untrSet, alertHtml, vm, sold, set] = await Promise.all([
     rp(hoy, hoy), rp(m0, hoy), rp(p0, p1), rp(d14, hoy),
     typeof calcHistoricalBs === 'function' ? calcHistoricalBs(m0, hoy) : Promise.resolve({ok: false, netaBs: 0}),
     q(db.from('cuentas_saldo').select('balance,currency').eq('active', true)),
     q(db.from('stock_actual').select('product_id,name,stock,bajo_minimo,valor_usd,sells_regularly')),
+    typeof getUntrackedIds === 'function' ? getUntrackedIds() : Promise.resolve(new Set()),
     alertasHtml(),
     q(db.from('ventas_resumen').select('customer,total_usd').gte('sale_date', m0).neq('status', 'anulada')),
     q(db.from('sale_items').select('product_id,sales!inner(sale_date,status)').gte('sales.sale_date', d30).neq('sales.status', 'anulada')),
     q(db.from('settings').select('*').eq('id', 1).single())
   ]);
+  const stock = stockRaw.filter(x => !untrSet.has(Number(x.product_id)));
   const U = (n) => fmt(n) + ' USD', ut = (r) => r.ingresos - r.costo_ventas - r.gastos;
   const dl = (a, b) => b ? (a - b) / Math.abs(b) * 100 : null, dtxt = (a, b, l) => { const v = dl(a, b); return v === null ? '' : `${v >= 0 ? '+' : ''}${fmt(v, 0)}% ${l}`; };
   const cajaUsdReal = accs.filter(x => x.currency === 'USD').reduce((a, x) => a + Number(x.balance || 0), 0);
