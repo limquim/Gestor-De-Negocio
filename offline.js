@@ -596,6 +596,7 @@ const OFF = {
     const d = this.r3(delta);
     const prods = this.mem.products || [];
     const prod = prods.find(p => Number(p.id) === pid);
+    if (prod && (prod.track_inventory === false || prod.is_service)) return;
     const stRows = this.mem.stock_actual || [];
     let st = stRows.find(s => Number(s.product_id) === pid);
 
@@ -697,7 +698,7 @@ const OFF = {
     const cats = this.mem.product_categories || [];
     const cat = cats.find(c => Number(c.id) === Number(prod.category_id));
     const idx = stRows.findIndex(s => Number(s.product_id) === Number(prod.id));
-    if (prod.active === false || prod.is_service) {
+    if (prod.active === false || prod.is_service || prod.track_inventory === false) {
       if (idx >= 0) { stRows.splice(idx, 1); await this.saveTable('stock_actual', stRows); }
       return;
     }

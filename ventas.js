@@ -5,14 +5,24 @@ const V = {cart: [], pays: [], edit: null}, VH = {f: 'all', q: '', from: '', to:
 const waDigits = (t) => String(t || '').replace(/\D/g, '').replace(/^0/, '58');
 const optList = (obj, sel) => Object.entries(obj).map(([k, v]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${v}</option>`).join('');
 
+function priceWithList(basePrice, listObj) {
+  const b = Number(basePrice || 0);
+  if (!listObj || !b) return b;
+  const pct = Number(listObj.adjust_percent || 0);
+  return Math.max(0, Math.round(b * (1 + pct / 100) * 100) / 100);
+}
+
 async function vData() {
-  const [products, stock, custs, accs] = await Promise.all([
-    q(db.from('products').select('id,name,sku,unit,sale_price_usd,is_service,taxes(percent)').eq('active', true).order('name')),
+  const [products, stock, custs, accs, lists] = await Promise.all([
+    db.from('products').select('id,name,sku,unit,sale_price_usd,is_service,track_inventory,taxes(percent)').eq('active', true).order('name')
+      .then(r => r.error ? q(db.from('products').select('id,name,sku,unit,sale_price_usd,is_service,taxes(percent)').eq('active', true).order('name')) : r.data),
     q(db.from('stock_actual').select('product_id,stock')),
-    q(db.from('parties').select('id,name,phone').eq('is_customer', true).eq('active', true).order('name')),
-    db.from('accounts').select('id,name,currency,methods,is_default').eq('active', true).order('is_default', {ascending: false}).order('id').then(r => r.error ? q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id')) : r.data)
+    db.from('parties').select('id,name,phone,price_list_id').eq('is_customer', true).eq('active', true).order('name')
+      .then(r => r.error ? q(db.from('parties').select('id,name,phone').eq('is_customer', true).eq('active', true).order('name')) : r.data),
+    db.from('accounts').select('id,name,currency,methods,is_default').eq('active', true).order('is_default', {ascending: false}).order('id').then(r => r.error ? q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id')) : r.data),
+    db.from('price_lists').select('id,name,adjust_percent').eq('active', true).order('name').then(r => r.error ? [] : (r.data || []))
   ]);
-  return {products, st: Object.fromEntries(stock.map(s => [s.product_id, Number(s.stock)])), custs, accs};
+  return {products, st: Object.fromEntries(stock.map(s => [s.product_id, Number(s.stock)])), custs, accs, lists};
 }
 async function saleDetail(id) {
   const [s, items, pays, ret, rit] = await Promise.all([
@@ -59,14 +69,21 @@ async function viewVenta() {
   const D = await vData(), old = V.edit ? await saleDetail(V.edit) : null, qd = fq ? await quoteDetail(fq) : null;
   if (old) old.items.forEach(i => { D.st[i.product_id] = (D.st[i.product_id] || 0) + +i.quantity; });   // el stock vuelve a contar lo ya vendido
   const pm = Object.fromEntries(D.products.map(p => [p.id, p]));
-  const line = (pid, qv, pr) => { const p = pm[pid]; return {pid, name: p?.name, unit: p?.unit, qty: qv, price: pr ?? +p?.sale_price_usd, price0: +p?.sale_price_usd, svc: !!p?.is_service, pct: Number(p?.taxes?.percent || 0)}; };
+  const curPriceList = () => D.lists.find(l => String(l.id) === String($('#vList')?.value || '')) || null;
+  const line = (pid, qv, pr) => {
+    const p = pm[pid], base = +p?.sale_price_usd || 0, adj = priceWithList(base, curPriceList());
+    return {pid, name: p?.name, unit: p?.unit, qty: qv, price: pr ?? adj, price0: base, svc: !!p?.is_service, untr: p?.track_inventory === false, pct: Number(p?.taxes?.percent || 0)};
+  };
   V.cart = (old || qd) ? (old || qd).items.map(i => line(i.product_id, +i.quantity, +i.unit_price_usd)) : [];
   V.pays = old ? old.pays.map(p => ({acc: p.account_id, method: p.method, amount: +p.amount, ref: p.reference || ''})) : [];
 
   $('#view').innerHTML = `${V.edit ? `<div class="card title-row"><b>Corrigiendo la venta #${V.edit}</b><button class="lnk" id="vCancel">Cancelar</button></div>` : ''}
   <div class="card stack">
     <div class="row0"><label style="flex:1">Cliente<select id="vCust"><option value="">Cliente general</option>${D.custs.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label><button class="btn ghost" type="button" id="vNewC" aria-label="Nuevo cliente">+</button></div>
-    <label>Documento<select id="vDoc">${optList(DOCS)}</select></label>
+    <div class="grid">
+      <label>Documento<select id="vDoc">${optList(DOCS)}</select></label>
+      ${D.lists.length ? `<label>Lista de precios<select id="vList"><option value="">Precio normal (0%)</option>${D.lists.map(l => `<option value="${l.id}">${esc(l.name)} (${+l.adjust_percent > 0 ? '+' : ''}${qty(l.adjust_percent)}%)</option>`).join('')}</select></label>` : ''}
+    </div>
     <div class="grid"><label>Tasa (Bs por USD)<input id="vRate" type="number" step="0.0001" min="0.0001"></label><label>Descuento (USD)<input id="vDisc" type="number" step="0.01" min="0" value="0"></label></div></div>
   <div class="card"><h2>Productos</h2><div class="scan-row"><input id="vSearch" type="search" placeholder="Buscar producto o escanear código"><button type="button" class="icon-btn scan-btn" id="vScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div><div class="list" id="vRes" style="margin:.5rem 0"></div><div id="vCart"></div></div>
   <div class="card"><h2>Total</h2><div id="vTot"></div></div>
@@ -106,7 +123,7 @@ async function viewVenta() {
     return {...t, paid, bal};
   };
   const drawCart = () => {
-    $('#vCart').innerHTML = V.cart.map((c, i) => `<div class="pl" data-i="${i}"><div><b>${esc(c.name)}</b><small>${c.svc ? 'Servicio (sin inventario)' : 'Disponible: ' + qty(D.st[c.pid] || 0) + ' ' + esc(c.unit)}</small><small class="lt"></small>${c.svc ? `<button class="lnk" data-free="${i}">${c.price > 0 ? 'Asumirlo yo (no cobrar)' : 'Cobrarlo al cliente'}</button>` : ''}<button class="lnk bad" data-rm="${i}">Quitar</button></div>
+    $('#vCart').innerHTML = V.cart.map((c, i) => `<div class="pl" data-i="${i}"><div><b>${esc(c.name)}</b><small>${c.svc ? 'Servicio (sin inventario)' : c.untr ? 'Insumo sin inventario' : 'Disponible: ' + qty(D.st[c.pid] || 0) + ' ' + esc(c.unit)}</small><small class="lt"></small>${c.svc ? `<button class="lnk" data-free="${i}">${c.price > 0 ? 'Asumirlo yo (no cobrar)' : 'Cobrarlo al cliente'}</button>` : ''}<button class="lnk bad" data-rm="${i}">Quitar</button></div>
       <div class="stack" style="gap:.3rem"><label>Cant.<input data-f="qty" type="number" step="0.001" min="0.001" value="${c.qty}"></label><label>Precio USD<input data-f="price" type="number" step="0.01" min="0" value="${c.price}" ${lockSellerPrice ? 'disabled' : ''}></label></div></div>`).join('') || '<p class="mut">Busca y agrega productos.</p>';
     totals();
   };
@@ -120,9 +137,32 @@ async function viewVenta() {
   };
   drawCart(); drawPays();
 
+  const applyPriceListToCart = () => {
+    const pl = curPriceList();
+    V.cart.forEach(c => {
+      if (c.svc && c.price === 0) return;
+      c.price = priceWithList(c.price0, pl);
+    });
+    drawCart();
+  };
+  if ($('#vList')) $('#vList').onchange = () => { applyPriceListToCart(); const pl = curPriceList(); toast(pl ? `Lista "${pl.name}" aplicada` : 'Precios normales restaurados'); };
+  $('#vCust').onchange = () => {
+    if (!$('#vList')) return;
+    const c = D.custs.find(x => String(x.id) === $('#vCust').value);
+    const nextLid = c?.price_list_id ? String(c.price_list_id) : '';
+    if ($('#vList').value !== nextLid) {
+      $('#vList').value = nextLid;
+      applyPriceListToCart();
+      const pl = curPriceList();
+      if (pl) toast(`Lista "${pl.name}" aplicada para ${c.name}`);
+    }
+  };
   $('#vSearch').oninput = (e) => {
-    const t = e.target.value.trim().toLowerCase();
-    $('#vRes').innerHTML = t ? (D.products.filter(p => (p.name + ' ' + (p.sku || '')).toLowerCase().includes(t)).slice(0, 6).map(p => `<button class="item" data-add="${p.id}"><span><b>${esc(p.name)}</b><small>${fmt(p.sale_price_usd)} USD | ${p.is_service ? 'Servicio' : 'Disponible: ' + qty(D.st[p.id] || 0) + ' ' + esc(p.unit)}</small></span><span class="mut">+</span></button>`).join('') || '<p class="mut">Sin resultados.</p>') : '';
+    const t = e.target.value.trim().toLowerCase(), pl = curPriceList();
+    $('#vRes').innerHTML = t ? (D.products.filter(p => (p.name + ' ' + (p.sku || '')).toLowerCase().includes(t)).slice(0, 6).map(p => {
+      const pr = priceWithList(p.sale_price_usd, pl);
+      return `<button class="item" data-add="${p.id}"><span><b>${esc(p.name)}</b><small>${fmt(pr)} USD${pl ? ' (' + esc(pl.name) + ')' : ''} | ${p.is_service ? 'Servicio' : p.track_inventory === false ? 'Sin inventario' : 'Disponible: ' + qty(D.st[p.id] || 0) + ' ' + esc(p.unit)}</small></span><span class="mut">+</span></button>`;
+    }).join('') || '<p class="mut">Sin resultados.</p>') : '';
   };
   const addProdByCode = (code) => {
     const p = findBySku(D.products, code);
@@ -132,7 +172,7 @@ async function viewVenta() {
     else V.cart.push(line(p.id, 1));
     drawCart();
     const curQ = V.cart.find(c => c.pid === p.id)?.qty || 1;
-    return {ok: true, msg: `${p.name} (x${qty(curQ)}) — ${fmt(p.sale_price_usd)} USD`};
+    return {ok: true, msg: `${p.name} (x${qty(curQ)}) — ${fmt(priceWithList(p.sale_price_usd, curPriceList()))} USD`};
   };
   $('#vScan').onclick = () => openScanner({
     title: 'Escanear para vender',
@@ -196,7 +236,7 @@ async function viewVenta() {
     if (Number(rules.max_discount_percent || 0) > 0 && discPctGo > Number(rules.max_discount_percent) + 0.05 && (S.role || 'admin') !== 'admin') {
       throw new Error(`El descuento (${fmt(discPctGo, 1)}%) supera el máximo permitido (${qty(rules.max_discount_percent)}%).`);
     }
-    const lacking = V.cart.filter(c => !c.svc && c.qty > (D.st[c.pid] || 0));
+    const lacking = V.cart.filter(c => !c.svc && !c.untr && c.qty > (D.st[c.pid] || 0));
     if (lacking.length) {
       if (rules.block_negative_stock) {
         throw new Error('Stock insuficiente para: ' + lacking.map(c => `${c.name} (disp: ${qty(D.st[c.pid] || 0)})`).join(', ') + '. Regla activa en Configuración.');

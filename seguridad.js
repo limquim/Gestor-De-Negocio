@@ -1,5 +1,5 @@
 // Seguridad: roles y permisos, bitácora de cambios y estado del sistema
-const APP_VERSION = '30';
+const APP_VERSION = '31';
 const ROLE_NAMES = {admin: 'Administrador', vendedor: 'Vendedor', almacen: 'Almacén', contador: 'Contador'};
 const ACCESS = {   // secciones que ve cada rol (el administrador ve todo)
   vendedor: ['ventas', 'inventario', 'marketing', 'directorios'],
@@ -89,7 +89,7 @@ async function viewBitacora() {
 
 // ---------- Estado del sistema ----------
 const FILES = {'01': '01_esquema_base.sql', '02': '02_compras.sql (o 12_reparar_compras.sql)', '04': '04_base.sql', '05': '05_produccion.sql', '06': '06_productos.sql', '07': '07_ventas.sql', '08': '08_finanzas.sql', '09': '09_cotizaciones_marketing.sql',
-  '10': '10_ticket_y_compras.sql', '11': '11_compras_cobros.sql', '13': '13_metodos_catalogo.sql', '14': '14_servicios_devoluciones.sql', '15': '15_costos_produccion_ajustes.sql', '16': '16_reinicio_nomina_deudas.sql', '17': '17_correcciones.sql', '18': '18_permisos_bitacora_estado.sql', '19': '19_ajustes_valorados_y_apertura.sql', '20': '20_cuentas_metodos_y_cierre_caja.sql', '21': '21_indice_codigo_barras.sql', '22': '22_soporte_offline_idempotente.sql', '23': '23_sincronizacion_total_offline.sql', '25': '25_configuracion_reglas_y_metas.sql', '27': '27_ajustes_historial_y_ticket.sql', '28': '28_anular_compra.sql', '29': '29_pagar_compras_y_editar_compra.sql'};
+  '10': '10_ticket_y_compras.sql', '11': '11_compras_cobros.sql', '13': '13_metodos_catalogo.sql', '14': '14_servicios_devoluciones.sql', '15': '15_costos_produccion_ajustes.sql', '16': '16_reinicio_nomina_deudas.sql', '17': '17_correcciones.sql', '18': '18_permisos_bitacora_estado.sql', '19': '19_ajustes_valorados_y_apertura.sql', '20': '20_cuentas_metodos_y_cierre_caja.sql', '21': '21_indice_codigo_barras.sql', '22': '22_soporte_offline_idempotente.sql', '23': '23_sincronizacion_total_offline.sql', '25': '25_configuracion_reglas_y_metas.sql', '27': '27_ajustes_historial_y_ticket.sql', '28': '28_anular_compra.sql', '29': '29_pagar_compras_y_editar_compra.sql', '31': '31_insumos_sin_inventario_y_listas.sql'};
 async function viewEstado() {
   let rows;
   try { rows = await q(db.rpc('estado_sistema')); }

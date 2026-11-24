@@ -238,7 +238,7 @@ async function viewProductos2() {
     const t = PR2.q.toLowerCase();
     $('#prList').innerHTML = prods.filter(p => !t || (p.name + ' ' + (p.sku || '')).toLowerCase().includes(t)).map(p => `<button class="item" data-id="${p.id}">
       <span class="row0">${D.photos && p.image_url ? `<img class="thumb" src="${esc(p.image_url)}" alt="">` : ''}<span><b>${esc(p.name)}</b>
-      <small>${p.is_service ? 'SERVICIO | ' : ''}${esc(p.sku || 'Sin código')} | ${esc(p.product_categories?.name || 'Sin categoría')} | ${esc(p.unit)}</small>
+      <small>${p.is_service ? 'SERVICIO | ' : p.track_inventory === false ? 'SIN INVENTARIO | ' : ''}${esc(p.sku || 'Sin código')} | ${esc(p.product_categories?.name || 'Sin categoría')} | ${esc(p.unit)}</small>
       <small>Precio: ${fmt(p.sale_price_usd)} USD${S.rate ? ' (' + fmt(p.sale_price_usd * S.rate) + ' Bs)' : ''} | ${esc(p.taxes?.name || 'Sin impuesto')}</small></span></span>
       <span class="mut">&rsaquo;</span></button>`).join('') || '<p class="mut">No hay productos. Pulsa + para crear el primero.</p>';
   };
@@ -278,7 +278,8 @@ function prodForm(p, D, preSku = '') {
     <label>Precio de venta en USD<input name="price" type="number" step="0.0001" min="0" value="${v('sale_price_usd', 0)}"></label>
     <label>Costo automático (el real, el que usa el sistema)<input value="${p && p.auto_cost_usd != null ? fmt(p.auto_cost_usd, 4) + ' USD' : 'Aún sin compras ni fabricaciones: se usa el costo manual'}" disabled></label>
     <p class="mut">El costo automático se actualiza solo con cada compra, fabricación o ajuste de ingreso con costo. Tu costo manual no cambia: solo se usa mientras no haya movimientos con costo.</p>
-    <label class="chk"><input type="checkbox" name="is_service" ${p?.is_service ? 'checked' : ''}> Es un servicio (no maneja inventario, ej: delivery). Tu costo es lo que pagas por él.</label>
+    <label class="chk"><input type="checkbox" name="no_track" ${p && p.track_inventory === false && !p.is_service ? 'checked' : ''}> Insumo sin inventario (consumo libre en fórmulas, ej: agua, gas, hielo). Puede tener costo 0 y nunca genera stock negativo.</label>
+    <label class="chk"><input type="checkbox" name="is_service" ${p?.is_service ? 'checked' : ''}> Es un servicio facturable (ej: delivery). Tu costo es lo que pagas por él.</label>
     <label>Stock mínimo<input name="min" type="number" step="0.001" min="0" value="${v('min_stock', 0)}"></label>
     <label>Impuesto<select name="tax_id">${opt(taxes, v('tax_id', defTax), 'id', t => `${t.name} (${qty(t.percent)}%)`)}</select></label>
     ${photos ? `<label>Foto<input name="photo" type="file" accept="image/*"></label>${p?.image_url ? `<img class="thumb big" src="${esc(p.image_url)}" alt=""><label class="chk"><input type="checkbox" name="rmphoto"> Quitar la foto actual</label>` : ''}` : ''}
@@ -307,6 +308,16 @@ function prodForm(p, D, preSku = '') {
     $('#pMargin').innerHTML = parts.join('<br>');
     if ($('#pApplySug')) $('#pApplySug').onclick = () => { el.price.value = sug.toFixed(2); mg(); };
   };
+  const syncInvFlags = (src) => {
+    if (src === 'svc' && el.is_service.checked) el.no_track.checked = false;
+    if (src === 'nt' && el.no_track.checked) el.is_service.checked = false;
+    const noInv = el.is_service.checked || el.no_track.checked;
+    el.min.disabled = noInv;
+    if (noInv) el.min.value = 0;
+  };
+  el.is_service.onchange = () => syncInvFlags('svc');
+  el.no_track.onchange = () => syncInvFlags('nt');
+  syncInvFlags();
   f.addEventListener('input', mg); mg();
   f.onsubmit = (e) => {
     e.preventDefault();
@@ -329,9 +340,22 @@ function prodForm(p, D, preSku = '') {
           }
         }
       }
+      const isSvc = el.is_service.checked;
+      const trackInv = !(isSvc || el.no_track.checked);
       const row = {sku: el.sku.value.trim() || null, name: el.pname.value.trim(), category_id: +el.category_id.value || null, unit: el.unit.value,
-        manual_cost_usd: +el.cost.value || 0, sale_price_usd: +el.price.value || 0, min_stock: +el.min.value || 0, is_service: el.is_service.checked, tax_id: +el.tax_id.value || null, image_url};
-      await q(p ? db.from('products').update(row).eq('id', p.id) : db.from('products').insert(row));
+        manual_cost_usd: +el.cost.value || 0, sale_price_usd: +el.price.value || 0, min_stock: trackInv ? (+el.min.value || 0) : 0,
+        is_service: isSvc, track_inventory: trackInv, tax_id: +el.tax_id.value || null, image_url};
+      try {
+        await q(p ? db.from('products').update(row).eq('id', p.id) : db.from('products').insert(row));
+      } catch (err) {
+        if (/track_inventory/i.test(err.message || '')) {
+          delete row.track_inventory;
+          await q(p ? db.from('products').update(row).eq('id', p.id) : db.from('products').insert(row));
+          toast('Guardado sin la marca "sin inventario": ejecuta 31_insumos_sin_inventario_y_listas.sql en Supabase.', true);
+          closeSheet(); render(); return;
+        }
+        throw err;
+      }
       closeSheet(); toast('Producto guardado'); render();
     });
   };

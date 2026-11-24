@@ -47,12 +47,19 @@ async function quoteSheet(id) {
 
 async function quoteForm(id) {
   const D = await vData(), old = id ? await quoteDetail(id) : null, pm = Object.fromEntries(D.products.map(p => [p.id, p]));
-  const line = (pid, qv, pr) => { const p = pm[pid]; return {pid, name: p?.name, qty: qv, price: pr ?? +p?.sale_price_usd}; };
+  const curQList = () => D.lists.find(l => String(l.id) === String($('#qF')?.elements?.plist?.value || '')) || null;
+  const line = (pid, qv, pr) => {
+    const p = pm[pid], base = +p?.sale_price_usd || 0;
+    return {pid, name: p?.name, qty: qv, price: pr ?? priceWithList(base, curQList()), price0: base};
+  };
   const cart = old ? old.items.map(i => line(i.product_id, +i.quantity, +i.unit_price_usd)) : [];
   const v7 = new Date(caracasDate() + 'T12:00:00'); v7.setDate(v7.getDate() + 7);
   openSheet(old ? 'Editar cotización #' + id : 'Nueva cotización', `<form id="qF" class="stack">
     <label>Cliente<select name="cust"><option value="">Cliente general</option>${D.custs.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label>
-    <label>Documento<select name="doc">${optList(DOCS)}</select></label>
+    <div class="grid">
+      <label>Documento<select name="doc">${optList(DOCS)}</select></label>
+      ${D.lists.length ? `<label>Lista de precios<select name="plist"><option value="">Precio normal (0%)</option>${D.lists.map(l => `<option value="${l.id}">${esc(l.name)} (${+l.adjust_percent > 0 ? '+' : ''}${qty(l.adjust_percent)}%)</option>`).join('')}</select></label>` : ''}
+    </div>
     <div class="grid"><label>Tasa (Bs por USD)<input name="rate" type="number" step="0.0001" min="0.0001" required></label>
       <label>Descuento (USD)<input name="disc" type="number" step="0.01" min="0" value="0"></label><label>Válida hasta<input name="valid" type="date"></label></div>
     <div class="scan-row"><input id="qS" type="search" placeholder="Buscar producto o escanear código"><button type="button" class="icon-btn scan-btn" id="qScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div><div class="list" id="qR"></div><div id="qC"></div><p id="qT" class="big"></p>
@@ -72,9 +79,21 @@ async function quoteForm(id) {
     tot();
   };
   draw();
+  const applyQList = () => {
+    const pl = curQList();
+    cart.forEach(c => { c.price = priceWithList(c.price0, pl); });
+    draw();
+  };
+  if (el.plist) el.plist.onchange = applyQList;
+  el.cust.onchange = () => {
+    if (!el.plist) return;
+    const c = D.custs.find(x => String(x.id) === el.cust.value);
+    const nextLid = c?.price_list_id ? String(c.price_list_id) : '';
+    if (el.plist.value !== nextLid) { el.plist.value = nextLid; applyQList(); }
+  };
   $('#qS').oninput = (e) => {
-    const t = e.target.value.trim().toLowerCase();
-    $('#qR').innerHTML = t ? (D.products.filter(p => (p.name + ' ' + (p.sku || '')).toLowerCase().includes(t)).slice(0, 6).map(p => `<button type="button" class="item" data-add="${p.id}"><span><b>${esc(p.name)}</b><small>${fmt(p.sale_price_usd)} USD</small></span><span class="mut">+</span></button>`).join('') || '<p class="mut">Sin resultados.</p>') : '';
+    const t = e.target.value.trim().toLowerCase(), pl = curQList();
+    $('#qR').innerHTML = t ? (D.products.filter(p => (p.name + ' ' + (p.sku || '')).toLowerCase().includes(t)).slice(0, 6).map(p => `<button type="button" class="item" data-add="${p.id}"><span><b>${esc(p.name)}</b><small>${fmt(priceWithList(p.sale_price_usd, pl))} USD${pl ? ' (' + esc(pl.name) + ')' : ''}</small></span><span class="mut">+</span></button>`).join('') || '<p class="mut">Sin resultados.</p>') : '';
   };
   const addQuoteByCode = (code) => {
     const p = findBySku(D.products, code);

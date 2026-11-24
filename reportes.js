@@ -237,14 +237,15 @@ async function alertasHtml() {
   const hoy = caracasDate();
   const [venc, prods, stock, rate, accs, enp] = await Promise.all([
     q(db.from('ventas_resumen').select('id').eq('status', 'pendiente').lt('due_date', hoy)),
-    q(db.from('products').select('sale_price_usd,avg_cost_usd').eq('active', true).eq('is_service', false)),
+    db.from('products').select('sale_price_usd,avg_cost_usd,track_inventory').eq('active', true).eq('is_service', false).then(r => r.error ? q(db.from('products').select('sale_price_usd,avg_cost_usd').eq('active', true).eq('is_service', false)) : r.data),
     q(db.from('stock_actual').select('bajo_minimo')),
     q(db.from('exchange_rates').select('rate_date').eq('currency', 'USD').order('rate_date', {ascending: false}).limit(1)),
     q(db.from('cuentas_saldo').select('name,balance').eq('active', true)),
     q(db.from('production_orders').select('id').eq('status', 'en_proceso'))
   ]);
-  const A = [], bajos = stock.filter(x => x.bajo_minimo).length, sc = prods.filter(p => !+p.avg_cost_usd).length;
-  const ng = prods.filter(p => +p.avg_cost_usd > 0 && +p.sale_price_usd < +p.avg_cost_usd).length, neg = accs.filter(a => +a.balance < 0);
+  const trackedProds = prods.filter(p => p.track_inventory !== false);
+  const A = [], bajos = stock.filter(x => x.bajo_minimo).length, sc = trackedProds.filter(p => !+p.avg_cost_usd).length;
+  const ng = trackedProds.filter(p => +p.avg_cost_usd > 0 && +p.sale_price_usd < +p.avg_cost_usd).length, neg = accs.filter(a => +a.balance < 0);
   if (venc.length) A.push(['ventas', `${venc.length} ${venc.length === 1 ? 'venta vencida' : 'ventas vencidas'} por cobrar`]);
   if (bajos) A.push(['inventario', `${bajos} ${bajos === 1 ? 'producto' : 'productos'} por reponer`]);
   if (sc) A.push(['inventario', `${sc} ${sc === 1 ? 'producto sin costo' : 'productos sin costo'}: la utilidad saldrá incompleta`]);

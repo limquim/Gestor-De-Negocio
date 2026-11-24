@@ -207,13 +207,13 @@ async function viewDir(key) {
       draw();
     };
   }
-  if (!c.noAdd) $('#dAdd').onclick = () => dirForm(c, null);
+  if (!c.noAdd) $('#dAdd').onclick = () => run(() => dirForm(c, null));
   $('#dList').onclick = (e) => {
     const b = e.target.closest('[data-id]'); if (!b) return;
     const row = rows.find(r => String(r.id) === b.dataset.id);
     if (!row) return;
     if (isParties) run(() => partySheet(row, c));
-    else dirForm(c, row);
+    else run(() => dirForm(c, row));
   };
 }
 
@@ -275,7 +275,7 @@ async function partySheet(p, dirCfg) {
       </div>` : ''}
     </div>`);
 
-  $('#psEdit').onclick = () => dirForm(dirCfg, p);
+  $('#psEdit').onclick = () => run(() => dirForm(dirCfg, p));
   if (p.phone && $('#psWa')) $('#psWa').onclick = () => window.open('https://wa.me/' + waDigits(p.phone), '_blank');
 
   if ($('#psStmt')) {
@@ -316,20 +316,42 @@ async function partySheet(p, dirCfg) {
   }
 }
 
-function dirForm(c, row) {
+async function dirForm(c, row) {
   const v = (f) => row ? row[f.k] : f.def;
+  let extraHtml = '';
+  let plists = [];
+  if (c.table === 'parties') {
+    plists = await db.from('price_lists').select('id,name,adjust_percent').eq('active', true).order('name').then(r => r.error ? [] : (r.data || []));
+    if (plists.length) {
+      extraHtml = `<label>Lista de precios predeterminada (opcional)<select name="price_list_id"><option value="">Precio normal (0%)</option>${plists.map(l => `<option value="${l.id}" ${String(row?.price_list_id || '') === String(l.id) ? 'selected' : ''}>${esc(l.name)} (${+l.adjust_percent > 0 ? '+' : ''}${qty(l.adjust_percent)}%)</option>`).join('')}</select></label>`;
+    }
+  }
   const fields = c.fields.map(f => {
     if (f.type === 'check') return `<label class="chk"><input type="checkbox" name="${f.k}" ${v(f) ? 'checked' : ''}> ${f.l}</label>`;
     if (f.type === 'textarea') return `<label>${f.l}<textarea name="${f.k}" rows="5" ${f.req ? 'required' : ''}>${esc(v(f) ?? '')}</textarea></label>`;
     if (f.type === 'select') return `<label>${f.l}<select name="${f.k}">${Object.entries(f.opts).map(([k, t]) => `<option value="${k}" ${v(f) === k ? 'selected' : ''}>${t}</option>`).join('')}</select></label>`;
     return `<label>${f.l}<input name="${f.k}" type="${f.type || 'text'}" ${f.type === 'number' ? 'step="0.0001"' : ''} value="${esc(v(f) ?? '')}" ${f.req ? 'required' : ''}></label>`;
   }).join('');
-  openSheet(row ? 'Editar ' + c.label.toLowerCase() : 'Nuevo registro', `<form id="dForm" class="stack">${fields}<div class="row"><button class="btn" type="submit">Guardar</button>${row && !c.noDel ? '<button type="button" class="btn ghost" id="dDel">Desactivar</button>' : ''}</div></form>`);
+  openSheet(row ? 'Editar ' + c.label.toLowerCase() : 'Nuevo registro', `<form id="dForm" class="stack">${fields}${extraHtml}<div class="row"><button class="btn" type="submit">Guardar</button>${row && !c.noDel ? '<button type="button" class="btn ghost" id="dDel">Desactivar</button>' : ''}</div></form>`);
   $('#dForm').onsubmit = (e) => {
     e.preventDefault();
     const el = e.target.elements, obj = {};
     c.fields.forEach(f => { const x = el[f.k]; obj[f.k] = f.type === 'check' ? x.checked : f.type === 'number' ? +x.value : (x.value.trim() || null); });
-    run(async () => { await q(row ? db.from(c.table).update(obj).eq('id', row.id) : db.from(c.table).insert(obj)); if (c.table === 'payment_methods') await loadMethods(); closeSheet(); toast('Guardado'); render(); });
+    if (c.table === 'parties' && el.price_list_id) obj.price_list_id = +el.price_list_id.value || null;
+    run(async () => {
+      try {
+        await q(row ? db.from(c.table).update(obj).eq('id', row.id) : db.from(c.table).insert(obj));
+      } catch (err) {
+        if (/price_list_id/i.test(err.message || '')) {
+          delete obj.price_list_id;
+          await q(row ? db.from(c.table).update(obj).eq('id', row.id) : db.from(c.table).insert(obj));
+        } else {
+          throw err;
+        }
+      }
+      if (c.table === 'payment_methods') await loadMethods();
+      closeSheet(); toast('Guardado'); render();
+    });
   };
   if (row && !c.noDel) $('#dDel').onclick = () => run(async () => {
     if (!confirm('¿Desactivar este registro?')) return;

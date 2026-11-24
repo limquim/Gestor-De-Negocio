@@ -423,3 +423,132 @@ async function receiptBlob(doc, set) {
   g = c.getContext('2d'); g.scale(sc, sc); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); dry = false; paint();
   return new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('No se pudo crear la imagen')), 'image/png'));
 }
+
+// Hoja / Orden de producción en foto (para WhatsApp al equipo de planta o impresión)
+async function prodOrderBlob(doc, set, showCosts = false) {
+  const W = 720, P = 40, sc = 2, F = 'system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif';
+  const acc = /^#[0-9a-f]{6}$/i.test(set?.ticket_color || '') ? set.ticket_color : '#0b7285', ink = '#14262d', mut = '#6b7f88', line = '#e3eaed';
+  const logo = set?.ticket_show_logo && set?.logo_data
+    ? await new Promise(r => { const im = new Image(); im.onload = () => r(im); im.onerror = () => r(null); im.src = set.logo_data; })
+    : null;
+  const m = document.createElement('canvas').getContext('2d');
+  let g, dry = true, y = 0;
+  const fnt = (sz, w = 400) => `${w} ${sz}px ${F}`;
+  const wrap = (t, mw, sz, w) => {
+    m.font = fnt(sz, w); const out = [];
+    String(t || '').split('\n').forEach(par => {
+      let ln = '';
+      par.split(' ').forEach(wd => {
+        const tt = ln ? ln + ' ' + wd : wd;
+        if (ln && m.measureText(tt).width > mw) { out.push(ln); ln = wd; } else ln = tt;
+      });
+      out.push(ln);
+    });
+    return out;
+  };
+  const tw = (t, sz, w) => { m.font = fnt(sz, w); return m.measureText(t).width; };
+  const T = (t, x, yy, sz, w, col, al = 'left') => { if (dry) return; g.font = fnt(sz, w); g.fillStyle = col; g.textAlign = al; g.textBaseline = 'alphabetic'; g.fillText(t, x, yy); };
+  const R = (x, yy, w, h, r, col) => { if (dry) return; g.beginPath(); (g.roundRect || g.rect).call(g, x, yy, w, h, r); g.fillStyle = col; g.fill(); };
+  const B = (x, yy, w, h, r, col, lw = 2) => { if (dry) return; g.beginPath(); (g.roundRect || g.rect).call(g, x, yy, w, h, r); g.strokeStyle = col; g.lineWidth = lw; g.stroke(); };
+
+  const paint = () => {
+    // Encabezado
+    const tx = logo ? P + 90 : P, tmax = W - tx - P;
+    const nameL = wrap(set?.business_name || 'Mi negocio', tmax, 26, 800);
+    const hh = P + Math.max(nameL.length * 32 + 24, logo ? 72 : 0) + P - 12;
+    R(0, 0, W, hh, 0, acc);
+    if (logo) {
+      R(P, P - 4, 72, 72, 16, '#fff');
+      if (!dry) {
+        const k = Math.min(60 / logo.width, 60 / logo.height), lw = logo.width * k, lh = logo.height * k;
+        g.drawImage(logo, P + 36 - lw / 2, P + 32 - lh / 2, lw, lh);
+      }
+    }
+    let ty = P + 24;
+    nameL.forEach(t => { T(t, tx, ty, 26, 800, '#fff'); ty += 32; });
+    T('HOJA DE PRODUCCIÓN / LOTE', tx, ty - 4, 14, 700, 'rgba(255,255,255,.88)');
+
+    // Orden, fecha y estado
+    y = hh + 46;
+    T('ORDEN #' + doc.id, P, y, 24, 800, acc);
+    const stColors = {'EN PROCESO': ['#8a5a00', '#fff2cc'], COMPLETADA: ['#1b7f4b', '#e3f5ea'], ANULADA: ['#b4381a', '#fde8e3']};
+    const sc2 = stColors[doc.status] || [mut, line];
+    const bw = tw(doc.status, 14, 800) + 30;
+    R(W - P - bw, y - 24, bw, 34, 17, sc2[1]);
+    T(doc.status, W - P - bw / 2, y - 2, 14, 800, sc2[0], 'center');
+
+    y += 26;
+    T('Fecha: ' + doc.dateStr, P, y, 15, 400, mut);
+
+    // Caja del producto a fabricar
+    y += 22;
+    const prodL = wrap(doc.productName, W - P * 2 - 220, 22, 800);
+    const boxH = Math.max(76, 36 + prodL.length * 28);
+    R(P - 12, y, W - P * 2 + 24, boxH, 16, acc + '16');
+    B(P - 12, y, W - P * 2 + 24, boxH, 16, acc, 1.8);
+    T('PRODUCTO A FABRICAR', P + 4, y + 24, 12, 800, acc);
+    prodL.forEach((l, k) => T(l, P + 4, y + 52 + k * 28, 22, 800, ink));
+    T('CANTIDAD', W - P - 6, y + 24, 12, 700, mut, 'right');
+    T(`${qty(doc.qty)} ${doc.unit}`, W - P - 6, y + 56, 26, 800, acc, 'right');
+    y += boxH;
+
+    // Ingredientes / Materiales
+    y += 30;
+    R(P - 12, y, W - P * 2 + 24, 36, 10, acc + '1f');
+    const cPlan = showCosts ? W - P - 220 : W - P - 140;
+    const cAct = showCosts ? W - P - 115 : W - P;
+    const cCost = W - P;
+    const descW = showCosts ? 310 : 390;
+    T('Ingrediente / Material', P + 26, y + 24, 14, 700, acc);
+    T('Teórico', cPlan, y + 24, 14, 700, acc, 'right');
+    T('Usado', cAct, y + 24, 14, 700, acc, 'right');
+    if (showCosts) T('Costo USD', cCost, y + 24, 14, 700, acc, 'right');
+    y += 36;
+
+    doc.items.forEach(it => {
+      const tag = it.untracked ? ' (libre)' : '';
+      const L = wrap(it.name + tag, descW, 17, 600);
+      y += 30;
+      // Cuadrito de checklist para marcar en planta
+      B(P, y - 15, 16, 16, 4, acc, 1.8);
+      L.forEach((t, k) => T(t, P + 26, y + k * 22, 17, 600, ink));
+      T(`${qty(it.planned)} ${it.unit}`, cPlan, y, 16, 400, mut, 'right');
+      T(`${qty(it.actual)} ${it.unit}`, cAct, y, 17, 700, ink, 'right');
+      if (showCosts) T(fmt(it.costUsd), cCost, y, 16, 600, ink, 'right');
+      y += (L.length - 1) * 22 + 14;
+      if (!dry) { g.fillStyle = line; g.fillRect(P, y, W - P * 2, 1); }
+    });
+
+    if (showCosts) {
+      y += 24;
+      R(P - 12, y, W - P * 2 + 24, 68, 16, acc);
+      T('COSTO TOTAL DEL LOTE', P + 8, y + 32, 13, 700, 'rgba(255,255,255,.85)');
+      T(`Costo por ${doc.unit}: ${fmt(doc.unitCostUsd)} USD`, P + 8, y + 54, 15, 600, '#fff');
+      T(fmt(doc.totalCostUsd) + ' USD', W - P - 8, y + 46, 30, 800, '#fff', 'right');
+      y += 68;
+    }
+
+    if (doc.notes) {
+      y += 24;
+      const nLines = wrap(doc.notes, W - P * 2 - 20, 15, 400);
+      const nh = 34 + nLines.length * 22;
+      R(P - 12, y, W - P * 2 + 24, nh, 12, '#f3f6f7');
+      T('NOTAS DEL LOTE', P + 2, y + 22, 12, 800, mut);
+      nLines.forEach((l, k) => T(l, P + 2, y + 44 + k * 22, 15, 400, ink));
+      y += nh;
+    }
+
+    // Firma del responsable de producción
+    y += 58;
+    if (!dry) { g.fillStyle = ink; g.fillRect(P, y, 250, 1.5); g.fillRect(W - P - 250, y, 250, 1.5); }
+    y += 20;
+    T('Preparado por', P + 125, y, 13, 600, mut, 'center');
+    T('Verificado / Control', W - P - 125, y, 13, 600, mut, 'center');
+    y += P;
+  };
+
+  paint();
+  const H = y, c = document.createElement('canvas'); c.width = W * sc; c.height = H * sc;
+  g = c.getContext('2d'); g.scale(sc, sc); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); dry = false; paint();
+  return new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('No se pudo crear la hoja de producción')), 'image/png'));
+}
