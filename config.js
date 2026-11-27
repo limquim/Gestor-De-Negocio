@@ -1,26 +1,22 @@
 // Configuración comercial de Gestor Emprendedor — Edición Emprendedores v3 (Local + Drive + Licencias)
-// Edita estos datos una sola vez con tu marca antes de publicar.
 const APP_CONFIG = {
   brandName: 'Gestor Emprendedor',
   edition: 'Emprendedores v3 (Local + Drive + Licencias)',
 
-  // Datos de contacto y soporte (aparecen en la Política de Privacidad, Acerca de y botones de renovación)
-  supportWhatsApp: '',   // con código de país, sin +, ej: '584141234567'
-  supportEmail: '',      // ej: 'soporte@tudominio.com'
+  // Datos de contacto y soporte (aparecen en Política de Privacidad, Acerca de y renovación por WhatsApp)
+  // Coloca tu WhatsApp con código de país sin +, ej: '584141234567'
+  supportWhatsApp: '+5804124438098',
+  supportEmail: 'h.jhosmar14@gmail.com',
   privacyUrl: './privacidad.html',
 
-  // Fase 2: ID de cliente OAuth de Google Cloud (termina en .apps.googleusercontent.com)
-  googleDriveClientId: '',
+  // Fase 2: Google Drive OAuth Client ID
+  googleDriveClientId: '298894656305-r6n1bjjm2qsmov9fsju32cetv3a9s0i2.apps.googleusercontent.com',
 
-  // Fase 3: Sistema de Licencias ($10/mes)
-  // Cambia licenseEnabled a true cuando ya hayas pegado tu licensePublicKey (generada en admin.html)
-  // o tu licenseApiUrl (Cloudflare Worker). Mientras sea false, la app funciona en modo libre sin bloqueo.
-  licenseEnabled: false,
-  trialDays: 14,          // Días de prueba gratis automáticos para nuevos usuarios
-  monthlyPriceUsd: 10,    // Precio mensual mostrado en pantalla de suscripción
-  // Llave pública ECDSA P-256 (JWK en JSON o Base64url) generada con 1 clic en admin.html. Es seguro publicarla aquí.
-  licensePublicKey: '',
-  // Opcional (recomendado para renovación/suspensión remota): URL de tu worker_licencias.js en Cloudflare Workers
-  // Ejemplo: 'https://licencias-gestor.tuusuario.workers.dev' (sin barra al final)
+  // Fase 3: Sistema de Licencias ($10/mes) — Modo Offline ECDSA P-256 activo
+  licenseEnabled: true,
+  trialDays: 14,
+  monthlyPriceUsd: 10,
+  licensePublicKey: '{"kty":"EC","crv":"P-256","x":"q2HhvRMQEaOMbCZUGqHfbxB8gewlxdoxrF_nQQCDhv8","y":"EXaVET2k2lLZrFV9IdpQFfG8Duus3qfuLa8Tg9sRWMA"}',
+  // Opcional (solo si activas Cloudflare Worker más adelante)
   licenseApiUrl: ''
 };
