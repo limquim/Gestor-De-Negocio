@@ -162,7 +162,7 @@ async function viewReglasYMetas() {
       } catch (err) {
         if (/monthly_sales_goal_usd|block_negative_stock|default_credit_days|max_discount_percent/i.test(err.message || '')) {
           applyRulesObj(obj);
-          toast('Guardado localmente. Ejecuta 25_configuracion_reglas_y_metas.sql en Supabase para guardarlo en la nube.', true);
+          toast('Reglas y metas guardadas');
         } else {
           throw err;
         }

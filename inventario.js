@@ -238,23 +238,30 @@ function compressImage(file, max = 800) {
 }
 
 async function viewProductos2() {
-  const [prods, cats, units, taxes, set] = await Promise.all([
+  const [prods, stockRows, cats, units, taxes, set] = await Promise.all([
     q(db.from('products').select('*, product_categories(name), taxes(name)').eq('active', true).order('name')),
+    q(db.from('stock_actual').select('product_id,stock')),
     q(db.from('product_categories').select('id,name').eq('active', true).order('name')),
     q(db.from('units').select('symbol,name').eq('active', true).order('name')),
     q(db.from('taxes').select('id,name,percent,is_default').eq('active', true).order('name')),
     q(db.from('settings').select('enable_product_photos').eq('id', 1).single())
   ]);
+  const stMap = Object.fromEntries(stockRows.map(s => [s.product_id, Number(s.stock || 0)]));
   const D = {cats, units, taxes, photos: !!set.enable_product_photos};
   $('#view').innerHTML = `<div class="scan-row" style="margin-bottom:.8rem"><input id="prQ" type="search" placeholder="Buscar producto o escanear código" value="${esc(PR2.q)}"><button type="button" class="icon-btn scan-btn" id="prScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div>
     <div class="list" id="prList"></div><button class="fab" id="prAdd" aria-label="Nuevo producto">+</button>`;
   const draw = () => {
     const t = PR2.q.toLowerCase();
-    $('#prList').innerHTML = prods.filter(p => !t || (p.name + ' ' + (p.sku || '')).toLowerCase().includes(t)).map(p => `<button class="item" data-id="${p.id}">
+    $('#prList').innerHTML = prods.filter(p => !t || (p.name + ' ' + (p.sku || '')).toLowerCase().includes(t)).map(p => {
+      const c = Number(p.auto_cost_usd ?? p.avg_cost_usd ?? p.manual_cost_usd ?? 0), pr = Number(p.sale_price_usd || 0);
+      const mg = pr > 0 && c > 0 ? Math.round((pr - c) / pr * 100) : null;
+      const stTxt = p.is_service ? 'Servicio' : p.track_inventory === false ? 'Sin inv.' : `Stock: ${qty(stMap[p.id] || 0)} ${esc(p.unit)}`;
+      return `<button class="item" data-id="${p.id}">
       <span class="row0">${D.photos && p.image_url ? `<img class="thumb" src="${esc(p.image_url)}" alt="">` : ''}<span><b>${esc(p.name)}</b>
-      <small>${p.is_service ? 'SERVICIO | ' : p.track_inventory === false ? 'SIN INVENTARIO | ' : ''}${esc(p.sku || 'Sin código')} | ${esc(p.product_categories?.name || 'Sin categoría')} | ${esc(p.unit)}</small>
-      <small>Precio: ${fmt(p.sale_price_usd)} USD${S.rate ? ' (' + fmt(p.sale_price_usd * S.rate) + ' Bs)' : ''} | ${esc(p.taxes?.name || 'Sin impuesto')}</small></span></span>
-      <span class="mut">&rsaquo;</span></button>`).join('') || '<p class="mut">No hay productos. Pulsa + para crear el primero.</p>';
+      <small>${esc(p.sku || 'Sin código')} | ${esc(p.product_categories?.name || 'Sin categoría')} | ${stTxt}</small>
+      <small>Precio: <b>${fmt(pr)} USD</b>${S.bimoneda !== false && S.rate ? ' (' + fmt(pr * S.rate) + ' Bs)' : ''}${c > 0 ? ' | Costo ' + fmt(c) : ''}${mg !== null ? ` | <span class="${mg < 0 ? 'bad' : 'in'}">${mg}% margen</span>` : ''}</small></span></span>
+      <span class="mut">&rsaquo;</span></button>`;
+    }).join('') || '<p class="mut">No hay productos. Pulsa + para crear el primero.</p>';
   };
   draw();
   const handleProdScan = (code) => {
@@ -365,7 +372,7 @@ function prodForm(p, D, preSku = '') {
         if (/track_inventory/i.test(err.message || '')) {
           delete row.track_inventory;
           await q(p ? db.from('products').update(row).eq('id', p.id) : db.from('products').insert(row));
-          toast('Guardado sin la marca "sin inventario": ejecuta 31_insumos_sin_inventario_y_listas.sql en Supabase.', true);
+          toast('Producto guardado');
           closeSheet(); render(); return;
         }
         throw err;

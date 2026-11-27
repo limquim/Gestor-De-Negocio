@@ -689,7 +689,7 @@ async function viewGastos() {
           await q(rec ? db.from('recurring_expenses').update(obj).eq('id', rec.id) : db.from('recurring_expenses').insert(obj));
         } catch (err) {
           if (/recurring_expenses/i.test(err.message || '')) {
-            throw new Error('Falta ejecutar 32_fix_stock_actual_y_gastos_fijos.sql en Supabase (SQL Editor).');
+            throw new Error('No se pudo guardar el gasto fijo.');
           }
           throw err;
         }

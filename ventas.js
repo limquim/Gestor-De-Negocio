@@ -13,7 +13,7 @@ function priceWithList(basePrice, listObj) {
 }
 
 async function vData() {
-  const [products, stock, custs, accs, lists] = await Promise.all([
+  const [products, stock, custs, accs, lists, taxes] = await Promise.all([
     db.from('products').select('id,name,sku,unit,sale_price_usd,is_service,track_inventory,taxes(percent)').eq('active', true).order('name')
       .then(r => r.error ? q(db.from('products').select('id,name,sku,unit,sale_price_usd,is_service,taxes(percent)').eq('active', true).order('name')) : r.data),
     q(db.from('stock_actual').select('product_id,stock')),
@@ -90,16 +90,21 @@ async function viewVenta() {
         <input id="vIvaPct" type="number" step="0.5" min="0" max="100" value="${D.defIva}" style="width:4.8rem;min-height:36px;margin:0;padding:.25rem .45rem;text-align:right">
       </label>
     </div>
-    <div class="grid"><label>Tasa (Bs por USD)<input id="vRate" type="number" step="0.0001" min="0.0001"></label><label>Descuento (USD)<input id="vDisc" type="number" step="0.01" min="0" value="0"></label></div></div>
+    <div class="grid">
+      <label class="${S.bimoneda === false ? 'hidden' : ''}">Tasa (Bs por USD)<input id="vRate" type="number" step="0.0001" min="0.0001"></label>
+      <label>Descuento (USD)<input id="vDisc" type="number" step="0.01" min="0" value="0"></label>
+    </div></div>
   <div class="card"><h2>Productos</h2><div class="scan-row"><input id="vSearch" type="search" placeholder="Buscar producto o escanear código"><button type="button" class="icon-btn scan-btn" id="vScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div><div class="list" id="vRes" style="margin:.5rem 0"></div><div id="vCart"></div></div>
   <div class="card"><h2>Total</h2><div id="vTot"></div></div>
-  <div class="card"><h2>Pagos</h2><div id="vPays"></div><div class="row"><button class="btn ghost" type="button" id="vAddPay">Agregar pago</button></div>
+  <div class="card"><h2>Pagos</h2>
+    ${D.accs.length ? `<div class="stack" style="gap:.35rem;margin-bottom:.65rem"><small class="mut">Cobro rápido (pago completo en 1 toque):</small><div class="chips" id="vQuickPay">${D.accs.slice(0, 5).map(a => `<button type="button" data-qacc="${a.id}">${esc(a.name)} (${a.currency})</button>`).join('')}</div></div>` : ''}
+    <div id="vPays"></div><div class="row"><button class="btn ghost" type="button" id="vAddPay">+ Agregar pago parcial / mixto</button></div>
     <p id="vBal"></p><label id="vDueW" class="hidden">Fecha límite del saldo<input id="vDue" type="date"></label></div>
   <label>Nota<input id="vNotes"></label>
   <div class="row"><button class="btn" id="vGo">${V.edit ? 'Guardar corrección' : 'Registrar venta'}</button></div>`;
   const rules = S.rules || {};
   const lockSellerPrice = (S.role === 'vendedor') && rules.allow_seller_price_edit === false;
-  $('#vRate').value = old ? old.s.exchange_rate : (S.rate || '');
+  $('#vRate').value = S.bimoneda === false ? 1 : (old ? old.s.exchange_rate : (S.rate || ''));
   const inferIvaPct = (rec) => {
     if (rec?.iva_percent != null && Number(rec.iva_percent) > 0) return Number(rec.iva_percent);
     const base = Math.max(0, Number(rec?.subtotal_usd || 0) - Number(rec?.discount_usd || 0));
@@ -126,7 +131,7 @@ async function viewVenta() {
   let dueTouched = !!(old && old.s.due_date);
   $('#vDue').addEventListener('input', () => { dueTouched = true; });
   const calc = () => {
-    const rate = +$('#vRate').value || 0, sub = V.cart.reduce((a, c) => a + c.qty * c.price, 0), disc = Math.min(+$('#vDisc').value || 0, sub);
+    const rate = S.bimoneda === false ? 1 : (+$('#vRate').value || 0), sub = V.cart.reduce((a, c) => a + c.qty * c.price, 0), disc = Math.min(+$('#vDisc').value || 0, sub);
     const ivaOn = $('#vIva').checked, ivaPct = ivaOn ? Math.max(0, +$('#vIvaPct').value || 0) : 0;
     const tax = ivaOn ? (sub - disc) * ivaPct / 100 : 0;
     return {sub, disc, tax, ivaOn, ivaPct, total: sub - disc + tax, rate};
@@ -137,19 +142,23 @@ async function viewVenta() {
     const discPct = t.sub > 0 ? (t.disc / t.sub * 100) : 0;
     const maxDisc = Number(rules.max_discount_percent || 0);
     const overDisc = maxDisc > 0 && discPct > maxDisc + 0.05 && (S.role || 'admin') !== 'admin';
-    $('#vTot').innerHTML = `Subtotal: ${fmt(t.sub)} USD${t.disc ? ' | Descuento: -' + fmt(t.disc) + ' (' + fmt(discPct, 1) + '%)' : ''}${t.ivaOn ? ' | IVA (' + qty(t.ivaPct) + '%): ' + fmt(t.tax) : ''}${overDisc ? `<br><span class="warn">Supera el tope máximo permitido de descuento (${qty(maxDisc)}%)</span>` : ''}<br><span class="big">${fmt(t.total)} USD</span><br><span class="mut">${fmt(t.total * t.rate)} Bs</span>`;
-    $('#vBal').innerHTML = `Pagado: <b>${fmt(paid)} USD</b> | ` + (bal > 0.01 ? `<span class="warn">Queda a crédito: <b>${fmt(bal)} USD</b> (${fmt(bal * t.rate)} Bs)</span>` : bal < -0.01 ? `Vuelto: <b>${fmt(-bal)} USD</b> (${fmt(-bal * t.rate)} Bs)` : 'Pago completo');
+    const showBs = S.bimoneda !== false && t.rate > 0;
+    $('#vTot').innerHTML = `Subtotal: ${fmt(t.sub)} USD${t.disc ? ' | Descuento: -' + fmt(t.disc) + ' (' + fmt(discPct, 1) + '%)' : ''}${t.ivaOn ? ' | IVA (' + qty(t.ivaPct) + '%): ' + fmt(t.tax) : ''}${overDisc ? `<br><span class="warn">Supera el tope máximo permitido de descuento (${qty(maxDisc)}%)</span>` : ''}<br><span class="big">${fmt(t.total)} USD</span>${showBs ? `<br><span class="mut">${fmt(t.total * t.rate)} Bs</span>` : ''}`;
+    $('#vBal').innerHTML = `Pagado: <b>${fmt(paid)} USD</b> | ` + (bal > 0.01 ? `<span class="warn">Queda a crédito: <b>${fmt(bal)} USD</b>${showBs ? ' (' + fmt(bal * t.rate) + ' Bs)' : ''}</span>` : bal < -0.01 ? `Vuelto: <b>${fmt(-bal)} USD</b>${showBs ? ' (' + fmt(-bal * t.rate) + ' Bs)' : ''}` : '<span class="in"><b>Pago completo</b></span>');
     $('#vDueW').classList.toggle('hidden', !(bal > 0.01));
     if (bal > 0.01 && !dueTouched && !$('#vDue').value && Number(rules.default_credit_days || 0) > 0 && typeof addDaysISO === 'function') {
       $('#vDue').value = addDaysISO(caracasDate(), rules.default_credit_days);
     }
-    document.querySelectorAll('#vPays .payl').forEach(l => { const u = payUsd(V.pays[+l.dataset.i], t.rate); l.querySelector('.eq').textContent = '≈ ' + fmt(u) + ' USD | ' + fmt(u * t.rate) + ' Bs'; });
+    document.querySelectorAll('#vPays .payl').forEach(l => { const u = payUsd(V.pays[+l.dataset.i], t.rate); l.querySelector('.eq').textContent = '≈ ' + fmt(u) + ' USD' + (showBs ? ' | ' + fmt(u * t.rate) + ' Bs' : ''); });
     document.querySelectorAll('#vCart .pl').forEach(l => { const c = V.cart[+l.dataset.i]; l.querySelector('.lt').textContent = 'Total: ' + fmt(c.qty * c.price) + ' USD'; });
+    if ($('#vGo') && !V.edit) {
+      $('#vGo').textContent = (V.cart.length && bal > 0.01) ? (paid > 0.01 ? 'Registrar venta (con saldo a crédito)' : 'Registrar venta a crédito') : 'Registrar venta';
+    }
     return {...t, paid, bal};
   };
   const drawCart = () => {
     $('#vCart').innerHTML = V.cart.map((c, i) => `<div class="pl" data-i="${i}"><div><b>${esc(c.name)}</b><small>${c.svc ? 'Servicio (sin inventario)' : c.untr ? 'Insumo sin inventario' : 'Disponible: ' + qty(D.st[c.pid] || 0) + ' ' + esc(c.unit)}</small><small class="lt"></small>${c.svc ? `<button class="lnk" data-free="${i}">${c.price > 0 ? 'Asumirlo yo (no cobrar)' : 'Cobrarlo al cliente'}</button>` : ''}<button class="lnk bad" data-rm="${i}">Quitar</button></div>
-      <div class="stack" style="gap:.3rem"><label>Cant.<input data-f="qty" type="number" step="0.001" min="0.001" value="${c.qty}"></label><label>Precio USD<input data-f="price" type="number" step="0.01" min="0" value="${c.price}" ${lockSellerPrice ? 'disabled' : ''}></label></div></div>`).join('') || '<p class="mut">Busca y agrega productos.</p>';
+      <div class="stack" style="gap:.3rem"><label>Cant.<div class="aj-step"><button type="button" class="aj-sb" data-qdec="${i}" aria-label="Restar 1">&minus;</button><input data-f="qty" type="number" step="0.001" min="0.001" value="${c.qty}" style="width:4rem"><button type="button" class="aj-sb" data-qinc="${i}" aria-label="Sumar 1">+</button></div></label><label>Precio USD<input data-f="price" type="number" step="0.01" min="0" value="${c.price}" ${lockSellerPrice ? 'disabled' : ''}></label></div></div>`).join('') || '<p class="mut">Busca y agrega productos.</p>';
     totals();
   };
   const drawPays = () => {
@@ -223,6 +232,9 @@ async function viewVenta() {
   };
   $('#vCart').addEventListener('input', (e) => { const l = e.target.closest('.pl'); if (l && e.target.dataset.f) { V.cart[+l.dataset.i][e.target.dataset.f] = +e.target.value || 0; totals(); } });
   $('#vCart').addEventListener('click', (e) => {
+    const inc = e.target.closest('[data-qinc]'), dec = e.target.closest('[data-qdec]');
+    if (inc) { const i = +inc.dataset.qinc; V.cart[i].qty = Math.round((V.cart[i].qty + 1) * 1000) / 1000; drawCart(); return; }
+    if (dec) { const i = +dec.dataset.qdec; if (V.cart[i].qty > 1) { V.cart[i].qty = Math.round((V.cart[i].qty - 1) * 1000) / 1000; drawCart(); } return; }
     if (e.target.dataset.rm !== undefined) { V.cart.splice(+e.target.dataset.rm, 1); drawCart(); }
     if (e.target.dataset.free !== undefined) { const c = V.cart[+e.target.dataset.free]; c.price = c.price > 0 ? 0 : (c.price0 || 0); drawCart(); }
   });
@@ -238,6 +250,18 @@ async function viewVenta() {
   $('#vPays').addEventListener('click', (e) => { if (e.target.dataset.rmp !== undefined) { V.pays.splice(+e.target.dataset.rmp, 1); drawPays(); } });
   ['vRate', 'vDisc', 'vIvaPct'].forEach(id => $('#' + id).addEventListener('input', totals));
   $('#vIva').addEventListener('change', () => { syncIvaUI(); totals(); });
+  if ($('#vQuickPay')) {
+    $('#vQuickPay').onclick = (e) => {
+      const b = e.target.closest('[data-qacc]'); if (!b) return;
+      if (!V.cart.length) return toast('Agrega productos primero', true);
+      const t = calc(), a = D.accs.find(x => String(x.id) === b.dataset.qacc);
+      if (!a) return;
+      const amt = Math.round(t.total * (a.currency === 'USD' ? 1 : (t.rate || 1)) * 100) / 100;
+      V.pays = [{acc: a.id, method: Object.keys(accMethods(a))[0] || 'efectivo', amount: amt, ref: ''}];
+      drawPays();
+      toast(`Pago completo cargado en ${a.name}`);
+    };
+  }
   $('#vAddPay').onclick = () => {
     const t = totals(), a = D.accs[0]; if (!a) return toast('No hay cuentas de pago configuradas', true);
     V.pays.push({acc: a.id, method: Object.keys(accMethods(a))[0], amount: t.bal > 0 ? Math.round(t.bal * (a.currency === 'USD' ? 1 : t.rate) * 100) / 100 : 0, ref: ''}); drawPays();

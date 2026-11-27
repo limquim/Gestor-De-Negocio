@@ -64,12 +64,12 @@ async function quoteForm(id) {
         <input name="iva_pct" type="number" step="0.5" min="0" max="100" value="${D.defIva}" style="width:4.8rem;min-height:36px;margin:0;padding:.25rem .45rem;text-align:right">
       </label>
     </div>
-    <div class="grid"><label>Tasa (Bs por USD)<input name="rate" type="number" step="0.0001" min="0.0001" required></label>
+    <div class="grid"><label class="${S.bimoneda === false ? 'hidden' : ''}">Tasa (Bs por USD)<input name="rate" type="number" step="0.0001" min="0.0001" ${S.bimoneda === false ? '' : 'required'}></label>
       <label>Descuento (USD)<input name="disc" type="number" step="0.01" min="0" value="0"></label><label>Válida hasta<input name="valid" type="date"></label></div>
     <div class="scan-row"><input id="qS" type="search" placeholder="Buscar producto o escanear código"><button type="button" class="icon-btn scan-btn" id="qScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div><div class="list" id="qR"></div><div id="qC"></div><p id="qT" class="big"></p>
     <label>Nota<input name="notes" placeholder="Ej: entrega en 2 días"></label><button class="btn" type="submit">Guardar cotización</button></form>`);
   const el = $('#qF').elements;
-  el.rate.value = old ? old.s.exchange_rate : (S.rate || ''); el.valid.value = old ? (old.s.valid_until || '') : dstr(v7);
+  el.rate.value = S.bimoneda === false ? 1 : (old ? old.s.exchange_rate : (S.rate || '')); el.valid.value = old ? (old.s.valid_until || '') : dstr(v7);
   if (old) {
     el.cust.value = old.s.customer_id || '';
     el.iva.checked = old.s.doc_type === 'factura' || Number(old.s.tax_usd || 0) > 0;
@@ -87,7 +87,7 @@ async function quoteForm(id) {
     const ivaPct = el.iva.checked ? Math.max(0, +el.iva_pct.value || 0) : 0;
     const tax = el.iva.checked ? (sub - disc) * ivaPct / 100 : 0;
     const t = sub - disc + tax;
-    $('#qT').innerHTML = `${fmt(t)} USD <span class="mut">(${fmt(t * (+el.rate.value || 0))} Bs)${el.iva.checked ? ` · IVA ${qty(ivaPct)}%: ${fmt(tax)}` : ''}</span>`;
+    $('#qT').innerHTML = `${fmt(t)} USD <span class="mut">${S.bimoneda !== false && (+el.rate.value > 0) ? '(' + fmt(t * (+el.rate.value || 0)) + ' Bs)' : ''}${el.iva.checked ? ` · IVA ${qty(ivaPct)}%: ${fmt(tax)}` : ''}</span>`;
   };
   const draw = () => {
     $('#qC').innerHTML = cart.map((c, i) => `<div class="pl" data-i="${i}"><div><b>${esc(c.name)}</b><button type="button" class="lnk bad" data-rm="${i}">Quitar</button></div>

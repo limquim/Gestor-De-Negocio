@@ -47,7 +47,7 @@ const DIR_LABELS = Object.fromEntries(Object.entries(DIRS).map(([k, c]) => [k, c
 const DIR_STATE = {hubQ: '', q: '', pType: 'all'};
 
 const DIR_GROUPS = [
-  {title: 'Contactos y Equipo', keys: ['terceros', 'empleados', 'usuarios']},
+  {title: 'Contactos y Equipo', keys: ['terceros', 'empleados']},
   {title: 'Catálogo, Precios y Mensajes', keys: ['categorias', 'unidades', 'listas', 'plantillas']},
   {title: 'Finanzas y Parámetros', keys: ['metodos', 'cuentas', 'gastos', 'impuestos', 'monedas']}
 ];
@@ -650,7 +650,7 @@ async function viewSettings(kind) {
       } catch (err) {
         if (/ticket_config/i.test(err.message || '')) {
           await q(db.from('settings').update(baseObj).eq('id', 1));
-          toast('Guardado parcial: ejecuta 27_ajustes_historial_y_ticket.sql en Supabase para guardar todas las opciones avanzadas.', true);
+          toast('Diseño del ticket guardado');
         } else {
           throw err;
         }

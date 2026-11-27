@@ -50,6 +50,7 @@ function saleDoc(d, set, payDetails = '') {
     subtotal: +s.subtotal_usd,
     discount: +s.discount_usd,
     tax: +s.tax_usd,
+    ivaPct: Number(s.iva_percent || 0),
     total: +s.total_usd,
     rate: +s.exchange_rate,
     pays: d.pays.map(p => ({label: METHODS[p.method] || p.method, amount: +p.amount, cur: p.currency})),
@@ -75,6 +76,7 @@ function quoteDoc(d, set, payDetails = '') {
     subtotal: +s.subtotal_usd,
     discount: +s.discount_usd,
     tax: +s.tax_usd,
+    ivaPct: Number(s.iva_percent || 0),
     total: +s.total_usd,
     rate: +s.exchange_rate,
     pays: [],
@@ -118,7 +120,7 @@ function docText(doc, set) {
   o.push(ln);
 
   const showUsd = cfg.currency_mode !== 'bs';
-  const showBs = cfg.currency_mode !== 'usd' && set.ticket_show_bs !== false && doc.rate > 0;
+  const showBs = (typeof S === 'undefined' || S.bimoneda !== false) && cfg.currency_mode !== 'usd' && set.ticket_show_bs !== false && doc.rate > 0;
   const priceOnlyBs = cfg.currency_mode === 'bs' && doc.rate > 0;
 
   doc.items.forEach(i => {
@@ -139,7 +141,7 @@ function docText(doc, set) {
   if (cfg.show_unit_price !== false) {
     o.push(two(`Subtotal ${cLabel}`, fmt(doc.subtotal * mult)));
     if (+doc.discount) o.push(two('Descuento', '-' + fmt(doc.discount * mult)));
-    if (+doc.tax) o.push(two('IVA', fmt(doc.tax * mult)));
+    if (+doc.tax) o.push(two(doc.ivaPct ? `IVA (${qty(doc.ivaPct)}%)` : 'IVA', fmt(doc.tax * mult)));
   }
 
   if (cfg.currency_mode === 'bs_first' && showBs) {
@@ -216,7 +218,7 @@ async function receiptBlob(doc, set) {
   const logoDim = cfg.logo_size === 'sm' ? 68 : cfg.logo_size === 'lg' ? 112 : 88;
   const logoCenter = cfg.logo_pos === 'center';
   const showUsd = cfg.currency_mode !== 'bs';
-  const showBs = cfg.currency_mode !== 'usd' && set.ticket_show_bs !== false && doc.rate > 0;
+  const showBs = (typeof S === 'undefined' || S.bimoneda !== false) && cfg.currency_mode !== 'usd' && set.ticket_show_bs !== false && doc.rate > 0;
   const priceOnlyBs = cfg.currency_mode === 'bs' && doc.rate > 0;
 
   const paint = () => {
@@ -337,7 +339,7 @@ async function receiptBlob(doc, set) {
       y += 6;
       row('Subtotal', fmt(doc.subtotal * mult) + ' ' + cLabel);
       if (doc.discount) row('Descuento', '-' + fmt(doc.discount * mult) + ' ' + cLabel, '#b4381a');
-      if (doc.tax) row('IVA', fmt(doc.tax * mult) + ' ' + cLabel);
+      if (doc.tax) row(doc.ivaPct ? `IVA (${qty(doc.ivaPct)}%)` : 'IVA', fmt(doc.tax * mult) + ' ' + cLabel);
     }
 
     // 6. Total principal (respetando moneda y estilo)

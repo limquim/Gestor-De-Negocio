@@ -57,8 +57,8 @@ async function viewCompra() {
     <div class="row0"><label style="flex:1">Proveedor<select id="cSup"><option value="">Sin proveedor</option>${D.sups.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}${editing && old.b.supplier_id && !D.sups.some(s => String(s.id) === String(old.b.supplier_id)) ? `<option value="${old.b.supplier_id}">${esc(old.b.parties?.name || ('Proveedor #' + old.b.supplier_id))}</option>` : ''}</select></label><button class="btn ghost" type="button" id="cNewS" aria-label="Nuevo proveedor">+</button></div>
     <div class="grid">
       ${editing ? `<label>Fecha de compra<input id="cDate" type="date" value="${esc(old.b.purchase_date || caracasDate())}"></label>` : ''}
-      <label>Moneda de la factura<select id="cCur"><option value="USD">Dólares (USD)</option><option value="VES">Bolívares (Bs)</option></select></label>
-      <label>Tasa (Bs por USD)<input id="cRate" type="number" step="0.0001" min="0.0001"></label>
+      <label class="${S.bimoneda === false ? 'hidden' : ''}">Moneda de la factura<select id="cCur"><option value="USD">Dólares (USD)</option><option value="VES">Bolívares (Bs)</option></select></label>
+      <label class="${S.bimoneda === false ? 'hidden' : ''}">Tasa (Bs por USD)<input id="cRate" type="number" step="0.0001" min="0.0001"></label>
     </div>
     <div class="row0" style="justify-content:space-between;flex-wrap:wrap;gap:.5rem;padding:.45rem .65rem;background:var(--bg);border:1px solid var(--line);border-radius:10px">
       <label class="chk" style="margin:0"><input type="checkbox" id="cIva"> <b>Aplicar IVA a esta compra</b></label>
@@ -79,7 +79,7 @@ async function viewCompra() {
   <div class="row"><button class="btn" id="cGo">${editing ? 'Guardar corrección' : 'Registrar compra'}</button></div>`;
 
   $('#cCur').value = initCur;
-  $('#cRate').value = initRate;
+  $('#cRate').value = S.bimoneda === false ? 1 : initRate;
   if (editing) {
     $('#cSup').value = old.b.supplier_id || '';
     $('#cDue').value = old.b.due_date || '';
@@ -219,7 +219,7 @@ async function viewCompra() {
         }));
       } catch (err) {
         if (err.code === 'PGRST202' || /actualizar_compra/i.test(err.message || '')) {
-          throw new Error('Falta ejecutar 29_pagar_compras_y_editar_compra.sql en Supabase (SQL Editor).');
+          throw new Error('No se pudo completar la operación en esta compra.');
         }
         throw err;
       }
@@ -367,7 +367,7 @@ async function purchaseSheet(id) {
         await q(db.rpc('anular_compra', {p_id: id, p_reason: reason ? reason.trim() : null}));
       } catch (err) {
         if (err.code === 'PGRST202' || /anular_compra/i.test(err.message || '')) {
-          throw new Error('Falta ejecutar 28_anular_compra.sql en Supabase (SQL Editor).');
+          throw new Error('No se pudo anular esta compra.');
         }
         throw err;
       }
@@ -522,7 +522,7 @@ async function supplierDebtSheet(sup) {
         }));
       } catch (err) {
         if (err.code === 'PGRST202' || /pagar_compras/i.test(err.message || '')) {
-          throw new Error('Falta ejecutar 29_pagar_compras_y_editar_compra.sql en Supabase (SQL Editor).');
+          throw new Error('No se pudo completar la operación en esta compra.');
         }
         throw err;
       }

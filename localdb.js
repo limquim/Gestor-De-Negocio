@@ -1053,13 +1053,16 @@ const LDB = {
         rItems.push({id: this.nextId('sale_return_items'), return_id: retId, product_id: Number(it.product_id), quantity: Number(it.quantity), unit_price_usd: up, unit_cost_usd: uc, restock: !!it.restock});
         if (it.restock) await this.addInvMove(it.product_id, Number(it.quantity), uc, 'devolucion', 'sale', sid, 'Devolución #' + retId);
       }
+      const savedRefunds = [];
       for (const rf of (P.p_refund || [])) {
         const acc = accById(rf.account_id), cur = acc?.currency || 'USD', amt = this.r2(rf.amount);
+        if (!(amt > 0)) continue;
         refundUsd += this.toUsdLocal(amt, cur, rate);
+        savedRefunds.push({account_id: Number(rf.account_id), amount: amt, currency: cur});
         await this.addAccMove(rf.account_id, -amt, 'reembolso', 'Reembolso devolución #' + retId);
       }
       const rets = this.mem.sale_returns || [];
-      rets.unshift({id: retId, sale_id: sid, return_date: today, reason: P.p_reason || null, notes: P.p_notes || null, total_usd: this.r2(totalUsd), refund_usd: this.r2(refundUsd), status: 'activa', created_at: now});
+      rets.unshift({id: retId, sale_id: sid, return_date: today, reason: P.p_reason || null, notes: P.p_notes || null, total_usd: this.r2(totalUsd), refund_usd: this.r2(refundUsd), refunds: savedRefunds, status: 'activa', created_at: now});
       await this.saveTable('sale_returns', rets);
       await this.saveTable('sale_return_items', [...(this.mem.sale_return_items || []), ...rItems], false);
       const vr = this.computeView('ventas_resumen').find(x => Number(x.id) === sid);
@@ -1074,6 +1077,15 @@ const LDB = {
         await this.saveTable('sale_returns', this.mem.sale_returns);
         for (const it of (this.mem.sale_return_items || []).filter(x => Number(x.return_id) === id && x.restock)) {
           await this.addInvMove(it.product_id, -Number(it.quantity), it.unit_cost_usd, 'ajuste', 'sale', r.sale_id, 'Anulación devolución #' + id);
+        }
+        for (const rf of (r.refunds || [])) {
+          await this.addAccMove(rf.account_id, Math.abs(Number(rf.amount)), 'anulacion', 'Anulación devolución #' + id);
+        }
+        const s = (this.mem.sales || []).find(x => Number(x.id) === Number(r.sale_id));
+        if (s && s.status !== 'anulada') {
+          const vr = this.computeView('ventas_resumen').find(x => Number(x.id) === Number(r.sale_id));
+          s.status = (vr && vr.paid_usd >= vr.total_usd - 0.01) ? 'pagada' : 'pendiente';
+          await this.saveTable('sales', this.mem.sales, false);
         }
       }
       return {data: true, error: null};
@@ -1493,7 +1505,20 @@ const LDB = {
       await this.saveTable('accounts', this.mem.accounts || []);
 
       const curStock = this.computeView('stock_actual');
+      let prodsDirty = false;
       for (const inv of (P.p_inventario || [])) {
+        const pr = prodById(inv.product_id);
+        if (pr) {
+          if (inv.sale_price_usd != null && Number(inv.sale_price_usd) >= 0) {
+            pr.sale_price_usd = this.r4(inv.sale_price_usd);
+            prodsDirty = true;
+          }
+          if (inv.unit_cost_usd != null && Number(inv.unit_cost_usd) >= 0) {
+            pr.manual_cost_usd = this.r4(inv.unit_cost_usd);
+            if (pr.auto_cost_usd == null) pr.avg_cost_usd = pr.manual_cost_usd;
+            prodsDirty = true;
+          }
+        }
         const st = curStock.find(s => Number(s.product_id) === Number(inv.product_id));
         if (inv.stock != null) {
           const delta = this.r3(Number(inv.stock) - Number(st?.stock || 0));
@@ -1502,6 +1527,7 @@ const LDB = {
           }
         }
       }
+      if (prodsDirty) await this.saveTable('products', this.mem.products || [], false);
 
       const findOrCreateParty = async (name, isCust, isSup) => {
         const nm = String(name || '').trim();
@@ -1518,15 +1544,17 @@ const LDB = {
         return p.id;
       };
 
-      for (const cxc of (P.p_cxc || [])) {
+      const cxcList = P.p_por_cobrar || P.p_cxc || [];
+      for (const cxc of cxcList) {
         const amt = this.r2(cxc.amount_usd); if (!(amt > 0)) continue;
-        const cid = cxc.party_id || await findOrCreateParty(cxc.party_name, true, false);
-        this.mem.sales.unshift({id: this.nextId('sales'), customer_id: cid, sale_date: fecha, doc_type: 'nota_entrega', exchange_rate: rate, subtotal_usd: amt, discount_usd: 0, tax_usd: 0, total_usd: amt, status: 'pendiente', due_date: cxc.due_date || null, notes: 'Saldo inicial por cobrar' + (cxc.note ? ': ' + cxc.note : ''), created_at: now});
+        const cid = cxc.customer_id || cxc.party_id || await findOrCreateParty(cxc.customer_name || cxc.party_name, true, false);
+        this.mem.sales.unshift({id: this.nextId('sales'), customer_id: cid, sale_date: fecha, doc_type: 'nota_entrega', iva_percent: 0, exchange_rate: rate, subtotal_usd: amt, discount_usd: 0, tax_usd: 0, total_usd: amt, status: 'pendiente', due_date: cxc.due_date || null, notes: 'Saldo inicial por cobrar' + (cxc.note ? ': ' + cxc.note : ''), created_at: now});
       }
-      for (const cxp of (P.p_cxp || [])) {
+      const cxpList = P.p_por_pagar || P.p_cxp || [];
+      for (const cxp of cxpList) {
         const amt = this.r2(cxp.amount_usd); if (!(amt > 0)) continue;
-        const sid = cxp.party_id || await findOrCreateParty(cxp.party_name, false, true);
-        this.mem.purchases.unshift({id: this.nextId('purchases'), supplier_id: sid, purchase_date: fecha, currency: 'USD', exchange_rate: rate, total_usd: amt, status: 'registrada', due_date: cxp.due_date || null, notes: 'Saldo inicial por pagar' + (cxp.note ? ': ' + cxp.note : ''), created_at: now});
+        const sid = cxp.supplier_id || cxp.party_id || await findOrCreateParty(cxp.supplier_name || cxp.party_name, false, true);
+        this.mem.purchases.unshift({id: this.nextId('purchases'), supplier_id: sid, purchase_date: fecha, currency: 'USD', exchange_rate: rate, subtotal_usd: amt, tax_usd: 0, apply_iva: false, iva_percent: 0, total_usd: amt, status: 'registrada', due_date: cxp.due_date || null, notes: 'Saldo inicial por pagar' + (cxp.note ? ': ' + cxp.note : ''), created_at: now});
       }
       await this.saveTable('sales', this.mem.sales || [], false);
       await this.saveTable('purchases', this.mem.purchases || [], false);
