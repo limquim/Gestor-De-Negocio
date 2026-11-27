@@ -70,6 +70,7 @@ th.n{text-align:right}
   <header>
     <strong>Gestor Emprendedor</strong>
     <div id="rateChip"></div>
+    <button class="icon-btn" id="globalSearchBtn" title="Buscar producto, cliente o venta" aria-label="Buscador global"><svg class="ic" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.35-4.35"/></svg></button>
     <button class="icon-btn" id="roleBtn" aria-label="Modo Empleado / PIN del dueño"></button>
     <button class="icon-btn" id="themeBtn" aria-label="Cambiar entre fondo claro y oscuro"></button>
   </header>
@@ -98,7 +99,31 @@ const TIPOS = {materia_prima:'Materia prima', envase:'Envase', producto_terminad
 const MOV = {compra:'Compra', venta:'Venta', produccion_entrada:'Producción (entra)', produccion_consumo:'Producción (consumo)', ajuste:'Ajuste', merma:'Merma', devolucion:'Devolución'};
 
 let db, tab = 'inicio';
-const S = {rate: null, mode: 'auto', rates: [], products: [], bimoneda: true, baseCurrency: 'USD', mods: null};
+const S = {rate: null, mode: 'auto', rates: [], products: [], bimoneda: true, baseCurrency: 'USD', curSym: '$', curCode: 'USD', curPos: 'prefix', secSym: 'Bs', mods: null};
+const curSym = () => (S.curPos === 'code' ? (S.curCode || 'USD') : (S.curSym || '$'));
+const curCode = () => S.curCode || 'USD';
+const curLabel = () => (S.curPos === 'code' ? curCode() : (S.curSym || '$'));
+const secSym = () => S.secSym || 'Bs';
+const fmtCur = (n, d = 2) => {
+  const v = Number(n || 0);
+  const neg = v < -1e-9;
+  const abs = fmt(Math.abs(v), d);
+  const sym = curSym();
+  const pos = S.curPos || 'prefix';
+  if (pos === 'prefix' && sym.length <= 3 && !/^[A-Z]{3}$/.test(sym)) {
+    return (neg ? '-' : '') + sym + abs;
+  }
+  return (neg ? '-' : '') + abs + ' ' + sym;
+};
+const fmtCurSigned = (n, d = 2) => {
+  const v = Number(n || 0);
+  return v > 1e-9 ? '+' + fmtCur(v, d) : fmtCur(v, d);
+};
+const fmtSec = (n, d = 2) => {
+  const v = Number(n || 0);
+  const neg = v < -1e-9;
+  return (neg ? '-' : '') + fmt(Math.abs(v), d) + ' ' + secSym();
+};
 
 let toastTimer;
 function toast(msg, err) {
@@ -112,7 +137,7 @@ const q = async (p) => { const {data, error} = await p; if (error) throw error; 
 function paintRateChip() {
   if (S.bimoneda === false) { $('#rateChip').innerHTML = ''; return; }
   $('#rateChip').innerHTML = S.rate
-    ? `<span class="price-tag">1 USD = <b>${fmt(S.rate, 4)} Bs</b><small>${S.mode === 'auto' ? 'BCV auto' : 'manual'}</small></span>`
+    ? `<span class="price-tag">1 ${esc(curLabel())} = <b>${fmt(S.rate, 4)} ${esc(secSym())}</b><small>${S.mode === 'auto' ? 'BCV auto' : 'manual'}</small></span>`
     : '<span class="bad">Sin tasa</span>';
 }
 async function loadRate() {
@@ -156,15 +181,15 @@ async function viewTasa() {
   await loadRate();
   if (S.bimoneda === false) {
     $('#view').innerHTML = `<div class="card stack"><h2>Modo moneda única activo</h2>
-      <p class="mut" style="margin:0">Actualmente trabajas en una sola moneda (USD) sin bolívares. Si deseas activar la tasa BCV y cobros en bolívares, activa el <b>Modo Bimoneda</b> en <b>Configuración &gt; Módulos del negocio</b>.</p>
+      <p class="mut" style="margin:0">Actualmente trabajas en una sola moneda (${esc(curLabel())} · ${esc(curCode())}) sin moneda secundaria. Si deseas activar la tasa BCV y cobros en ${esc(secSym())}, activa el <b>Modo Bimoneda</b> en <b>Configuración &gt; Módulos y Moneda</b>.</p>
       <div class="row"><button class="btn" id="tsModBtn">Ir a Módulos del negocio</button></div></div>`;
     $('#tsModBtn').onclick = () => { SUB.cfg = 'modulos'; go('configuracion'); };
     return;
   }
   const rows = S.rates.map(r => `<tr><td>${r.rate_date}</td><td class="n">${fmt(r.rate, 4)}</td><td>${r.source === 'bcv_auto' ? 'BCV automática' : 'Manual'}</td></tr>`).join('');
   $('#view').innerHTML = `
-  <div class="card"><h2>Tasa del dólar (Bs por 1 USD)</h2>
-    <p class="big">${S.rate ? fmt(S.rate, 4) + ' Bs' : 'Sin tasa'}</p>
+  <div class="card"><h2>Tasa de cambio (${esc(secSym())} por 1 ${esc(curLabel())})</h2>
+    <p class="big">${S.rate ? fmtSec(S.rate, 4) : 'Sin tasa'}</p>
     <div class="radios">
       <label><input type="radio" name="mode" value="auto" ${S.mode === 'auto' ? 'checked' : ''}> Automática (BCV)</label>
       <label><input type="radio" name="mode" value="manual" ${S.mode === 'manual' ? 'checked' : ''}> Manual</label></div>

@@ -57,8 +57,8 @@ async function viewCompra() {
     <div class="row0"><label style="flex:1">Proveedor<select id="cSup"><option value="">Sin proveedor</option>${D.sups.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('')}${editing && old.b.supplier_id && !D.sups.some(s => String(s.id) === String(old.b.supplier_id)) ? `<option value="${old.b.supplier_id}">${esc(old.b.parties?.name || ('Proveedor #' + old.b.supplier_id))}</option>` : ''}</select></label><button class="btn ghost" type="button" id="cNewS" aria-label="Nuevo proveedor">+</button></div>
     <div class="grid">
       ${editing ? `<label>Fecha de compra<input id="cDate" type="date" value="${esc(old.b.purchase_date || caracasDate())}"></label>` : ''}
-      <label class="${S.bimoneda === false ? 'hidden' : ''}">Moneda de la factura<select id="cCur"><option value="USD">Dólares (USD)</option><option value="VES">Bolívares (Bs)</option></select></label>
-      <label class="${S.bimoneda === false ? 'hidden' : ''}">Tasa (Bs por USD)<input id="cRate" type="number" step="0.0001" min="0.0001"></label>
+      <label class="${S.bimoneda === false ? 'hidden' : ''}">Moneda de la factura<select id="cCur"><option value="USD">Moneda principal (${esc(curLabel())})</option><option value="VES">Bolívares (${esc(secSym())})</option></select></label>
+      <label class="${S.bimoneda === false ? 'hidden' : ''}">Tasa (${esc(secSym())} por ${esc(curLabel())})<input id="cRate" type="number" step="0.0001" min="0.0001"></label>
     </div>
     <div class="row0" style="justify-content:space-between;flex-wrap:wrap;gap:.5rem;padding:.45rem .65rem;background:var(--bg);border:1px solid var(--line);border-radius:10px">
       <label class="chk" style="margin:0"><input type="checkbox" id="cIva"> <b>Aplicar IVA a esta compra</b></label>
@@ -102,13 +102,13 @@ async function viewCompra() {
     const tax = (openingNoItems && !CV.cart.length) ? 0 : (ivaOn ? cartSub * ivaPct / 100 : 0);
     const tot = (openingNoItems && !CV.cart.length) ? +old.b.total_usd : (cartSub + tax);
     const paid = CV.pays.reduce((a, p) => a + payUsd(p), 0), bal = tot - paid, rt = rate();
-    $('#cTot').innerHTML = `${ivaOn ? `Subtotal: ${fmt(cartSub)} USD | IVA (${qty(ivaPct)}%): ${fmt(tax)} USD<br>` : ''}<span class="big">${fmt(tot)} USD</span><br><span class="mut">${fmt(tot * rt)} Bs a la tasa indicada${ivaOn ? ' · El IVA se prorratea al costo real en inventario' : ''}</span>`;
-    $('#cBal').innerHTML = `Pagado: <b>${fmt(paid)} USD</b> | ` + (bal > 0.01 ? `<span class="warn">Queda por pagar: <b>${fmt(bal)} USD</b> (${fmt(bal * rt)} Bs)</span>` : bal < -0.01 ? `<span class="warn">El pago supera el total por ${fmt(-bal)} USD</span>` : 'Pago completo');
+    $('#cTot').innerHTML = `${ivaOn ? `Subtotal: ${fmtCur(cartSub)} | IVA (${qty(ivaPct)}%): ${fmtCur(tax)}<br>` : ''}<span class="big">${fmtCur(tot)}</span><br><span class="mut">${fmt(tot * rt)} Bs a la tasa indicada${ivaOn ? ' · El IVA se prorratea al costo real en inventario' : ''}</span>`;
+    $('#cBal').innerHTML = `Pagado: <b>${fmtCur(paid)}</b> | ` + (bal > 0.01 ? `<span class="warn">Queda por pagar: <b>${fmtCur(bal)}</b> (${fmt(bal * rt)} Bs)</span>` : bal < -0.01 ? `<span class="warn">El pago supera el total por ${fmtCur(-bal)}</span>` : 'Pago completo');
     $('#cDueW').classList.toggle('hidden', !(bal > 0.01));
-    document.querySelectorAll('#cCart .pl').forEach(l => { const c = CV.cart[+l.dataset.i]; l.querySelector('.lt').textContent = 'Total: ' + fmt(c.qty * c.cost) + (cur() === 'USD' ? ' USD' : ' Bs'); });
+    document.querySelectorAll('#cCart .pl').forEach(l => { const c = CV.cart[+l.dataset.i]; l.querySelector('.lt').textContent = 'Total: ' + (cur() === 'USD' ? fmtCur(c.qty * c.cost) : fmtSec(c.qty * c.cost)); });
     document.querySelectorAll('#cPays .payl').forEach(l => {
       const p = CV.pays[+l.dataset.i], a = D.accs.find(x => x.id === +p.acc), u = payUsd(p);
-      l.querySelector('.eq').textContent = '≈ ' + fmt(u) + ' USD | ' + fmt(u * rt) + ' Bs';
+      l.querySelector('.eq').textContent = '≈ ' + fmtCur(u) + (S.bimoneda !== false ? ' | ' + fmtSec(u * rt) : '');
       const bl = l.querySelector('.abal');
       if (bl) bl.innerHTML = accBalanceLine(a, p.amount, true);
     });
@@ -117,7 +117,7 @@ async function viewCompra() {
   const drawCart = () => {
     $('#cCart').innerHTML = CV.cart.map((c, i) => `<div class="pl" data-i="${i}"><div><b>${esc(c.name)}</b><small class="lt"></small><button class="lnk bad" data-rm="${i}">Quitar</button></div>
       <div class="stack" style="gap:.3rem"><label>Cant. (${esc(c.unit)})<input data-f="qty" type="number" step="0.001" min="0.001" value="${c.qty}"></label>
-      <label>Costo (${cur() === 'USD' ? 'USD' : 'Bs'})<input data-f="cost" type="number" step="0.01" min="0" value="${c.cost}"></label></div></div>`).join('') || (openingNoItems ? '<p class="mut">Sin artículos detallados (mantiene el monto inicial).</p>' : '<p class="mut">Busca y agrega productos.</p>');
+      <label>Costo (${cur() === 'USD' ? esc(curLabel()) : esc(secSym())})<input data-f="cost" type="number" step="0.01" min="0" value="${c.cost}"></label></div></div>`).join('') || (openingNoItems ? '<p class="mut">Sin artículos detallados (mantiene el monto inicial).</p>' : '<p class="mut">Busca y agrega productos.</p>');
     totals();
   };
   const drawPays = () => {
@@ -138,7 +138,7 @@ async function viewCompra() {
 
   $('#cSearch').oninput = (e) => {
     const t = e.target.value.trim().toLowerCase();
-    $('#cRes').innerHTML = t ? (D.products.filter(p => (p.name + ' ' + (p.sku || '')).toLowerCase().includes(t)).slice(0, 6).map(p => `<button class="item" data-add="${p.id}"><span><b>${esc(p.name)}</b><small>Último costo: ${fmt(p.last_cost_usd || p.avg_cost_usd)} USD</small></span><span class="mut">+</span></button>`).join('') || '<p class="mut">Sin resultados.</p>') : '';
+    $('#cRes').innerHTML = t ? (D.products.filter(p => (p.name + ' ' + (p.sku || '')).toLowerCase().includes(t)).slice(0, 6).map(p => `<button class="item" data-add="${p.id}"><span><b>${esc(p.name)}</b><small>Último costo: ${fmtCur(p.last_cost_usd || p.avg_cost_usd)}</small></span><span class="mut">+</span></button>`).join('') || '<p class="mut">Sin resultados.</p>') : '';
   };
   const addCompraByCode = (code) => {
     const p = findBySku(D.products, code);
@@ -285,8 +285,8 @@ async function viewHistCompras() {
     const pendUsd = actList.filter(r => r.status === 'registrada').reduce((s, r) => s + Math.max(0, Number(r.total_usd || 0) - Number(r.paid_usd || 0)), 0);
 
     $('#chStats').innerHTML = `
-      <div class="stat"><span>Total comprado</span><b>${fmt(totUsd)} USD</b><span>${actList.length} ${actList.length === 1 ? 'compra activa' : 'compras activas'}${S.rate ? ' · ' + fmt(totUsd * S.rate) + ' Bs' : ''}</span></div>
-      <div class="stat ${pendUsd > 0.01 ? 'warn' : ''}"><span>Por pagar</span><b>${fmt(pendUsd)} USD</b><span>${S.rate ? fmt(pendUsd * S.rate) + ' Bs hoy' : ''}</span></div>`;
+      <div class="stat"><span>Total comprado</span><b>${fmtCur(totUsd)}</b><span>${actList.length} ${actList.length === 1 ? 'compra activa' : 'compras activas'}${S.rate ? ' · ' + fmt(totUsd * S.rate) + ' Bs' : ''}</span></div>
+      <div class="stat ${pendUsd > 0.01 ? 'warn' : ''}"><span>Por pagar</span><b>${fmtCur(pendUsd)}</b><span>${S.rate ? fmt(pendUsd * S.rate) + ' Bs hoy' : ''}</span></div>`;
 
     $('#chL').innerHTML = list.map(r => {
       const d = Math.max(0, Number(r.total_usd || 0) - Number(r.paid_usd || 0));
@@ -300,8 +300,8 @@ async function viewHistCompras() {
           <b>${idLbl} ${esc(r.supplier || 'Sin proveedor')}</b>
           <small>${dmy(r.purchase_date)}${r.due_date ? ' | vence ' + dmy(r.due_date) : ''}</small>
           <small>${r.status === 'registrada'
-            ? 'Debes ' + fmt(d) + ' USD (' + fmt(d * (S.rate || r.exchange_rate)) + ' Bs hoy)'
-            : fmt(r.total_usd) + ' USD (' + fmt(r.total_usd * r.exchange_rate) + ' Bs)'}</small>
+            ? 'Debes ' + fmtCur(d) + (S.bimoneda !== false ? ' (' + fmtSec(d * (S.rate || r.exchange_rate)) + ' hoy)' : '')
+            : fmtCur(r.total_usd) + (S.bimoneda !== false ? ' (' + fmtSec(r.total_usd * r.exchange_rate) + ')' : '')}</small>
         </span>
         <span class="badge ${bCls}">${bTxt}</span>
       </button>`;
@@ -329,8 +329,8 @@ async function purchaseSheet(id) {
       <thead><tr><th>Producto</th><th class="n">Cant.</th><th class="n">Costo</th><th class="n">Total</th></tr></thead>
       <tbody>${items.map(i => `<tr><td>${esc(i.products?.name)}</td><td class="n">${qty(i.quantity)} ${esc(i.products?.unit || '')}</td><td class="n">${fmt(i.unit_cost_usd, 4)}</td><td class="n">${fmt(i.quantity * i.unit_cost_usd)}</td></tr>`).join('')}</tbody>
     </table></div>` : '<p class="mut">Compra de saldo inicial sin detalle de artículos.</p>'}
-    <p>${Number(b.tax_usd || 0) > 0 ? `Subtotal ${fmt(b.subtotal_usd ?? (b.total_usd - b.tax_usd))} USD | IVA (${qty(b.iva_percent || 16)}%): ${fmt(b.tax_usd)} USD<br>` : ''}<b>Total ${fmt(b.total_usd)} USD</b> (${fmt(b.total_usd * b.exchange_rate)} Bs a la tasa de la compra)<br>Pagado ${fmt(paid)} USD${open ? `<br><span class="warn">Debes ${fmt(bal)} USD (${fmt(bal * (S.rate || b.exchange_rate))} Bs a la tasa de hoy)</span>` : ''}</p>
-    ${pays.length ? `<p class="mut">${pays.map(p => `${METHODS[p.method] || p.method} (${esc(p.accounts?.name)}): ${fmt(p.amount)} ${p.currency === 'USD' ? 'USD' : 'Bs'} a tasa ${fmt(p.exchange_rate, 2)}`).join('<br>')}</p>` : ''}
+    <p>${Number(b.tax_usd || 0) > 0 ? `Subtotal ${fmtCur(b.subtotal_usd ?? (b.total_usd - b.tax_usd))} | IVA (${qty(b.iva_percent || 16)}%): ${fmtCur(b.tax_usd)}<br>` : ''}<b>Total ${fmtCur(b.total_usd)}</b> (${fmt(b.total_usd * b.exchange_rate)} Bs a la tasa de la compra)<br>Pagado ${fmtCur(paid)}${open ? `<br><span class="warn">Debes ${fmtCur(bal)} (${fmt(bal * (S.rate || b.exchange_rate))} Bs a la tasa de hoy)</span>` : ''}</p>
+    ${pays.length ? `<p class="mut">${pays.map(p => `${METHODS[p.method] || p.method} (${esc(p.accounts?.name)}): ${money(p.amount, p.currency)} a tasa ${fmt(p.exchange_rate, 2)}`).join('<br>')}</p>` : ''}
     <div class="row">
       ${open ? '<button class="btn" id="pcPay">Registrar pago</button>' : ''}
       ${!anul ? '<button class="btn ghost" id="pcEdit">Modificar</button>' : ''}
@@ -414,7 +414,7 @@ async function viewDeudasProv() {
 
   $('#view').innerHTML = `<div class="stat warn" style="margin-bottom:1rem">
       <span>Total por pagar</span>
-      <b>${fmt(tot)} USD</b>
+      <b>${fmtCur(tot)}</b>
       <span>${S.rate ? fmt(tot * S.rate) + ' Bs a la tasa de hoy | ' : ''}${rows.length} ${rows.length === 1 ? 'proveedor' : 'proveedores'}</span>
     </div>
     <div class="list" id="dpL">${rows.map((r, i) => `<button class="item" data-i="${i}">
@@ -422,7 +422,7 @@ async function viewDeudasProv() {
         <b>${esc(r.supplier)}</b>
         <small>${r.num_compras} ${r.num_compras === 1 ? 'compra pendiente' : 'compras pendientes'}${r.vencidas ? ` · <span class="bad">${r.vencidas} ${r.vencidas === 1 ? 'vencida' : 'vencidas'}</span>` : ''} | desde hace ${diasDesde(r.desde)} días</small>
       </span>
-      <span class="n"><b>${fmt(r.debt_usd)} USD</b><small>${S.rate ? fmt(r.debt_usd * S.rate) + ' Bs hoy' : ''}</small></span>
+      <span class="n"><b>${fmtCur(r.debt_usd)}</b><small>${S.rate ? fmt(r.debt_usd * S.rate) + ' Bs hoy' : ''}</small></span>
     </button>`).join('') || '<p class="mut">No le debes a ningún proveedor.</p>'}</div>`;
 
   $('#dpL').onclick = (e) => {
@@ -441,19 +441,19 @@ async function supplierDebtSheet(sup) {
   const total = purs.reduce((a, p) => a + bal(p), 0);
 
   openSheet(esc(sup.supplier), `<form id="dpF" class="stack">
-    <p><b>Deuda total: ${fmt(total)} USD</b>${S.rate ? ' (' + fmt(total * S.rate) + ' Bs a la tasa de hoy)' : ''}</p>
+    <p><b>Deuda total: ${fmtCur(total)}</b>${S.rate ? ' (' + fmt(total * S.rate) + ' Bs a la tasa de hoy)' : ''}</p>
     <p class="mut">Marca las compras que vas a pagar. Si el monto no alcanza para todas, se pagan completas las más antiguas y la siguiente queda con un abono y el resto abierto.</p>
     <div class="list" id="dpS">${purs.map(p => `<div class="item">
       <label class="chk" style="flex:1"><input type="checkbox" data-p="${p.id}" checked>
         <span><b>Compra #${p.id}</b>
-          <small>${dmy(p.purchase_date)}${p.due_date && p.due_date < hoy ? ' | vencida' : ''} | debes ${fmt(bal(p))} USD</small>
+          <small>${dmy(p.purchase_date)}${p.due_date && p.due_date < hoy ? ' | vencida' : ''} | debes ${fmtCur(bal(p))}</small>
           <small class="al" style="display:block"></small>
         </span>
       </label>
     </div>`).join('')}</div>
     <label>Pagar desde la cuenta<select name="acc">${acctOpts(accs)}</select></label>
     <small id="dpAccBal" style="display:block;margin-top:-.45rem"></small>
-    <label>Tasa de cambio (Bs por USD)<input name="rate" type="number" step="0.0001" min="0.0001" value="${S.rate || ''}"></label>
+    <label>Tasa de cambio (${esc(secSym())} por ${esc(curLabel())})<input name="rate" type="number" step="0.0001" min="0.0001" value="${S.rate || ''}"></label>
     <label>Método<select name="method"></select></label>
     <label>Monto a pagar<input name="amount" type="number" step="0.01" min="0.01" required></label>
     <p class="mut" id="dpSum"></p>
@@ -486,11 +486,11 @@ async function supplierDebtSheet(sup) {
       const l = document.querySelector(`[data-p="${x.p.id}"]`).closest('.item').querySelector('.al');
       l.className = 'al ' + (x.st === 'full' ? 'in' : x.st === 'part' ? 'warn' : 'mut');
       l.style.display = 'block';
-      l.textContent = x.st === 'full' ? 'Se paga completa' : x.st === 'part' ? `Abono de ${fmt(x.a)} USD: queda abierta debiendo ${fmt(bal(x.p) - x.a)} USD` : x.st === 'none' ? 'No alcanza: queda pendiente' : '';
+      l.textContent = x.st === 'full' ? 'Se paga completa' : x.st === 'part' ? `Abono de ${fmtCur(x.a)}: queda abierta debiendo ${fmtCur(bal(x.p) - x.a)}` : x.st === 'none' ? 'No alcanza: queda pendiente' : '';
     });
     $('#dpSum').textContent = over > 0.02
-      ? `El monto supera la deuda de las compras elegidas por ${fmt(over)} USD.`
-      : `Pagarás ${fmt(usd)} USD. Quedan pendientes ${fmt(Math.max(sel - usd, 0))} USD de las compras elegidas.`;
+      ? `El monto supera la deuda de las compras elegidas por ${fmtCur(over)}.`
+      : `Pagarás ${fmtCur(usd)}. Quedan pendientes ${fmtCur(Math.max(sel - usd, 0))} de las compras elegidas.`;
     if ($('#dpAccBal')) $('#dpAccBal').innerHTML = accBalanceLine(curAcc(), amt, true);
   };
   const fillM = () => { el.method.innerHTML = optList(accMethods(curAcc())); };
@@ -509,7 +509,7 @@ async function supplierDebtSheet(sup) {
       const ids = purs.filter(chosen).map(p => p.id);
       if (!ids.length) throw new Error('Marca al menos una compra');
       const amt = num(el.amount.value), sel = selDebt(), over = amt / (factor() || 1) - sel;
-      if (over > 0.02) throw new Error(`El monto supera la deuda seleccionada (${fmt(sel)} USD)`);
+      if (over > 0.02) throw new Error(`El monto supera la deuda seleccionada (${fmtCur(sel)})`);
       let res;
       try {
         res = await q(db.rpc('pagar_compras', {
@@ -527,7 +527,7 @@ async function supplierDebtSheet(sup) {
         throw err;
       }
       closeSheet();
-      toast(`Pago registrado: ${res.pagadas} ${res.pagadas === 1 ? 'compra pagada completa' : 'compras pagadas completas'}${res.abonadas ? ' y 1 con abono (queda abierta)' : ''}. Pendiente: ${fmt(res.pendiente_usd)} USD`);
+      toast(`Pago registrado: ${res.pagadas} ${res.pagadas === 1 ? 'compra pagada completa' : 'compras pagadas completas'}${res.abonadas ? ' y 1 con abono (queda abierta)' : ''}. Pendiente: ${fmtCur(res.pendiente_usd)}`);
       render();
     });
   };
@@ -535,7 +535,7 @@ async function supplierDebtSheet(sup) {
   if (sup.phone && $('#dpWa')) {
     $('#dpWa').onclick = () => {
       const amt = num(el.amount.value) || 0, ref = el.ref.value.trim();
-      const msg = `Hola ${sup.supplier}, te escribo respecto a nuestro saldo pendiente (${fmt(total)} USD).${amt > 0 ? ` Pago por ${money(amt, cur())}${ref ? ' · Ref: ' + ref : ''}.` : ''}`;
+      const msg = `Hola ${sup.supplier}, te escribo respecto a nuestro saldo pendiente (${fmtCur(total)}).${amt > 0 ? ` Pago por ${money(amt, cur())}${ref ? ' · Ref: ' + ref : ''}.` : ''}`;
       window.open(`https://wa.me/${waDigits(sup.phone)}?text=${encodeURIComponent(msg)}`, '_blank');
     };
   }
@@ -544,18 +544,18 @@ async function supplierDebtSheet(sup) {
 // ---------- Cobro o pago de una deuda individual: queda en USD y se convierte con la tasa del día ----------
 async function debtForm(cfg) {
   const accs = await loadActiveAccounts(), bal = cfg.bal, isOut = cfg.rpc === 'registrar_pago_compra', bi = S.bimoneda !== false;
-  openSheet(cfg.title, `<form id="dF" class="stack"><p>${cfg.label}: <b>${fmt(bal)} USD</b>${bi && S.rate ? ` (${fmt(bal * S.rate)} Bs a la tasa de hoy)` : ''}<br>
+  openSheet(cfg.title, `<form id="dF" class="stack"><p>${cfg.label}: <b>${fmtCur(bal)}</b>${bi && S.rate ? ` (${fmt(bal * S.rate)} Bs a la tasa de hoy)` : ''}<br>
     ${bi ? '<span class="mut">El precio en dólares no cambia. Lo que se paga en Bs depende de la tasa del día del pago; puedes modificarla.</span>' : ''}</p>
     <label>Cuenta<select name="acc">${acctOpts(accs)}</select></label>
     <small id="dAccBal" style="display:block;margin-top:-.45rem"></small>
-    <label class="${bi ? '' : 'hidden'}">Tasa de cambio (Bs por USD)<input name="rate" type="number" step="0.0001" min="0.0001" value="${bi ? (S.rate || '') : 1}"></label>
+    <label class="${bi ? '' : 'hidden'}">Tasa de cambio (${esc(secSym())} por ${esc(curLabel())})<input name="rate" type="number" step="0.0001" min="0.0001" value="${bi ? (S.rate || '') : 1}"></label>
     <label>Método<select name="method"></select></label>
     <label>Monto<input name="amount" type="number" step="0.01" min="0.01" required></label><p class="mut" id="dEq"></p>
     <label>Referencia<input name="ref"></label><button class="btn" type="submit">${cfg.title}</button></form>`);
   const el = $('#dF').elements, curAcc = () => accs.find(a => String(a.id) === el.acc.value), cur = () => curAcc().currency;
   const eq = () => {
     const r = bi ? (+el.rate.value || 0) : 1, a = num(el.amount.value) || 0, usd = cur() === 'USD' ? a : (r ? a / r : 0);
-    $('#dEq').textContent = `Equivale a ${fmt(usd)} USD | quedaría debiendo ${fmt(Math.max(bal - usd, 0))} USD`;
+    $('#dEq').textContent = `Equivale a ${fmtCur(usd)} | quedaría debiendo ${fmtCur(Math.max(bal - usd, 0))}`;
     $('#dAccBal').innerHTML = accBalanceLine(curAcc(), a, isOut);
   };
   const full = () => { el.amount.value = (bal * (cur() === 'USD' ? 1 : (bi ? (+el.rate.value || 0) : 1))).toFixed(2); eq(); };

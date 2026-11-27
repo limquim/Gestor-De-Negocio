@@ -83,7 +83,7 @@ async function viewMarketing() {
     ['{producto}', 'Favorito'],
     ['{negocio}', 'Negocio'],
     ['{dias}', 'Días'],
-    ['{saldo}', 'Deuda USD'],
+    ['{saldo}', 'Deuda'],
     ['{saldo_bs}', 'Deuda Bs'],
     ['{total}', 'Total comprado'],
     ['{datos_pago}', 'Datos de pago']
@@ -129,7 +129,7 @@ async function viewMarketing() {
 
     <div class="card">
       <h2>Mejores clientes</h2>
-      ${top.map(c => `<div class="rl"><span>${esc(c.name)}<small class="mut" style="display:block">${c.num_ventas} ${c.num_ventas === 1 ? 'compra' : 'compras'}${c.producto_favorito ? ' · ' + esc(c.producto_favorito) : ''}</small></span><b>${fmt(c.total_usd)} USD</b></div>`).join('') || '<p class="mut">Aún no hay ventas a clientes.</p>'}
+      ${top.map(c => `<div class="rl"><span>${esc(c.name)}<small class="mut" style="display:block">${c.num_ventas} ${c.num_ventas === 1 ? 'compra' : 'compras'}${c.producto_favorito ? ' · ' + esc(c.producto_favorito) : ''}</small></span><b>${fmtCur(c.total_usd)}</b></div>`).join('') || '<p class="mut">Aún no hay ventas a clientes.</p>'}
     </div>`;
 
   $('#mkM').value = MK.msg;
@@ -154,8 +154,8 @@ async function viewMarketing() {
           <input type="checkbox" data-sel="${c.id}" ${MK.sel.has(c.id) ? 'checked' : ''} ${c.phone ? '' : 'disabled'}>
           <span>
             <b>${esc(c.name)}${sent ? ' <span class="badge ok" style="font-size:.68rem">Enviado hoy</span>' : ''}</b>
-            <small>${c.dias === null ? 'Nunca ha comprado' : 'Última compra hace ' + c.dias + ' días'} | ${c.num_ventas} compras | ${fmt(c.total_usd)} USD</small>
-            <small>${[c.producto_favorito && 'Favorito: ' + c.producto_favorito, dAmt > 0.01 && 'Debe ' + fmt(dAmt) + ' USD', !c.phone && 'Sin teléfono'].filter(Boolean).map(esc).join(' | ')}</small>
+            <small>${c.dias === null ? 'Nunca ha comprado' : 'Última compra hace ' + c.dias + ' días'} | ${c.num_ventas} compras | ${fmtCur(c.total_usd)}</small>
+            <small>${[c.producto_favorito && 'Favorito: ' + c.producto_favorito, dAmt > 0.01 && 'Debe ' + fmtCur(dAmt), !c.phone && 'Sin teléfono'].filter(Boolean).map(esc).join(' | ')}</small>
           </span>
         </label>
         ${c.phone

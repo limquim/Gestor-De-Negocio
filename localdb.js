@@ -207,6 +207,8 @@ const LDB = {
       rate_mode: bimoneda ? (opts.rateMode || 'auto') : 'manual',
       bimoneda,
       base_currency: baseCur,
+      currency_symbol: opts.baseCurrencySymbol || '$',
+      currency_display: 'prefix',
       business_profile: opts.profile || 'tienda',
       modules_config: mods,
       enable_product_photos: true,

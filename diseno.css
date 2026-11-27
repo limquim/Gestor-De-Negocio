@@ -158,3 +158,7 @@ input[type=color]{padding:.2rem;cursor:pointer}
 /* Pantalla de suscripción vencida (permite respaldo y renovación sin perder datos) */
 .lic-gate{position:fixed;inset:0;z-index:75;display:grid;place-items:center;padding:1rem;background:color-mix(in srgb,var(--bg) 94%,rgba(0,0,0,.45));backdrop-filter:blur(4px);overflow:auto}
 .lic-card{width:100%;max-width:460px;padding:1.35rem;margin:auto;box-shadow:0 16px 42px rgba(0,0,0,.22)}
+
+/* Barra seleccionada en gráficas táctiles */
+.dayb i{cursor:pointer;transition:opacity .15s,background .15s}
+.dayb i.sel{background:var(--tag)}

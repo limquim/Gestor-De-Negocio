@@ -82,15 +82,43 @@ async function viewReportes() {
     return isNaN(d.getTime()) ? s.slice(0, 10) : d.toLocaleDateString('en-CA', {timeZone: 'America/Caracas'});
   };
 
-  const [r, histBs, accs, stock, mv, allPays, set] = await Promise.all([
+  const [r, histBs, accs, stock, mv, allPays, set, catSales, prodsCat, catsList] = await Promise.all([
     q(db.rpc('reporte_resumen', {p_from: from, p_to: to})),
     calcHistoricalBs(from, to),
     q(db.from('cuentas_saldo').select('name,balance,currency').eq('active', true).order('id')),
     q(db.from('stock_actual').select('valor_usd')),
     q(db.from('account_movements').select('kind,amount,accounts(name,currency)').gte('created_at', from + 'T00:00:00-04:00').lte('created_at', to + 'T23:59:59-04:00')),
     db.from('payments').select('*').order('id', {ascending: false}).limit(800).then(x => x.error ? [] : (x.data || [])),
-    q(db.from('settings').select('business_name,business_phone').eq('id', 1).single()).catch(() => ({}))
+    q(db.from('settings').select('business_name,business_phone').eq('id', 1).single()).catch(() => ({})),
+    q(db.from('sales').select('id,subtotal_usd,discount_usd,status').gte('sale_date', from).lte('sale_date', to).neq('status', 'anulada')),
+    q(db.from('products').select('id,category_id,avg_cost_usd,manual_cost_usd')),
+    q(db.from('product_categories').select('id,name'))
   ]);
+
+  // Calcular ventas y utilidad agrupadas por categoría de producto
+  const catNameById = new Map(catsList.map(c => [Number(c.id), c.name]));
+  const prodMetaMap = new Map(prodsCat.map(p => [Number(p.id), p]));
+  const catSaleMap = new Map(catSales.map(s => [Number(s.id), s]));
+  const byCatMap = {};
+  const catSaleIds = catSales.map(s => s.id);
+  for (let i = 0; i < catSaleIds.length; i += 150) {
+    const chunk = catSaleIds.slice(i, i + 150);
+    const its = await q(db.from('sale_items').select('sale_id,product_id,quantity,unit_price_usd,unit_cost_usd').in('sale_id', chunk));
+    its.forEach(it => {
+      const s = catSaleMap.get(Number(it.sale_id));
+      const ratio = Number(s?.subtotal_usd || 0) > 0 ? Math.max(0, 1 - Number(s.discount_usd || 0) / Number(s.subtotal_usd || 1)) : 1;
+      const p = prodMetaMap.get(Number(it.product_id));
+      const cname = (p?.category_id != null && catNameById.get(Number(p.category_id))) || 'Sin categoría';
+      const qn = Number(it.quantity || 0);
+      const rev = qn * Number(it.unit_price_usd || 0) * ratio;
+      const cost = qn * Number(it.unit_cost_usd ?? p?.avg_cost_usd ?? p?.manual_cost_usd ?? 0);
+      const bucket = byCatMap[cname] || (byCatMap[cname] = {name: cname, rev: 0, gain: 0});
+      bucket.rev += rev;
+      bucket.gain += (rev - cost);
+    });
+  }
+  const byCat = Object.values(byCatMap).sort((a, b) => b.rev - a.rev);
+  const maxCat = Math.max(0, ...byCat.map(x => x.rev));
 
   // Agrupar cobros de ventas del período por método de pago (sin depender de created_at en payments)
   const rawSaleIds = [...new Set(allPays.filter(p => p.sale_id).map(p => p.sale_id))];
@@ -127,7 +155,7 @@ async function viewReportes() {
   const caja = cajaUsdReal + cajaVesInUsd;
   const inv = stock.reduce((a, x) => a + +x.valor_usd, 0);
   const fijos = r.gastos_por_tipo.filter(x => x.fijo).reduce((a, x) => a + +x.total, 0), pe = mb > 0 && fijos > 0 ? fijos / (mb / 100) : 0;
-  const U = (n) => fmt(n) + ' USD', sg = (n) => n >= 0 ? 'pos' : 'neg';
+  const U = (n) => fmtCur(n), sg = (n) => n >= 0 ? 'pos' : 'neg';
   const L = (a, b, c = '') => `<div class="rl ${c}"><span>${a}</span><b>${b}</b></div>`;
   const LB = (a, usdStr, bsVal, c = '') => `<div class="rl ${c}"><span>${a}</span><b>${usdStr}${histBs.ok ? `<small class="mut" style="display:block;font-weight:600">${fmt(bsVal)} Bs hist.</small>` : ''}</b></div>`;
 
@@ -176,12 +204,12 @@ async function viewReportes() {
     )).join('') + L('Total cobrado en el período', U(cobrosPerUsd), 'tot') : '<p class="mut">Sin cobros de ventas registrados en este período.</p>'}
   </div>
 
-  <div class="card"><h2>Dinero disponible y exposición cambiaria</h2>
+  <div class="card"><h2>Dinero disponible${S.bimoneda !== false ? ' y exposición cambiaria' : ''}</h2>
     ${L('Total consolidado hoy', U(caja), 'tot')}
-    ${L('En cuentas USD (protegido)', fmt(cajaUsdReal) + ' USD')}
-    ${L('En cuentas Bs (expuesto)', fmt(cajaVesReal) + ' Bs' + (S.rate ? ` (≈ ${fmt(cajaVesInUsd)} USD hoy)` : ''))}
-    ${posTot > 0 ? `<div class="fx-bar" title="${pctUsd}% USD / ${pctVes}% Bs"><i style="width:${pctUsd}%"></i></div>
-      <div class="title-row" style="margin:.25rem 0 .6rem"><small class="pos"><b>${pctUsd}% en USD</b></small><small class="${pctVes >= 50 ? 'warn' : 'mut'}"><b>${pctVes}% en Bs</b></small></div>` : ''}
+    ${S.bimoneda !== false ? `${L(`En cuentas ${esc(curLabel())} (protegido)`, fmtCur(cajaUsdReal))}
+    ${L(`En cuentas ${esc(secSym())} (expuesto)`, fmtSec(cajaVesReal) + (S.rate ? ` (≈ ${fmtCur(cajaVesInUsd)} hoy)` : ''))}
+    ${posTot > 0 ? `<div class="fx-bar" title="${pctUsd}% ${esc(curLabel())} / ${pctVes}% ${esc(secSym())}"><i style="width:${pctUsd}%"></i></div>
+      <div class="title-row" style="margin:.25rem 0 .6rem"><small class="pos"><b>${pctUsd}% en ${esc(curLabel())}</b></small><small class="${pctVes >= 50 ? 'warn' : 'mut'}"><b>${pctVes}% en ${esc(secSym())}</b></small></div>` : ''}` : ''}
     ${loss10 > 0.5 ? `<p class="mut" style="margin:0 0 .6rem">Si la tasa sube <b>+5%</b> tus Bs pierden <b>${U(loss5)}</b> de poder de compra; si sube <b>+10%</b> pierden <b>${U(loss10)}</b>.</p>` : ''}
     ${accs.map(a => L(esc(a.name), money(a.balance, a.currency))).join('')}
   </div>
@@ -192,15 +220,27 @@ async function viewReportes() {
     ${L('Capital del negocio', U(caja + inv + r.por_cobrar - r.por_pagar), 'tot ' + sg(caja + inv + r.por_cobrar - r.por_pagar))}</div>
   <div class="card"><h2>Gastos por tipo</h2>${r.gastos_por_tipo.map(x => B(x.tipo + (x.fijo ? ' (fijo)' : ''), +x.total, maxG, U(+x.total))).join('') || '<p class="mut">Sin gastos en este período.</p>'}
     ${pe ? `<p class="mut">Punto de equilibrio: para cubrir tus gastos fijos (${U(fijos)}) con tu margen de ${fmt(mb, 0)}% necesitas vender unos <b>${U(pe)}</b> en este período.</p>` : ''}</div>
-  <div class="card"><h2>Más vendidos</h2>${r.top_productos.map(x => B(x.name, +x.ingreso, maxP, U(+x.ingreso) + ' | gana ' + fmt(x.utilidad))).join('') || '<p class="mut">Sin ventas en este período.</p>'}</div>
-  <div class="card"><h2>Ventas por día</h2>${r.por_dia.length ? `<div class="dayb">${r.por_dia.map(x => `<i style="height:${Math.max(3, +x.total / maxD * 100)}%" title="${x.dia}: ${fmt(x.total)} USD"></i>`).join('')}</div>
-    <p class="mut">${r.por_dia[0].dia} a ${r.por_dia[r.por_dia.length - 1].dia}. Toca una barra para ver el valor.</p>` : '<p class="mut">Sin ventas en este período.</p>'}</div>`;
+  <div class="card"><h2>Rentabilidad por categoría</h2>${byCat.map(x => {
+    const mgC = x.rev > 0 ? Math.round(x.gain / x.rev * 100) : 0;
+    return B(x.name, x.rev, maxCat, `${U(x.rev)} · gana ${U(x.gain)} (${mgC}%)`);
+  }).join('') || '<p class="mut">Sin ventas en este período.</p>'}</div>
+  <div class="card"><h2>Más vendidos</h2>${r.top_productos.map(x => B(x.name, +x.ingreso, maxP, U(+x.ingreso) + ' | gana ' + U(x.utilidad))).join('') || '<p class="mut">Sin ventas en este período.</p>'}</div>
+  <div class="card"><h2>Ventas por día</h2>${r.por_dia.length ? `<div class="dayb" id="rpDayChart">${r.por_dia.map(x => `<i data-day="${x.dia}" data-val="${x.total}" style="height:${Math.max(3, +x.total / maxD * 100)}%" title="${dmy(x.dia)}: ${fmtCur(x.total)}"></i>`).join('')}</div>
+    <p class="mut" id="rpDayInfo">${dmy(r.por_dia[0].dia)} a ${dmy(r.por_dia[r.por_dia.length - 1].dia)} · Toca una barra para ver el detalle.</p>` : '<p class="mut">Sin ventas en este período.</p>'}</div>`;
 
   $('#rpR').onclick = (e) => { const b = e.target.closest('button'); if (b) { RP.k = b.dataset.k; render(); } };
+  if ($('#rpDayChart')) {
+    $('#rpDayChart').onclick = (e) => {
+      const b = e.target.closest('i[data-day]'); if (!b) return;
+      $('#rpDayChart').querySelectorAll('i').forEach(x => x.classList.toggle('sel', x === b));
+      const v = Number(b.dataset.val || 0);
+      $('#rpDayInfo').innerHTML = `<b>${dmy(b.dataset.day)}</b>: <b>${U(v)}</b>${S.bimoneda !== false && S.rate ? ' (' + fmtSec(v * S.rate) + ')' : ''}`;
+    };
+  }
   $('#rpWa').onclick = () => {
     const lines = [
       `*ESTADO DE RESULTADOS — ${String(set?.business_name || 'Mi negocio').toUpperCase()}*`,
-      `Período: ${dmy(from)} al ${dmy(to)}${S.rate ? ' | Tasa hoy: ' + fmt(S.rate, 4) + ' Bs/USD' : ''}`,
+      `Período: ${dmy(from)} al ${dmy(to)}${S.rate ? ' | Tasa hoy: ' + fmt(S.rate, 4) + ' ' + secSym() + '/' + curLabel() : ''}`,
       '',
       `• Ingresos (sin IVA): ${U(r.ingresos)}${histBs.ok ? ` (${fmt(histBs.ingresosBs)} Bs hist.)` : ''}`,
       `• Costo vendido: -${U(r.costo_ventas)}`,
@@ -209,7 +249,7 @@ async function viewReportes() {
       `*• Utilidad neta: ${U(neta)}*${histBs.ok ? ` (${fmt(histBs.netaBs)} Bs hist.)` : ''}`,
       '',
       '*POSICIÓN HOY*',
-      `• En USD: ${fmt(cajaUsdReal)} USD | En Bs: ${fmt(cajaVesReal)} Bs (${pctUsd}% USD / ${pctVes}% Bs)`,
+      S.bimoneda !== false ? `• En ${curLabel()}: ${fmtCur(cajaUsdReal)} | En ${secSym()}: ${fmtSec(cajaVesReal)} (${pctUsd}% ${curLabel()} / ${pctVes}% ${secSym()})` : `• En caja/bancos: ${fmtCur(caja)}`,
       `• Inventario: ${U(inv)} | Por cobrar: ${U(r.por_cobrar)} | Por pagar: ${U(r.por_pagar)}`,
       `• Capital del negocio: ${U(caja + inv + r.por_cobrar - r.por_pagar)}`
     ];
@@ -217,13 +257,13 @@ async function viewReportes() {
   };
   $('#rpCsv').onclick = () => run(async () => {
     const rows = await q(db.from('ventas_resumen').select('id,sale_date,doc_type,status,customer,total_usd,exchange_rate,paid_usd').gte('sale_date', from).lte('sale_date', to).order('id'));
-    const csv = ['Nro,Fecha,Documento,Estado,Cliente,Total USD,Tasa,Total Bs Historico,Pagado USD', ...rows.map(x => [x.id, x.sale_date, x.doc_type, x.status, '"' + (x.customer || 'Cliente general').replace(/"/g, '""') + '"', x.total_usd, x.exchange_rate, (x.total_usd * x.exchange_rate).toFixed(2), x.paid_usd].join(','))].join('\n');
+    const csv = [`Nro,Fecha,Documento,Estado,Cliente,Total ${curCode()},Tasa,Total ${secSym()} Historico,Pagado ${curCode()}`,  ...rows.map(x => [x.id, x.sale_date, x.doc_type, x.status, '"' + (x.customer || 'Cliente general').replace(/"/g, '""') + '"', x.total_usd, x.exchange_rate, (x.total_usd * x.exchange_rate).toFixed(2), x.paid_usd].join(','))].join('\n');
     downloadBlob(new Blob(['\ufeff' + csv], {type: 'text/csv;charset=utf-8'}), `ventas_${from}_${to}.csv`);
   });
   $('#rpProdCsv').onclick = () => {
     const rows = r.top_productos || [];
     if (!rows.length) return toast('No hay productos vendidos en este período', true);
-    const csv = ['Producto,Ingreso USD,Utilidad USD,Margen %', ...rows.map(x => {
+    const csv = [`Producto,Ingreso ${curCode()},Utilidad ${curCode()},Margen %`, ...rows.map(x => {
       const ing = Number(x.ingreso || 0), ut = Number(x.utilidad || 0), mg = ing > 0 ? (ut / ing * 100) : 0;
       return ['"' + String(x.name || '').replace(/"/g, '""') + '"', ing.toFixed(2), ut.toFixed(2), mg.toFixed(1)].join(',');
     })].join('\n');

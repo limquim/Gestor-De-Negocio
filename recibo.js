@@ -137,7 +137,7 @@ function docText(doc, set) {
 
   o.push(ln);
   const mult = priceOnlyBs ? doc.rate : 1;
-  const cLabel = priceOnlyBs ? 'Bs' : 'USD';
+  const cLabel = priceOnlyBs ? secSym() : curLabel();
   if (cfg.show_unit_price !== false) {
     o.push(two(`Subtotal ${cLabel}`, fmt(doc.subtotal * mult)));
     if (+doc.discount) o.push(two('Descuento', '-' + fmt(doc.discount * mult)));
@@ -145,22 +145,22 @@ function docText(doc, set) {
   }
 
   if (cfg.currency_mode === 'bs_first' && showBs) {
-    o.push(two('TOTAL Bs', fmt(doc.total * doc.rate)));
-    if (showUsd) o.push(two('TOTAL USD', fmt(doc.total)));
+    o.push(two('TOTAL ' + secSym(), fmtSec(doc.total * doc.rate)));
+    if (showUsd) o.push(two('TOTAL ' + curLabel(), fmtCur(doc.total)));
   } else {
-    if (showUsd) o.push(two('TOTAL USD', fmt(doc.total)));
-    if (showBs) o.push(two('TOTAL Bs', fmt(doc.total * doc.rate)));
+    if (showUsd) o.push(two('TOTAL ' + curLabel(), fmtCur(doc.total)));
+    if (showBs) o.push(two('TOTAL ' + secSym(), fmtSec(doc.total * doc.rate)));
   }
-  if (set.ticket_show_rate && doc.rate > 0) o.push('Tasa: ' + fmt(doc.rate, 4) + ' Bs/USD');
+  if (set.ticket_show_rate && doc.rate > 0) o.push('Tasa: ' + fmt(doc.rate, 4) + ' ' + secSym() + '/' + curLabel());
 
   if (set.ticket_show_payments !== false && (doc.pays.length || doc.balance > 0.01)) {
     if (doc.pays.length) {
       o.push(ln, 'PAGOS');
-      doc.pays.forEach(p => o.push(two(p.label, fmt(p.amount) + ' ' + (p.cur === 'USD' ? 'USD' : 'Bs'))));
+      doc.pays.forEach(p => o.push(two(p.label, p.cur === 'VES' ? fmtSec(p.amount) : fmtCur(p.amount))));
     }
     if (doc.balance > 0.01) {
-      o.push(two('POR PAGAR USD', fmt(doc.balance)));
-      if (showBs) o.push(two('POR PAGAR Bs', fmt(doc.balance * doc.rate)));
+      o.push(two('POR PAGAR', fmtCur(doc.balance)));
+      if (showBs) o.push(two('POR PAGAR ' + secSym(), fmtSec(doc.balance * doc.rate)));
     }
   }
 
@@ -320,7 +320,7 @@ async function receiptBlob(doc, set) {
     y += 36;
 
     const mult = priceOnlyBs ? doc.rate : 1;
-    const cLabel = priceOnlyBs ? 'Bs' : 'USD';
+    const cLabel = priceOnlyBs ? secSym() : curLabel();
     doc.items.forEach(i => {
       const nm = (cfg.show_sku && i.sku ? `[${i.sku}] ` : '') + i.name;
       const L = wrap(nm, descW, fs(17), 600);
@@ -335,11 +335,12 @@ async function receiptBlob(doc, set) {
 
     // 5. Subtotales
     const row = (l, v, col = mut) => { y += fs(28); T(l, W - P - 270, y, fs(16), 400, col); T(v, ct, y, fs(16), 600, col === mut ? ink : col, 'right'); };
+    const fmtLineC = (v) => priceOnlyBs ? fmtSec(v) : fmtCur(v);
     if (cfg.show_unit_price !== false) {
       y += 6;
-      row('Subtotal', fmt(doc.subtotal * mult) + ' ' + cLabel);
-      if (doc.discount) row('Descuento', '-' + fmt(doc.discount * mult) + ' ' + cLabel, '#b4381a');
-      if (doc.tax) row(doc.ivaPct ? `IVA (${qty(doc.ivaPct)}%)` : 'IVA', fmt(doc.tax * mult) + ' ' + cLabel);
+      row('Subtotal', fmtLineC(doc.subtotal * mult));
+      if (doc.discount) row('Descuento', '-' + fmtLineC(doc.discount * mult), '#b4381a');
+      if (doc.tax) row(doc.ivaPct ? `IVA (${qty(doc.ivaPct)}%)` : 'IVA', fmtLineC(doc.tax * mult));
     }
 
     // 6. Total principal (respetando moneda y estilo)
@@ -354,10 +355,10 @@ async function receiptBlob(doc, set) {
       R(P - 12, y, W - P * 2 + 24, bh, 20, acc);
     }
     const primaryTxt = cfg.currency_mode === 'bs_first' && showBs
-      ? (fmt(doc.total * doc.rate) + ' Bs')
-      : (showUsd ? fmt(doc.total) + ' USD' : fmt(doc.total * doc.rate) + ' Bs');
+      ? fmtSec(doc.total * doc.rate)
+      : (showUsd ? fmtCur(doc.total) : fmtSec(doc.total * doc.rate));
     const secondaryTxt = twoCur
-      ? (cfg.currency_mode === 'bs_first' ? (fmt(doc.total) + ' USD') : (fmt(doc.total * doc.rate) + ' Bs'))
+      ? (cfg.currency_mode === 'bs_first' ? fmtCur(doc.total) : fmtSec(doc.total * doc.rate))
       : '';
     const totTitleCol = minimal ? acc : 'rgba(255,255,255,.85)';
     const totMainCol = minimal ? ink : '#fff';
@@ -367,7 +368,7 @@ async function receiptBlob(doc, set) {
     T(doc.quote ? 'TOTAL' : 'TOTAL A PAGAR', P + 10, y + 40, fs(15), 700, totTitleCol);
     T(primaryTxt, ct - 8, y + 48, fs(36), 800, totMainCol, 'right');
     if (secondaryTxt) T(secondaryTxt, ct - 8, y + 80, fs(20), 600, totSubCol, 'right');
-    if (showRateLine) T('Tasa: ' + fmt(doc.rate, 4) + ' Bs/USD', ct - 8, y + (secondaryTxt ? 104 : 80), fs(14), 400, totRateCol, 'right');
+    if (showRateLine) T('Tasa: ' + fmt(doc.rate, 4) + ' ' + secSym() + '/' + curLabel(), ct - 8, y + (secondaryTxt ? 104 : 80), fs(14), 400, totRateCol, 'right');
     y += bh;
 
     // 7. Pagos y saldo pendiente
@@ -376,12 +377,12 @@ async function receiptBlob(doc, set) {
       doc.pays.forEach(p => {
         y += fs(28);
         T(p.label, P, y, fs(16), 400, ink);
-        T(fmt(p.amount) + (p.cur === 'USD' ? ' USD' : ' Bs'), ct, y, fs(16), 600, ink, 'right');
+        T(p.cur === 'VES' ? fmtSec(p.amount) : fmtCur(p.amount), ct, y, fs(16), 600, ink, 'right');
       });
       if (doc.balance) {
         y += fs(32);
         T('Pendiente por pagar', P, y, fs(17), 800, '#8a5a00');
-        T(fmt(doc.balance) + ' USD' + (showBs ? ` (${fmt(doc.balance * doc.rate)} Bs)` : ''), ct, y, fs(17), 800, '#8a5a00', 'right');
+        T(fmtCur(doc.balance) + (showBs ? ` (${fmt(doc.balance * doc.rate)} Bs)` : ''), ct, y, fs(17), 800, '#8a5a00', 'right');
       }
     }
 
@@ -504,7 +505,7 @@ async function prodOrderBlob(doc, set, showCosts = false) {
     T('Ingrediente / Material', P + 26, y + 24, 14, 700, acc);
     T('Teórico', cPlan, y + 24, 14, 700, acc, 'right');
     T('Usado', cAct, y + 24, 14, 700, acc, 'right');
-    if (showCosts) T('Costo USD', cCost, y + 24, 14, 700, acc, 'right');
+    if (showCosts) T('Costo ' + curLabel(), cCost, y + 24, 14, 700, acc, 'right');
     y += 36;
 
     doc.items.forEach(it => {
@@ -525,8 +526,8 @@ async function prodOrderBlob(doc, set, showCosts = false) {
       y += 24;
       R(P - 12, y, W - P * 2 + 24, 68, 16, acc);
       T('COSTO TOTAL DEL LOTE', P + 8, y + 32, 13, 700, 'rgba(255,255,255,.85)');
-      T(`Costo por ${doc.unit}: ${fmt(doc.unitCostUsd)} USD`, P + 8, y + 54, 15, 600, '#fff');
-      T(fmt(doc.totalCostUsd) + ' USD', W - P - 8, y + 46, 30, 800, '#fff', 'right');
+      T(`Costo por ${doc.unit}: ${fmtCur(doc.unitCostUsd)}`, P + 8, y + 54, 15, 600, '#fff');
+      T(fmtCur(doc.totalCostUsd), W - P - 8, y + 46, 30, 800, '#fff', 'right');
       y += 68;
     }
 
@@ -578,13 +579,13 @@ function paymentReceiptText(doc, set) {
     ln,
     doc.concept || 'Abono a cuenta pendiente',
     ln,
-    two('Saldo anterior', fmt(doc.prevBalanceUsd) + ' USD'),
-    two('Monto abonado', fmt(doc.paidUsd) + ' USD'),
+    two('Saldo anterior', fmtCur(doc.prevBalanceUsd)),
+    two('Monto abonado', fmtCur(doc.paidUsd)),
     doc.paidCur === 'VES' ? two('Recibido en Bs', fmt(doc.paidOrig) + ' Bs') : '',
     doc.methodLabel ? two('Método', doc.methodLabel) : '',
     doc.reference ? 'Ref: ' + doc.reference : '',
     ln,
-    two(fullPaid ? 'SALDO PENDIENTE' : 'RESTA POR PAGAR', fmt(Math.max(0, doc.remainingUsd)) + ' USD'),
+    two(fullPaid ? 'SALDO PENDIENTE' : 'RESTA POR PAGAR', fmtCur(Math.max(0, doc.remainingUsd))),
     !fullPaid && showBs ? two('Equiv. en Bs', fmt(Math.max(0, doc.remainingUsd) * doc.rate) + ' Bs') : '',
     fullPaid ? '¡Cuenta pagada en su totalidad!' : '',
     set?.ticket_footer ? ln : '',
@@ -672,7 +673,7 @@ async function paymentReceiptBlob(doc, set) {
     const bh = paidBs ? 104 : 76;
     R(P - 10, y, W - P * 2 + 20, bh, 18, acc);
     T('MONTO ABONADO', P + 10, y + 36, 14, 700, 'rgba(255,255,255,.86)');
-    T(fmt(doc.paidUsd) + ' USD', W - P - 10, y + 48, 36, 800, '#fff', 'right');
+    T(fmtCur(doc.paidUsd), W - P - 10, y + 48, 36, 800, '#fff', 'right');
     if (paidBs) T(paidBs + (doc.rate > 0 ? `  (Tasa: ${fmt(doc.rate, 2)})` : ''), W - P - 10, y + 82, 18, 600, 'rgba(255,255,255,.92)', 'right');
     y += bh;
 
@@ -685,8 +686,8 @@ async function paymentReceiptBlob(doc, set) {
       if (!dry) { g.fillStyle = line; g.fillRect(P, y, W - P * 2, 1); }
     };
     y += 10;
-    row('Saldo anterior', fmt(doc.prevBalanceUsd) + ' USD');
-    row('Monto abonado', '-' + fmt(doc.paidUsd) + ' USD', '#1b7f4b', 700);
+    row('Saldo anterior', fmtCur(doc.prevBalanceUsd));
+    row('Monto abonado', '-' + fmtCur(doc.paidUsd), '#1b7f4b', 700);
     if (doc.methodLabel) row('Método de pago', doc.methodLabel + (doc.accountName ? ' (' + doc.accountName + ')' : ''));
     if (doc.reference) row('Referencia', doc.reference);
 
@@ -696,7 +697,7 @@ async function paymentReceiptBlob(doc, set) {
     R(P - 10, y, W - P * 2 + 20, remBoxH, 14, fullPaid ? '#e3f5ea' : '#fff2cc');
     B(P - 10, y, W - P * 2 + 20, remBoxH, 14, fullPaid ? '#1b7f4b' : '#c48a00', 1.5);
     T(fullPaid ? 'CUENTA SALDADA' : 'SALDO RESTANTE', P + 8, y + 35, 15, 800, fullPaid ? '#1b7f4b' : '#8a5a00');
-    T(fmt(rem) + ' USD', W - P - 8, y + 37, 24, 800, fullPaid ? '#1b7f4b' : '#8a5a00', 'right');
+    T(fmtCur(rem), W - P - 8, y + 37, 24, 800, fullPaid ? '#1b7f4b' : '#8a5a00', 'right');
     if (!fullPaid && showBs) T(`≈ ${fmt(rem * doc.rate)} Bs a la tasa de hoy`, W - P - 8, y + 60, 14, 600, '#8a5a00', 'right');
     y += remBoxH;
 

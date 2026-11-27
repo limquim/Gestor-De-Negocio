@@ -57,12 +57,12 @@ function addDaysISO(dateStr, days) {
 
 function shareExecutiveSummaryWhatsApp(info) {
   const rate = S.rate || 0;
-  const U = (n) => fmt(n) + ' USD';
+  const U = (n) => fmtCur(n);
   const goal = Number(S.rules?.monthly_sales_goal_usd || 0);
   const pct = goal > 0 ? Math.round((info.mesIngresos / goal) * 100) : null;
   const lines = [
     `*RESUMEN DEL DÍA — ${String(info.business || 'Mi negocio').toUpperCase()}*`,
-    `Fecha: ${dmy(info.hoy)}${rate ? ` | Tasa: ${fmt(rate, 4)} Bs/USD` : ''}`,
+    `Fecha: ${dmy(info.hoy)}${rate ? ` | Tasa: ${fmt(rate, 4)} ${secSym()}/${curLabel()}` : ''}`,
     '',
     '*HOY*',
     `• Vendido: ${U(info.hoyIngresos)} (${info.hoyVentas} ${info.hoyVentas === 1 ? 'venta' : 'ventas'})${rate ? ' · ' + fmt(info.hoyIngresos * rate) + ' Bs' : ''}`,
@@ -74,7 +74,7 @@ function shareExecutiveSummaryWhatsApp(info) {
     `• Ganancia neta del mes: ${U(info.mesNeta)}${info.mesNetaBs != null ? ' (' + fmt(info.mesNetaBs) + ' Bs hist.)' : ''}`,
     '',
     '*DINERO E INVENTARIO*',
-    `• Disponible en cuentas: ${U(info.caja)}${info.cajaUsdReal != null ? ` (${fmt(info.cajaUsdReal)} USD + ${fmt(info.cajaVesReal)} Bs)` : (rate ? ' (' + fmt(info.caja * rate) + ' Bs)' : '')}`,
+    `• Disponible en cuentas: ${U(info.caja)}${info.cajaUsdReal != null ? ` (${fmtCur(info.cajaUsdReal)} + ${fmt(info.cajaVesReal)} Bs)` : (rate ? ' (' + fmt(info.caja * rate) + ' Bs)' : '')}`,
     `• Por cobrar: ${U(info.porCobrar)}`,
     `• Por pagar: ${U(info.porPagar)}`,
     `• Valor de inventario: ${U(info.inv)}${info.bajos ? ` (${info.bajos} por reponer)` : ''}`,
@@ -94,7 +94,7 @@ async function viewReglasYMetas() {
         <h2>Metas y Rentabilidad</h2>
         <p class="mut" style="margin:0">Define objetivos claros para medir el avance de tu negocio desde el Panel del Dueño y calcular precios sugeridos automáticamente.</p>
         <div class="grid">
-          <label>Meta mensual de ventas (USD)
+          <label>Meta mensual de ventas (${esc(curLabel())})
             <input name="monthly_sales_goal_usd" type="number" step="0.01" min="0" value="${r.monthly_sales_goal_usd}" placeholder="Ej: 3000">
           </label>
           <label>Margen mínimo objetivo (%)
@@ -257,7 +257,7 @@ async function viewConfiguracion() {
   const activeModCnt = MOD_CATALOG.filter(m => hasMod(m.k)).length;
 
   const activeControls = [
-    r.monthly_sales_goal_usd > 0 ? 'Meta: ' + fmt(r.monthly_sales_goal_usd, 0) + ' USD' : '',
+    r.monthly_sales_goal_usd > 0 ? 'Meta: ' + fmtCur(r.monthly_sales_goal_usd, 0) : '',
     r.block_negative_stock ? 'Stock estricto' : '',
     r.max_discount_percent > 0 ? 'Desc. máx ' + qty(r.max_discount_percent) + '%' : ''
   ].filter(Boolean);

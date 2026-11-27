@@ -9,8 +9,8 @@ const DIRS = {
   empleados: {label: 'Empleados', desc: 'Personal activo, cargos, frecuencia y sueldo base', table: 'employees', order: 'name', fields: [
     {k: 'name', l: 'Nombre completo', req: 1}, {k: 'id_number', l: 'Cédula'}, {k: 'phone', l: 'Teléfono (WhatsApp)', type: 'tel'},
     {k: 'position', l: 'Cargo'}, {k: 'pay_type', l: 'Cada cuánto se le paga', type: 'select', opts: {semanal: 'Semanal', quincenal: 'Quincenal', mensual: 'Mensual'}},
-    {k: 'salary_usd', l: 'Sueldo por período en USD', type: 'number', req: 1}, {k: 'hire_date', l: 'Fecha de ingreso', type: 'date'}],
-    title: r => r.name, sub: r => [r.position, r.pay_type, fmt(r.salary_usd) + ' USD'].filter(Boolean).join(' | ')},
+    {k: 'salary_usd', l: 'Sueldo por período', type: 'number', req: 1}, {k: 'hire_date', l: 'Fecha de ingreso', type: 'date'}],
+    title: r => r.name, sub: r => [r.position, r.pay_type, fmtCur(r.salary_usd)].filter(Boolean).join(' | ')},
   usuarios: {label: 'Usuarios y roles', desc: 'Accesos y permisos de administrador, vendedor, almacén y contador', table: 'profiles', order: 'created_at', all: 1, noAdd: 1, noDel: 1, fields: [
     {k: 'full_name', l: 'Nombre', req: 1}, {k: 'role', l: 'Rol', type: 'select', opts: ROLES}, {k: 'active', l: 'Usuario activo', type: 'check'}],
     title: r => r.full_name || 'Sin nombre', sub: r => ROLES[r.role] + (r.active ? '' : ' | inactivo')},
@@ -189,8 +189,8 @@ async function viewDir(key) {
       const dm = isParties ? debtMap[r.id] : null;
       const right = dm && (dm.cxc || dm.cxp)
         ? `<span class="n" style="flex:none">
-            ${dm.cxc ? `<b class="warn">Te debe ${fmt(dm.cxc)}</b>` : ''}
-            ${dm.cxp ? `<small class="bad" style="display:block">Debes ${fmt(dm.cxp)}</small>` : ''}
+            ${dm.cxc ? `<b class="warn">Te debe ${fmtCur(dm.cxc)}</b>` : ''}
+            ${dm.cxp ? `<small class="bad" style="display:block">Debes ${fmtCur(dm.cxp)}</small>` : ''}
           </span>`
         : '<span class="mut">&rsaquo;</span>';
       return `<button class="item" data-id="${r.id}"><span><b>${esc(c.title(r))}</b><small>${esc(c.sub(r))}</small></span>${right}</button>`;
@@ -250,26 +250,26 @@ async function partySheet(p, dirCfg) {
 
       ${p.is_customer ? `<div class="card" style="background:var(--bg);margin:0">
         <h2 style="font-size:.98rem">Cuenta como cliente</h2>
-        <div class="rl"><span>Ventas registradas</span><b>${actSales.length} (${fmt(totSold)} USD)</b></div>
-        <div class="rl tot ${cxc > 0.01 ? 'neg' : 'pos'}"><span>Por cobrar</span><b>${fmt(cxc)} USD${S.rate && cxc > 0.01 ? ' (' + fmt(cxc * S.rate) + ' Bs)' : ''}</b></div>
+        <div class="rl"><span>Ventas registradas</span><b>${actSales.length} (${fmtCur(totSold)})</b></div>
+        <div class="rl tot ${cxc > 0.01 ? 'neg' : 'pos'}"><span>Por cobrar</span><b>${fmtCur(cxc)}${S.rate && cxc > 0.01 ? ' (' + fmtSec(cxc * S.rate) + ')' : ''}</b></div>
         ${actSales.length ? `<div class="list" id="psSales" style="margin-top:.6rem">${actSales.slice(0, 8).map(s => {
           const bal = Math.max(0, Number(s.total_usd) - Number(s.paid_usd));
           return `<button type="button" class="item" data-sid="${s.id}">
             <span><b>Venta #${s.id}</b><small>${dmy(s.sale_date)}${s.due_date && bal > 0.01 ? ' · vence ' + dmy(s.due_date) : ''}</small></span>
-            <span class="n"><b>${bal > 0.01 ? 'Debe ' + fmt(bal) : fmt(s.total_usd)} USD</b><small class="${bal > 0.01 ? 'warn' : 'in'}">${bal > 0.01 ? 'Pendiente' : 'Pagada'}</small></span>
+            <span class="n"><b>${bal > 0.01 ? 'Debe ' + fmtCur(bal) : fmtCur(s.total_usd)}</b><small class="${bal > 0.01 ? 'warn' : 'in'}">${bal > 0.01 ? 'Pendiente' : 'Pagada'}</small></span>
           </button>`;
         }).join('')}</div>` : '<p class="mut" style="margin:.5rem 0 0">Sin ventas registradas aún.</p>'}
       </div>` : ''}
 
       ${p.is_supplier ? `<div class="card" style="background:var(--bg);margin:0">
         <h2 style="font-size:.98rem">Cuenta como proveedor</h2>
-        <div class="rl"><span>Compras registradas</span><b>${actPurs.length} (${fmt(totBought)} USD)</b></div>
-        <div class="rl tot ${cxp > 0.01 ? 'neg' : 'pos'}"><span>Por pagar</span><b>${fmt(cxp)} USD${S.rate && cxp > 0.01 ? ' (' + fmt(cxp * S.rate) + ' Bs)' : ''}</b></div>
+        <div class="rl"><span>Compras registradas</span><b>${actPurs.length} (${fmtCur(totBought)})</b></div>
+        <div class="rl tot ${cxp > 0.01 ? 'neg' : 'pos'}"><span>Por pagar</span><b>${fmtCur(cxp)}${S.rate && cxp > 0.01 ? ' (' + fmtSec(cxp * S.rate) + ')' : ''}</b></div>
         ${actPurs.length ? `<div class="list" id="psPurs" style="margin-top:.6rem">${actPurs.slice(0, 8).map(x => {
           const bal = Math.max(0, Number(x.total_usd) - Number(x.paid_usd));
           return `<button type="button" class="item" data-pid="${x.id}">
             <span><b>Compra #${x.id}</b><small>${dmy(x.purchase_date)}${x.due_date && bal > 0.01 ? ' · vence ' + dmy(x.due_date) : ''}</small></span>
-            <span class="n"><b>${bal > 0.01 ? 'Debes ' + fmt(bal) : fmt(x.total_usd)} USD</b><small class="${bal > 0.01 ? 'warn' : 'in'}">${bal > 0.01 ? 'Por pagar' : 'Pagada'}</small></span>
+            <span class="n"><b>${bal > 0.01 ? 'Debes ' + fmtCur(bal) : fmtCur(x.total_usd)}</b><small class="${bal > 0.01 ? 'warn' : 'in'}">${bal > 0.01 ? 'Por pagar' : 'Pagada'}</small></span>
           </button>`;
         }).join('')}</div>` : '<p class="mut" style="margin:.5rem 0 0">Sin compras registradas aún.</p>'}
       </div>` : ''}
@@ -281,22 +281,22 @@ async function partySheet(p, dirCfg) {
   if ($('#psStmt')) {
     $('#psStmt').onclick = () => {
       const bName = String(set?.business_name || 'Mi negocio').toUpperCase();
-      const lines = [`*ESTADO DE CUENTA — ${bName}*`, `Contacto: ${p.name}`, `Fecha: ${dmy(caracasDate())}${S.rate ? ' | Tasa: ' + fmt(S.rate, 4) + ' Bs/USD' : ''}`, ''];
+      const lines = [`*ESTADO DE CUENTA — ${bName}*`, `Contacto: ${p.name}`, `Fecha: ${dmy(caracasDate())}${S.rate ? ' | Tasa: ' + fmt(S.rate, 4) + ' ' + secSym() + '/' + curLabel() : ''}`, ''];
       if (cxc > 0.01) {
         lines.push('*Ventas pendientes por pagar:*');
         pendSales.forEach(s => {
           const bal = Math.max(0, Number(s.total_usd) - Number(s.paid_usd));
-          lines.push(`• Venta #${s.id} (${dmy(s.sale_date)}): ${fmt(bal)} USD${s.due_date ? ' [vence ' + dmy(s.due_date) + ']' : ''}`);
+          lines.push(`• Venta #${s.id} (${dmy(s.sale_date)}): ${fmtCur(bal)}${s.due_date ? ' [vence ' + dmy(s.due_date) + ']' : ''}`);
         });
-        lines.push(`*Total pendiente: ${fmt(cxc)} USD*${S.rate ? ' (' + fmt(cxc * S.rate) + ' Bs hoy)' : ''}`);
+        lines.push(`*Total pendiente: ${fmtCur(cxc)}*${S.rate ? ' (' + fmtSec(cxc * S.rate) + ' hoy)' : ''}`);
         if (payTxt) lines.push('', payTxt);
       } else if (cxp > 0.01) {
         lines.push('*Facturas / Compras pendientes de pago:*');
         pendPurs.forEach(x => {
           const bal = Math.max(0, Number(x.total_usd) - Number(x.paid_usd));
-          lines.push(`• Compra #${x.id} (${dmy(x.purchase_date)}): ${fmt(bal)} USD${x.due_date ? ' [vence ' + dmy(x.due_date) + ']' : ''}`);
+          lines.push(`• Compra #${x.id} (${dmy(x.purchase_date)}): ${fmtCur(bal)}${x.due_date ? ' [vence ' + dmy(x.due_date) + ']' : ''}`);
         });
-        lines.push(`*Total por pagar: ${fmt(cxp)} USD*${S.rate ? ' (' + fmt(cxp * S.rate) + ' Bs hoy)' : ''}`);
+        lines.push(`*Total por pagar: ${fmtCur(cxp)}*${S.rate ? ' (' + fmtSec(cxp * S.rate) + ' hoy)' : ''}`);
       }
       window.open(`https://wa.me/${waDigits(p.phone || '')}?text=${encodeURIComponent(lines.join('\n'))}`, '_blank');
     };
@@ -350,6 +350,7 @@ async function dirForm(c, row) {
         }
       }
       if (c.table === 'payment_methods') await loadMethods();
+      if (c.table === 'currencies' && typeof loadModulesConfig === 'function') await loadModulesConfig();
       closeSheet(); toast('Guardado'); render();
     });
   };
@@ -427,10 +428,10 @@ async function viewSettings(kind) {
         <div class="grid">
           <label>Moneda en el ticket
             <select name="currency_mode">
-              <option value="both" ${cfg.currency_mode === 'both' ? 'selected' : ''}>USD arriba y Bs abajo</option>
-              <option value="bs_first" ${cfg.currency_mode === 'bs_first' ? 'selected' : ''}>Bs arriba y USD abajo</option>
-              <option value="usd" ${cfg.currency_mode === 'usd' ? 'selected' : ''}>Solo dólares (USD)</option>
-              <option value="bs" ${cfg.currency_mode === 'bs' ? 'selected' : ''}>Solo bolívares (Bs)</option>
+              <option value="both" ${cfg.currency_mode === 'both' ? 'selected' : ''}>${esc(curLabel())} arriba y ${esc(secSym())} abajo</option>
+              <option value="bs_first" ${cfg.currency_mode === 'bs_first' ? 'selected' : ''}>${esc(secSym())} arriba y ${esc(curLabel())} abajo</option>
+              <option value="usd" ${cfg.currency_mode === 'usd' ? 'selected' : ''}>Solo moneda principal (${esc(curLabel())})</option>
+              <option value="bs" ${cfg.currency_mode === 'bs' ? 'selected' : ''}>Solo bolívares (${esc(secSym())})</option>
             </select>
           </label>
           <label>Tamaño de texto

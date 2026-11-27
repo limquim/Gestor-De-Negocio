@@ -16,7 +16,7 @@ async function viewCotizaciones() {
   $('#view').innerHTML = `<div class="list" id="qL">${rows.map(r => {
     const venc = r.status === 'abierta' && r.valid_until && r.valid_until < hoy;
     return `<button class="item" data-id="${r.id}"><span><b>#${r.id} ${esc(r.parties?.name || 'Cliente general')}</b>
-      <small>${r.quote_date}${r.valid_until ? ' | válida hasta ' + r.valid_until : ''}</small><small>${fmt(r.total_usd)} USD (${fmt(r.total_usd * r.exchange_rate)} Bs)</small></span>
+      <small>${r.quote_date}${r.valid_until ? ' | válida hasta ' + r.valid_until : ''}</small><small>${fmtCur(r.total_usd)} (${fmt(r.total_usd * r.exchange_rate)} Bs)</small></span>
       <span class="badge ${r.status === 'convertida' ? 'ok' : r.status === 'abierta' && !venc ? 'low' : 'out'}">${venc ? 'Vencida' : ST[r.status]}</span></button>`;
   }).join('') || '<p class="mut">Aún no hay cotizaciones. Pulsa + para crear la primera.</p>'}</div>
   <button class="fab" id="qAdd" aria-label="Nueva cotización">+</button>`;
@@ -64,8 +64,8 @@ async function quoteForm(id) {
         <input name="iva_pct" type="number" step="0.5" min="0" max="100" value="${D.defIva}" style="width:4.8rem;min-height:36px;margin:0;padding:.25rem .45rem;text-align:right">
       </label>
     </div>
-    <div class="grid"><label class="${S.bimoneda === false ? 'hidden' : ''}">Tasa (Bs por USD)<input name="rate" type="number" step="0.0001" min="0.0001" ${S.bimoneda === false ? '' : 'required'}></label>
-      <label>Descuento (USD)<input name="disc" type="number" step="0.01" min="0" value="0"></label><label>Válida hasta<input name="valid" type="date"></label></div>
+    <div class="grid"><label class="${S.bimoneda === false ? 'hidden' : ''}">Tasa (${esc(secSym())} por ${esc(curLabel())})<input name="rate" type="number" step="0.0001" min="0.0001" ${S.bimoneda === false ? '' : 'required'}></label>
+      <label>Descuento (${esc(curLabel())})<input name="disc" type="number" step="0.01" min="0" value="0"></label><label>Válida hasta<input name="valid" type="date"></label></div>
     <div class="scan-row"><input id="qS" type="search" placeholder="Buscar producto o escanear código"><button type="button" class="icon-btn scan-btn" id="qScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div><div class="list" id="qR"></div><div id="qC"></div><p id="qT" class="big"></p>
     <label>Nota<input name="notes" placeholder="Ej: entrega en 2 días"></label><button class="btn" type="submit">Guardar cotización</button></form>`);
   const el = $('#qF').elements;
@@ -87,11 +87,11 @@ async function quoteForm(id) {
     const ivaPct = el.iva.checked ? Math.max(0, +el.iva_pct.value || 0) : 0;
     const tax = el.iva.checked ? (sub - disc) * ivaPct / 100 : 0;
     const t = sub - disc + tax;
-    $('#qT').innerHTML = `${fmt(t)} USD <span class="mut">${S.bimoneda !== false && (+el.rate.value > 0) ? '(' + fmt(t * (+el.rate.value || 0)) + ' Bs)' : ''}${el.iva.checked ? ` · IVA ${qty(ivaPct)}%: ${fmt(tax)}` : ''}</span>`;
+    $('#qT').innerHTML = `${fmtCur(t)} <span class="mut">${S.bimoneda !== false && (+el.rate.value > 0) ? '(' + fmt(t * (+el.rate.value || 0)) + ' Bs)' : ''}${el.iva.checked ? ` · IVA ${qty(ivaPct)}%: ${fmt(tax)}` : ''}</span>`;
   };
   const draw = () => {
     $('#qC').innerHTML = cart.map((c, i) => `<div class="pl" data-i="${i}"><div><b>${esc(c.name)}</b><button type="button" class="lnk bad" data-rm="${i}">Quitar</button></div>
-      <div class="stack" style="gap:.3rem"><label>Cant.<input data-f="qty" type="number" step="0.001" min="0.001" value="${c.qty}"></label><label>Precio USD<input data-f="price" type="number" step="0.01" min="0" value="${c.price}"></label></div></div>`).join('') || '<p class="mut">Busca y agrega productos.</p>';
+      <div class="stack" style="gap:.3rem"><label>Cant.<input data-f="qty" type="number" step="0.001" min="0.001" value="${c.qty}"></label><label>Precio (${esc(curLabel())})<input data-f="price" type="number" step="0.01" min="0" value="${c.price}"></label></div></div>`).join('') || '<p class="mut">Busca y agrega productos.</p>';
     tot();
   };
   draw();
@@ -109,7 +109,7 @@ async function quoteForm(id) {
   };
   $('#qS').oninput = (e) => {
     const t = e.target.value.trim().toLowerCase(), pl = curQList();
-    $('#qR').innerHTML = t ? (D.products.filter(p => (p.name + ' ' + (p.sku || '')).toLowerCase().includes(t)).slice(0, 6).map(p => `<button type="button" class="item" data-add="${p.id}"><span><b>${esc(p.name)}</b><small>${fmt(priceWithList(p.sale_price_usd, pl))} USD${pl ? ' (' + esc(pl.name) + ')' : ''}</small></span><span class="mut">+</span></button>`).join('') || '<p class="mut">Sin resultados.</p>') : '';
+    $('#qR').innerHTML = t ? (D.products.filter(p => (p.name + ' ' + (p.sku || '')).toLowerCase().includes(t)).slice(0, 6).map(p => `<button type="button" class="item" data-add="${p.id}"><span><b>${esc(p.name)}</b><small>${fmtCur(priceWithList(p.sale_price_usd, pl))}${pl ? ' (' + esc(pl.name) + ')' : ''}</small></span><span class="mut">+</span></button>`).join('') || '<p class="mut">Sin resultados.</p>') : '';
   };
   const addQuoteByCode = (code) => {
     const p = findBySku(D.products, code);

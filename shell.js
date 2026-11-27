@@ -246,3 +246,117 @@ document.addEventListener('click', (e) => {
     if (typeof toast === 'function') toast('Toca Atrás nuevamente para salir');
   });
 })();
+
+// ---------- Buscador Global Instantáneo (Productos, Clientes/Proveedores y Ventas) ----------
+async function openGlobalSearch() {
+  const [prods, stockRows, parties, debts, sales] = await Promise.all([
+    q(db.from('products').select('id,sku,name,unit,sale_price_usd,avg_cost_usd,is_service,track_inventory,product_categories(name)').eq('active', true).order('name')),
+    q(db.from('stock_actual').select('product_id,stock')),
+    q(db.from('parties').select('*').eq('active', true).order('name')),
+    q(db.from('deudas_clientes').select('customer_id,debt_usd')).catch(() => []),
+    q(db.from('ventas_resumen').select('id,sale_date,customer,total_usd,paid_usd,status').order('id', {ascending: false}).limit(80))
+  ]);
+  const stMap = Object.fromEntries(stockRows.map(s => [s.product_id, Number(s.stock || 0)]));
+  const debtMap = Object.fromEntries(debts.filter(d => d.customer_id != null).map(d => [d.customer_id, Number(d.debt_usd || 0)]));
+  const canEditInv = S.role !== 'vendedor' || staffCan('inventario_full');
+  const canDir = S.role !== 'vendedor' || staffCan('directorios');
+
+  openSheet('Buscador rápido', `
+    <div class="stack">
+      <div class="scan-row">
+        <input id="gsIn" type="search" placeholder="Busca producto, cliente o #venta..." autocomplete="off" autofocus>
+        <button type="button" class="icon-btn scan-btn" id="gsScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button>
+      </div>
+      <div id="gsRes" class="stack" style="gap:.65rem;max-height:62vh;overflow:auto"></div>
+    </div>`);
+
+  const draw = () => {
+    const raw = ($('#gsIn')?.value || '').trim();
+    const t = raw.toLowerCase();
+    const cleanNum = raw.replace(/^#/, '');
+    if (!t) {
+      $('#gsRes').innerHTML = `<p class="mut" style="margin:0">Escribe el nombre o código de un <b>producto</b>, un <b>cliente/proveedor</b> o un <b>número de venta</b> (ej: #12). También puedes escanear un código de barras.</p>`;
+      return;
+    }
+
+    const hitP = prods.filter(p => (p.name + ' ' + (p.sku || '') + ' ' + (p.product_categories?.name || '')).toLowerCase().includes(t)).slice(0, 6);
+    const hitC = canDir ? parties.filter(p => (p.name + ' ' + (p.phone || '') + ' ' + (p.rif || '')).toLowerCase().includes(t)).slice(0, 5) : [];
+    const hitS = sales.filter(s => (String(s.id) === cleanNum) || (`#${s.id} ${s.customer || ''}`).toLowerCase().includes(t)).slice(0, 4);
+
+    let html = '';
+    if (hitP.length) {
+      html += `<div class="stack" style="gap:.35rem"><small class="mut"><b>PRODUCTOS (${hitP.length})</b></small>${hitP.map(p => {
+        const st = stMap[p.id] || 0;
+        const stTxt = p.is_service ? 'Servicio' : p.track_inventory === false ? 'Disponible' : `Stock: ${qty(st)} ${esc(p.unit)}`;
+        return `<div class="item" style="gap:.5rem">
+          <button type="button" class="lnk" data-gsp="${p.id}" style="flex:1;text-align:left;padding:0;color:var(--ink);font-weight:400">
+            <b>${esc(p.name)}</b>
+            <small style="display:block;color:var(--mut)">${p.sku ? esc(p.sku) + ' · ' : ''}${stTxt} · <b>${fmtCur(p.sale_price_usd)}</b>${S.bimoneda !== false && S.rate ? ' (' + fmtSec(p.sale_price_usd * S.rate) + ')' : ''}</small>
+          </button>
+          <button type="button" class="btn ghost" data-gssell="${p.id}" style="min-height:36px;padding:.25rem .65rem;font-size:.82rem">+ Vender</button>
+        </div>`;
+      }).join('')}</div>`;
+    }
+    if (hitC.length) {
+      html += `<div class="stack" style="gap:.35rem"><small class="mut"><b>CLIENTES Y PROVEEDORES (${hitC.length})</b></small>${hitC.map(c => {
+        const d = debtMap[c.id] || 0;
+        return `<button type="button" class="item" data-gsc="${c.id}">
+          <span><b>${esc(c.name)}</b><small>${[c.is_customer && 'Cliente', c.is_supplier && 'Proveedor', c.phone].filter(Boolean).map(esc).join(' · ')}</small></span>
+          ${d > 0.01 ? `<span class="n"><b class="warn">Debe ${fmtCur(d)}</b></span>` : '<span class="mut">&rsaquo;</span>'}
+        </button>`;
+      }).join('')}</div>`;
+    }
+    if (hitS.length) {
+      html += `<div class="stack" style="gap:.35rem"><small class="mut"><b>VENTAS (${hitS.length})</b></small>${hitS.map(s => `<button type="button" class="item" data-gss="${s.id}">
+        <span><b>Venta #${s.id} · ${esc(s.customer || 'Cliente general')}</b><small>${dmy(s.sale_date)} · ${s.status}</small></span>
+        <span class="n"><b>${fmtCur(s.total_usd)}</b></span>
+      </button>`).join('')}</div>`;
+    }
+    $('#gsRes').innerHTML = html || '<p class="mut" style="margin:0">Sin resultados para "' + esc(raw) + '".</p>';
+  };
+  draw();
+
+  $('#gsIn').oninput = draw;
+  $('#gsScan').onclick = () => openScanner({
+    title: 'Buscar producto por código',
+    continuous: false,
+    onCode: (code) => {
+      const hit = findBySku(prods, code);
+      $('#gsIn').value = hit ? (hit.sku || hit.name) : code;
+      draw();
+      return hit ? {ok: true, msg: `${hit.name} — ${fmtCur(hit.sale_price_usd)}`} : {ok: false, msg: 'Sin producto con código ' + code};
+    }
+  });
+
+  $('#gsRes').onclick = (e) => {
+    const sellB = e.target.closest('[data-gssell]');
+    if (sellB) {
+      V.edit = null;
+      V.prePid = +sellB.dataset.gssell;
+      SUB.ven = 'nueva';
+      closeSheet();
+      go('ventas');
+      return;
+    }
+    const pB = e.target.closest('[data-gsp]');
+    if (pB) {
+      const p = prods.find(x => String(x.id) === pB.dataset.gsp);
+      if (!p) return;
+      if (canEditInv) {
+        PR2.q = p.name; SUB.inv = 'productos'; closeSheet(); go('inventario');
+      } else {
+        toast(`${p.name}: ${fmtCur(p.sale_price_usd)}${S.bimoneda !== false && S.rate ? ' (' + fmtSec(p.sale_price_usd * S.rate) + ')' : ''}`);
+      }
+      return;
+    }
+    const cB = e.target.closest('[data-gsc]');
+    if (cB) {
+      const c = parties.find(x => String(x.id) === cB.dataset.gsc);
+      if (c && typeof partySheet === 'function') run(() => partySheet(c, DIRS.terceros));
+      return;
+    }
+    const sB = e.target.closest('[data-gss]');
+    if (sB && typeof saleSheet === 'function') run(() => saleSheet(+sB.dataset.gss));
+  };
+}
+if ($('#globalSearchBtn')) $('#globalSearchBtn').onclick = () => run(openGlobalSearch);

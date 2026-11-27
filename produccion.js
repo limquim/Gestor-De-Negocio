@@ -41,7 +41,7 @@ function convertQtyUnit(val, fromSym, toSym, um) {
 const costOf = (pm, id) => Number(pm[id]?.avg_cost_usd || 0);
 const costLine = (tot, unitCost, fp, pm) => {
   const pr = Number(fp?.sale_price_usd || 0);
-  return `Costo total: <b>${fmt(tot)} USD</b><br>Costo por ${esc(fp?.unit || 'unidad')}: <b>${fmt(unitCost)} USD</b>${S.rate ? ' (' + fmt(unitCost * S.rate) + ' Bs)' : ''}${pr ? ` | Margen: <b>${fmt((pr - unitCost) / pr * 100, 0)}%</b>` : ''}`;
+  return `Costo total: <b>${fmtCur(tot)}</b><br>Costo por ${esc(fp?.unit || 'unidad')}: <b>${fmtCur(unitCost)}</b>${S.rate ? ' (' + fmt(unitCost * S.rate) + ' Bs)' : ''}${pr ? ` | Margen: <b>${fmt((pr - unitCost) / pr * 100, 0)}%</b>` : ''}`;
 };
 
 // ---------- Fórmulas (con conversión de unidades ej: g -> kg, ml -> L) ----------
@@ -50,7 +50,7 @@ async function viewFormulas() {
   $('#view').innerHTML = `<div class="list" id="fList">${recipes.map(r => {
     const tot = r.recipe_items.reduce((a, i) => a + i.quantity * costOf(pm, i.product_id), 0), u = tot / r.yield_qty, fp = pm[r.product_id], pr = Number(fp?.sale_price_usd || 0);
     return `<button class="item" data-id="${r.id}"><span><b>${esc(r.name)}</b><small>Rinde ${qty(r.yield_qty)} ${esc(fp?.unit)} de ${esc(fp?.name)} · ${r.recipe_items.length} materiales</small>
-      <small>Costo: ${fmt(u)} USD${S.rate ? ' (' + fmt(u * S.rate) + ' Bs)' : ''} por ${esc(fp?.unit)}${pr ? ' | Margen ' + fmt((pr - u) / pr * 100, 0) + '%' : ''}</small></span><span class="mut">&rsaquo;</span></button>`;
+      <small>Costo: ${fmtCur(u)}${S.rate ? ' (' + fmt(u * S.rate) + ' Bs)' : ''} por ${esc(fp?.unit)}${pr ? ' | Margen ' + fmt((pr - u) / pr * 100, 0) + '%' : ''}</small></span><span class="mut">&rsaquo;</span></button>`;
   }).join('') || '<p class="mut">Aún no hay fórmulas. Pulsa el botón + para crear la primera.</p>'}</div>
   <button class="fab" id="fAdd" aria-label="Nueva fórmula">+</button>`;
   $('#fAdd').onclick = () => formulaForm(null, D);
@@ -193,7 +193,7 @@ async function viewProducir() {
     });
     const n = +$('#pQty').value || 1, diff = tot - theo;
     $('#pSum').innerHTML = costLine(tot, tot / n, fin(), pm)
-      + (free ? '' : `<br><span class="mut">Según la fórmula: ${fmt(theo)} USD | Diferencia: ${diff >= 0 ? '+' : ''}${fmt(diff)} USD</span>`)
+      + (free ? '' : `<br><span class="mut">Según la fórmula: ${fmtCur(theo)} | Diferencia: ${diff >= 0 ? '+' : ''}${fmtCur(diff)}</span>`)
       + (miss ? '<br><span class="warn">Algún material con inventario no tiene costo: el costo puede estar incompleto.</span>' : '')
       + (lack.length ? `<br><span class="warn">Inventario insuficiente: ${esc(lack.join(', '))}</span>` : '');
     return lack.length;
@@ -302,8 +302,8 @@ async function showProdSheet(o, L, pm) {
       `Fecha: ${doc.dateStr}`,
       `Fabricar: ${qty(doc.qty)} ${doc.unit} de ${doc.productName}`,
       '----------------------------------------',
-      ...doc.items.map(i => `[ ] ${i.name}${i.untracked ? ' (libre)' : ''}: ${qty(i.actual)} ${i.unit}${withCosts ? ' · ' + fmt(i.costUsd) + ' USD' : ''}`),
-      ...(withCosts ? ['----------------------------------------', `Costo total: ${fmt(doc.totalCostUsd)} USD (${fmt(doc.unitCostUsd)} USD/${doc.unit})`] : []),
+      ...doc.items.map(i => `[ ] ${i.name}${i.untracked ? ' (libre)' : ''}: ${qty(i.actual)} ${i.unit}${withCosts ? ' · ' + fmtCur(i.costUsd) : ''}`),
+      ...(withCosts ? ['----------------------------------------', `Costo total: ${fmtCur(doc.totalCostUsd)} (${fmtCur(doc.unitCostUsd)}/${doc.unit})`] : []),
       ...(doc.notes ? ['----------------------------------------', 'Nota: ' + doc.notes] : [])
     ].join('\n');
     printTicket(lines, '80mm');
@@ -317,7 +317,7 @@ async function viewHistorialProd() {
   rows.sort((a, b) => (b.status === 'en_proceso') - (a.status === 'en_proceso'));
   $('#view').innerHTML = `<div class="list" id="hList">${rows.map(o => { const st = PST[o.status] || [o.status, 'low']; return `<button class="item" data-id="${o.id}"><span><b>${Number(o.id) < 0 ? 'LOC-' + Math.abs(o.id) : '#' + o.id} ${esc(o.products?.name)}</b>
     <small>${qty(o.qty_produced)} ${esc(o.products?.unit)} | ${fdate(o.produced_at || o.created_at)}</small>
-    <small>${o.status === 'en_proceso' ? 'Orden abierta: puedes seguir modificando el consumo' : 'Costo: ' + fmt(o.total_cost_usd) + ' USD (' + fmt(o.total_cost_usd / o.qty_produced) + ' por unidad)'}</small></span>
+    <small>${o.status === 'en_proceso' ? 'Orden abierta: puedes seguir modificando el consumo' : 'Costo: ' + fmtCur(o.total_cost_usd) + ' (' + fmtCur(o.total_cost_usd / o.qty_produced) + ' por unidad)'}</small></span>
     <span class="badge ${st[1]}">${st[0]}</span></button>`; }).join('') || '<p class="mut">Aún no hay producciones registradas.</p>'}</div>`;
   $('#hList').onclick = (e) => { const b = e.target.closest('[data-id]'); if (b) run(() => prDetail(rows.find(o => String(o.id) === b.dataset.id))); };
 }

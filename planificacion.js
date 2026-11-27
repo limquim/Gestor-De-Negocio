@@ -57,7 +57,7 @@ async function viewPlanificar() {
         <td class="n">${m.untr ? '<span class="mut">Consumo libre</span>' : qty(m.av)}</td>
         <td class="n ${m.miss > 0.0004 ? 'warn' : 'in'}"><b>${m.untr ? 'Sin control' : m.miss > 0.0004 ? qty(m.miss) : 'Alcanza'}</b></td></tr>`).join('')}</tbody></table></div>
       ${Object.keys(held).length ? '<p class="mut">Ya se descontó el material comprometido en órdenes en proceso.</p>' : ''}
-      ${miss.length ? `<p>Costo estimado de lo que falta: <b>${fmt(cost)} USD</b>${S.rate ? ' (' + fmt(cost * S.rate) + ' Bs)' : ''}</p>` : ''}
+      ${miss.length ? `<p>Costo estimado de lo que falta: <b>${fmtCur(cost)}</b>${S.rate ? ' (' + fmt(cost * S.rate) + ' Bs)' : ''}</p>` : ''}
       <div class="row">${miss.length ? '<button class="btn" id="plBuy">Pasar lo que falta a una compra</button>' : ''}<button class="btn ${miss.length ? 'ghost' : ''}" id="plOrd">Crear las órdenes en proceso</button></div></div>`;
     if (miss.length) $('#plBuy').onclick = () => { CV.pre = miss.map(m => ({pid: m.pid, qty: Math.ceil(m.miss * 100) / 100})); SUB.com = 'nueva'; go('compras'); };
     $('#plOrd').onclick = () => run(async () => {

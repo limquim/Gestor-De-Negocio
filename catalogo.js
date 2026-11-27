@@ -251,7 +251,7 @@ async function drawCatPage(i, lay, o, X, sc = 2) {
       if (set.business_address) contactParts.push(set.business_address.slice(0, 42));
     }
     if (o.showDate) contactParts.push(dmy(caracasDate()));
-    if (o.showRate && rate > 0) contactParts.push(`Tasa: ${fmt(rate, 2)} Bs/USD`);
+    if (o.showRate && rate > 0) contactParts.push(`Tasa: ${fmt(rate, 2)} ${secSym()}/${curLabel()}`);
 
     ty += 24;
     if (contactParts.length) T(wrap(contactParts.join('  ·  '), CPW - tx - CM, 12, 500, 1)[0], tx, ty, 12, 500, colMeta);
@@ -272,7 +272,7 @@ async function drawCatPage(i, lay, o, X, sc = 2) {
   // Helper de precios formateados
   const formatPriceLines = (r) => {
     if (o.list === 'none') return {main: '', sub: '', strike: '', savePct: 0};
-    const usd = fmt(r.price) + ' USD';
+    const usd = fmtCur(r.price);
     const bs = rate ? fmt(r.price * rate) + ' Bs' : '';
     const unitTag = o.showUnit && r.unit ? ` / ${r.unit}` : '';
     let main = usd + unitTag, sub = '';
@@ -280,7 +280,7 @@ async function drawCatPage(i, lay, o, X, sc = 2) {
     else if (o.cur === 'both' && bs) { main = usd + unitTag; sub = bs; }
     else if (o.cur === 'bs_first' && bs) { main = bs + unitTag; sub = usd; }
     const hasDisc = o.showCompare && r.adj < -0.05 && r.basePrice > r.price + 0.005;
-    const strike = hasDisc ? (o.cur === 'bs' && rate ? fmt(r.basePrice * rate) + ' Bs' : fmt(r.basePrice) + ' USD') : '';
+    const strike = hasDisc ? (o.cur === 'bs' && rate ? fmt(r.basePrice * rate) + ' Bs' : fmtCur(r.basePrice)) : '';
     return {main, sub, strike, savePct: hasDisc ? Math.round(-r.adj) : 0};
   };
 
@@ -475,7 +475,7 @@ function catWhatsappText(D, o) {
     `*${String(D.set?.business_name || 'MI NEGOCIO').toUpperCase()}*`,
     `*${o.title || 'CATÁLOGO DE PRODUCTOS'}*${listObj ? ` (${listObj.name})` : ''}`,
     o.subtitle || '',
-    o.showDate ? `Fecha: ${dmy(caracasDate())}${o.showRate && rate ? ` | Tasa: ${fmt(rate, 2)} Bs/USD` : ''}` : '',
+    o.showDate ? `Fecha: ${dmy(caracasDate())}${o.showRate && rate ? ` | Tasa: ${fmt(rate, 2)} ${secSym()}/${curLabel()}` : ''}` : '',
     o.iva && o.list !== 'none' ? '_Precios con IVA incluido_' : '',
     ''
   ].filter((x, idx) => idx === 5 || x);
@@ -489,7 +489,7 @@ function catWhatsappText(D, o) {
     }
     const parts = [];
     if (o.list !== 'none') {
-      const usd = `${fmt(r.price)} USD`, bs = rate ? `${fmt(r.price * rate)} Bs` : '';
+      const usd = `${fmtCur(r.price)}`, bs = rate ? `${fmt(r.price * rate)} Bs` : '';
       if (o.cur === 'bs' && bs) parts.push(bs);
       else if (o.cur === 'both' && bs) parts.push(`${usd} (${bs})`);
       else if (o.cur === 'bs_first' && bs) parts.push(`${bs} (${usd})`);
@@ -577,7 +577,7 @@ async function viewCatalogo() {
         <h2>2. Precios, moneda y filtros</h2>
         <div class="grid">
           <label>Lista de precios${sel('list', lists)}</label>
-          <label>Moneda${sel('cur', {both: 'USD arriba y Bs abajo', bs_first: 'Bs arriba y USD abajo', usd: 'Solo dólares (USD)', bs: 'Solo bolívares (Bs)'})}</label>
+          <label>Moneda${sel('cur', {both: `${curLabel()} arriba y ${secSym()} abajo`, bs_first: `${secSym()} arriba y ${curLabel()} abajo`, usd: `Solo ${curLabel()}`, bs: `Solo ${secSym()}`})}</label>
         </div>
         <div class="grid">
           <label>Existencias${sel('stock', {all: 'Todos los productos', instock: 'Solo disponibles (stock > 0)'})}</label>
@@ -700,7 +700,7 @@ async function viewCatalogo() {
       const vis = cand.filter(r => !t || (r.name + ' ' + (r.sku || '') + ' ' + r.cat).toLowerCase().includes(t));
       $('#cpL').innerHTML = vis.map(r => `<label class="item chk" style="cursor:pointer">
         <input type="checkbox" data-pid="${r.product_id}" ${!excl.has(Number(r.product_id)) ? 'checked' : ''}>
-        <span style="flex:1"><b>${esc(r.name)}</b><small>${esc(r.cat)} · ${fmt(r.price)} USD</small></span>
+        <span style="flex:1"><b>${esc(r.name)}</b><small>${esc(r.cat)} · ${fmtCur(r.price)}</small></span>
       </label>`).join('') || '<p class="mut">Sin coincidencias.</p>';
     };
     drawPick();
@@ -784,7 +784,7 @@ async function viewCatalogo() {
   });
   $('#ctCsv').onclick = () => run(async () => {
     const it = catItems(D, CT), rate = S.rate || 0, esc2 = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
-    const csv = ['Código,Producto,Categoría,Unidad' + (CT.list !== 'none' ? ',Precio USD,Precio Bs' : '') + (CT.avail !== 'none' ? ',Existencia' : ''),
+    const csv = ['Código,Producto,Categoría,Unidad' + (CT.list !== 'none' ? `,Precio ${curCode()},Precio ${secSym()}` : '') + (CT.avail !== 'none' ? ',Existencia' : ''),
       ...it.map(r => [esc2(r.sku), esc2(r.name), esc2(r.cat), esc2(r.unit), ...(CT.list !== 'none' ? [r.price, (r.price * rate).toFixed(2)] : []), ...(CT.avail !== 'none' ? [r.is_service ? 'Servicio' : +r.stock > 0 ? (CT.avail === 'qty' ? r.stock : 'Disponible') : 'Agotado'] : [])].join(','))].join('\n');
     downloadBlob(new Blob(['\ufeff' + csv], {type: 'text/csv;charset=utf-8'}), 'catalogo.csv');
   });

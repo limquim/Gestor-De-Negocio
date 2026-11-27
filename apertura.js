@@ -72,19 +72,19 @@ async function viewApertura() {
     const t = calcTotals();
     $('#apCapHero').innerHTML = `
       <span>Capital inicial estimado del negocio</span>
-      <b class="${t.capUsd < 0 ? 'neg2' : ''}">${fmt(t.capUsd)} USD</b>
+      <b class="${t.capUsd < 0 ? 'neg2' : ''}">${fmtCur(t.capUsd)}</b>
       <small>${S.rate ? fmt(t.capUsd * S.rate) + ' Bs a la tasa de hoy | ' : ''}Caja + Inventario + Por cobrar - Por pagar</small>
       <div class="hero3">
-        <div><span>Caja y bancos</span><b>${fmt(t.cajaUsd)} USD</b></div>
-        <div><span>Inventario</span><b>${fmt(t.invUsd)} USD</b></div>
-        <div><span>CxC - CxP</span><b>${fmt(t.cxcUsd - t.cxpUsd)} USD</b></div>
+        <div><span>Caja y bancos</span><b>${fmtCur(t.cajaUsd)}</b></div>
+        <div><span>Inventario</span><b>${fmtCur(t.invUsd)}</b></div>
+        <div><span>CxC - CxP</span><b>${fmtCur(t.cxcUsd - t.cxpUsd)}</b></div>
       </div>`;
     $('#apFootSum').innerHTML = `
-      <div class="rl"><span>Dinero disponible en caja/bancos</span><b>${fmt(t.cajaUsd)} USD</b></div>
-      <div class="rl"><span>Inventario inicial valorado</span><b>${fmt(t.invUsd)} USD</b></div>
-      <div class="rl"><span>Cuentas por cobrar iniciales</span><b>+${fmt(t.cxcUsd)} USD</b></div>
-      <div class="rl"><span>Cuentas por pagar iniciales</span><b>-${fmt(t.cxpUsd)} USD</b></div>
-      <div class="rl tot ${t.capUsd >= 0 ? 'pos' : 'neg'}"><span>Capital inicial total</span><b>${fmt(t.capUsd)} USD${S.rate ? ' (' + fmt(t.capUsd * S.rate) + ' Bs)' : ''}</b></div>`;
+      <div class="rl"><span>Dinero disponible en caja/bancos</span><b>${fmtCur(t.cajaUsd)}</b></div>
+      <div class="rl"><span>Inventario inicial valorado</span><b>${fmtCur(t.invUsd)}</b></div>
+      <div class="rl"><span>Cuentas por cobrar iniciales</span><b>+${fmtCur(t.cxcUsd)}</b></div>
+      <div class="rl"><span>Cuentas por pagar iniciales</span><b>-${fmtCur(t.cxpUsd)}</b></div>
+      <div class="rl tot ${t.capUsd >= 0 ? 'pos' : 'neg'}"><span>Capital inicial total</span><b>${fmtCur(t.capUsd)}${S.rate ? ' (' + fmt(t.capUsd * S.rate) + ' Bs)' : ''}</b></div>`;
   };
 
   $('#view').innerHTML = `
@@ -104,7 +104,7 @@ async function viewApertura() {
             <span style="flex:1">
               <b>${esc(a.name)}</b>
               <small>${esc(a.type || 'Cuenta')} | Moneda: <b>${a.currency}</b></small>
-              ${a.currency === 'VES' && S.rate ? `<small class="mut" id="apAccEq_${a.id}">≈ ${fmt((AP.accs[a.id] || 0) / S.rate)} USD</small>` : ''}
+              ${a.currency === 'VES' && S.rate ? `<small class="mut" id="apAccEq_${a.id}">≈ ${fmtCur((AP.accs[a.id] || 0) / S.rate)}</small>` : ''}
             </span>
             <label style="width:9.5rem;margin:0">Saldo (${a.currency})
               <input data-acc="${a.id}" type="number" step="0.01" value="${AP.accs[a.id] ?? 0}">
@@ -115,7 +115,7 @@ async function viewApertura() {
 
     <div class="card stack">
       <div class="title-row"><h2>2. Inventario inicial</h2><button type="button" class="btn ghost" id="apNewProd">+ Nuevo producto</button></div>
-      <p class="mut" style="margin:0">Coloca la existencia física actual y el costo unitario en USD de tus productos. También puedes <button type="button" class="lnk" id="apGoImp" style="padding:0">importarlos desde Excel/CSV</button>.</p>
+      <p class="mut" style="margin:0">Coloca la existencia física actual y el costo unitario (${esc(curLabel())}) de tus productos. También puedes <button type="button" class="lnk" id="apGoImp" style="padding:0">importarlos desde Excel/CSV</button>.</p>
       <div class="toolbar">
         <div class="scan-row" style="flex:1;min-width:210px"><input id="apProdQ" type="search" placeholder="Buscar producto o escanear código" value="${esc(AP.q)}"><button type="button" class="icon-btn scan-btn" id="apProdScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div>
         <label class="chk"><input type="checkbox" id="apOnly" ${AP.onlyFilled ? 'checked' : ''}> Solo con cantidad cargada</label>
@@ -157,12 +157,12 @@ async function viewApertura() {
       return `<div class="item" style="flex-direction:column;align-items:stretch;gap:.5rem" data-pid="${p.id}">
         <div class="row0" style="justify-content:space-between">
           <span><b>${esc(p.name)}</b> <small class="mut">${esc(p.sku || '')} | ${esc(p.product_categories?.name || 'Sin categoría')} (${esc(p.unit)})</small></span>
-          <small class="pos" id="apSub_${p.id}">${st > 0 ? 'Total: ' + fmt(st * cs) + ' USD' : ''}</small>
+          <small class="pos" id="apSub_${p.id}">${st > 0 ? 'Total: ' + fmtCur(st * cs) : ''}</small>
         </div>
         <div class="grid" style="grid-template-columns:repeat(3,1fr);gap:.5rem">
           <label style="margin:0">Stock inicial<input data-pf="stock" data-pid="${p.id}" type="number" step="0.001" min="0" placeholder="0" value="${esc(r.stock)}"></label>
-          <label style="margin:0">Costo USD<input data-pf="cost" data-pid="${p.id}" type="number" step="0.0001" min="0" placeholder="0.00" value="${esc(r.cost)}"></label>
-          <label style="margin:0">Precio venta USD<input data-pf="price" data-pid="${p.id}" type="number" step="0.0001" min="0" placeholder="0.00" value="${esc(r.price)}"></label>
+          <label style="margin:0">Costo ${esc(curLabel())}<input data-pf="cost" data-pid="${p.id}" type="number" step="0.0001" min="0" placeholder="0.00" value="${esc(r.cost)}"></label>
+          <label style="margin:0">Precio venta ${esc(curLabel())}<input data-pf="price" data-pid="${p.id}" type="number" step="0.0001" min="0" placeholder="0.00" value="${esc(r.price)}"></label>
         </div>
       </div>`;
     }).join('') || '<p class="mut">No hay productos con ese filtro. Pulsa "+ Nuevo producto" para crear uno.</p>';
@@ -174,7 +174,7 @@ async function viewApertura() {
         <div class="grid">
           <label>Cliente existente<select data-cf="cid"><option value="">-- O escribe nombre nuevo --</option>${custs.map(c => `<option value="${c.id}" ${String(c.id) === String(r.cid) ? 'selected' : ''}>${esc(c.name)}</option>`).join('')}</select></label>
           <label>Nombre (si es nuevo)<input data-cf="name" placeholder="Ej: Juan Pérez" value="${esc(r.name)}"></label>
-          <label>Monto que debe (USD)<input data-cf="amount" type="number" step="0.01" min="0.01" value="${esc(r.amount)}"></label>
+          <label>Monto que debe (${esc(curLabel())})<input data-cf="amount" type="number" step="0.01" min="0.01" value="${esc(r.amount)}"></label>
           <label>Vencimiento (opcional)<input data-cf="due" type="date" value="${esc(r.due)}"></label>
         </div>
         <div class="row" style="margin-top:.5rem">
@@ -190,7 +190,7 @@ async function viewApertura() {
         <div class="grid">
           <label>Proveedor existente<select data-pf="sid"><option value="">-- O escribe nombre nuevo --</option>${sups.map(s => `<option value="${s.id}" ${String(s.id) === String(r.sid) ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}</select></label>
           <label>Nombre (si es nuevo)<input data-pf="name" placeholder="Ej: Distribuidora Central" value="${esc(r.name)}"></label>
-          <label>Monto que debes (USD)<input data-pf="amount" type="number" step="0.01" min="0.01" value="${esc(r.amount)}"></label>
+          <label>Monto que debes (${esc(curLabel())})<input data-pf="amount" type="number" step="0.01" min="0.01" value="${esc(r.amount)}"></label>
           <label>Vencimiento (opcional)<input data-pf="due" type="date" value="${esc(r.due)}"></label>
         </div>
         <div class="row" style="margin-top:.5rem">
@@ -213,7 +213,7 @@ async function viewApertura() {
     if (!id) return;
     AP.accs[id] = num(e.target.value) || 0;
     const eq = $('#apAccEq_' + id);
-    if (eq && S.rate) eq.textContent = `≈ ${fmt(AP.accs[id] / S.rate)} USD`;
+    if (eq && S.rate) eq.textContent = `≈ ${fmtCur(AP.accs[id] / S.rate)}`;
     paintSummary();
   });
 
@@ -244,7 +244,7 @@ async function viewApertura() {
     AP.inv[pid][f] = e.target.value;
     const st = num(AP.inv[pid].stock) || 0, cs = num(AP.inv[pid].cost) || 0;
     const sub = $('#apSub_' + pid);
-    if (sub) sub.textContent = st > 0 ? 'Total: ' + fmt(st * cs) + ' USD' : '';
+    if (sub) sub.textContent = st > 0 ? 'Total: ' + fmtCur(st * cs) : '';
     paintSummary();
   });
 
@@ -279,7 +279,7 @@ async function viewApertura() {
         <button type="button" class="btn ghost" data-t-add="1" aria-label="Nuevo tipo de cuenta" style="flex:none">+</button>
       </div>
       <div class="grid">
-        <label>Moneda<select name="cur"><option value="USD">Dólares (USD)</option><option value="VES">Bolívares (Bs)</option></select></label>
+        <label>Moneda<select name="cur"><option value="USD">Moneda principal (${esc(curLabel())})</option><option value="VES">Bolívares (${esc(secSym())})</option></select></label>
         <label>Saldo inicial<input name="open" type="number" step="0.01" value="0" required></label>
       </div>
       ${renderMethodsField(['efectivo'])}
@@ -327,8 +327,8 @@ async function viewApertura() {
       <label>Unidad<select name="unit">${units.map(u => `<option value="${u.symbol}" ${u.symbol === 'und' ? 'selected' : ''}>${esc(u.name)} (${u.symbol})</option>`).join('')}</select></label>
       <div class="grid">
         <label>Stock inicial<input name="stock" type="number" step="0.001" min="0" value="0" required></label>
-        <label>Costo unitario (USD)<input name="cost" type="number" step="0.0001" min="0" value="0" required></label>
-        <label>Precio de venta (USD)<input name="price" type="number" step="0.0001" min="0" value="0"></label>
+        <label>Costo unitario (${esc(curLabel())})<input name="cost" type="number" step="0.0001" min="0" value="0" required></label>
+        <label>Precio de venta (${esc(curLabel())})<input name="price" type="number" step="0.0001" min="0" value="0"></label>
       </div>
       <button class="btn" type="submit">Crear y agregar</button>
     </form>`);
@@ -363,7 +363,7 @@ async function viewApertura() {
   // Guardar todo el arranque
   $('#apSave').onclick = () => run(async () => {
     const t = calcTotals();
-    if (!confirm(`Se guardarán tus saldos iniciales con un Capital Inicial estimado de ${fmt(t.capUsd)} USD. ¿Continuar?`)) return;
+    if (!confirm(`Se guardarán tus saldos iniciales con un Capital Inicial estimado de ${fmtCur(t.capUsd)}. ¿Continuar?`)) return;
 
     const cuentasPayload = accs.map(a => ({
       id: a.id,
@@ -410,7 +410,7 @@ async function viewApertura() {
 
     AP.cxc = [];
     AP.cxp = [];
-    toast(`Saldos iniciales guardados | Capital inicial: ${fmt(res.capital_inicial_usd)} USD`);
+    toast(`Saldos iniciales guardados | Capital inicial: ${fmtCur(res.capital_inicial_usd)}`);
     go('inicio');
   });
 }

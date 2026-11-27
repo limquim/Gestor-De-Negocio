@@ -36,7 +36,7 @@ async function viewInventario2() {
 
   $('#view').innerHTML = `
   <div class="stats">
-    <div class="stat"><span>Valor del inventario</span><b>${fmt(valor)} USD</b><span>${S.rate ? fmt(valor * S.rate) + ' Bs' : 'Sin tasa cargada'}</span></div>
+    <div class="stat"><span>Valor del inventario</span><b>${fmtCur(valor)}</b><span>${S.rate ? fmt(valor * S.rate) + ' Bs' : 'Sin tasa cargada'}</span></div>
     <div class="stat"><span>Productos activos</span><b>${rows.length}</b></div>
     <div class="stat warn"><span>Bajo el mínimo</span><b>${bajos}</b></div>
     <div class="stat bad"><span>Agotados</span><b>${agotados}</b></div>
@@ -61,14 +61,14 @@ async function viewInventario2() {
         <option value="count">Conteo físico (cantidad real)</option>
       </select></label>
       <label>Cantidad<input name="qty" type="number" step="0.001" min="0" required></label>
-      <label id="mCostLbl">Costo unitario de entrada (USD)<input name="unit_cost" id="mCost" type="number" step="0.0001" min="0" required></label>
+      <label id="mCostLbl">Costo unitario de entrada (${esc(curLabel())})<input name="unit_cost" id="mCost" type="number" step="0.0001" min="0" required></label>
       <label>Nota<input name="notes" placeholder="Ej: derrame en bodega"></label></div>
       <p class="mut" id="mValInfo" style="margin-top:.5rem"></p>
       <p class="mut" id="mHint">En ingreso puedes indicar el costo unitario y se recalculará el costo promedio. En salida se aplica automáticamente el costo actual del producto.</p>
       <div class="row"><button class="btn" type="submit">Registrar</button></div></form>` : '<p class="mut">Primero crea productos en la pestaña Productos.</p>'}
   </details>
   <div class="card"><h2>Últimos movimientos</h2>
-    ${moves.length ? `<div class="scroll"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th>Origen</th><th class="n">Cantidad</th><th class="n">Costo USD</th><th>Nota</th></tr></thead><tbody>${mrows}</tbody></table></div>` : '<p class="mut">Aún no hay movimientos.</p>'}</div>`;
+    ${moves.length ? `<div class="scroll"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th>Origen</th><th class="n">Cantidad</th><th class="n">Costo ${esc(curLabel())}</th><th>Nota</th></tr></thead><tbody>${mrows}</tbody></table></div>` : '<p class="mut">Aún no hay movimientos.</p>'}</div>`;
 
   drawInvTable();
   $('#invQ').oninput = (e) => { INV.q = e.target.value; drawInvTable(); };
@@ -109,12 +109,12 @@ async function viewInventario2() {
     const costLbl = $('#mCostLbl');
 
     if (kind === 'in') {
-      costLbl.firstChild.textContent = 'Costo unitario de ingreso (USD)';
+      costLbl.firstChild.textContent = `Costo unitario de ingreso (${curLabel()})`;
       costInp.readOnly = false;
       costInp.disabled = false;
       if (resetCost || costInp.value === '') costInp.value = curCost > 0 ? curCost : 0;
     } else {
-      costLbl.firstChild.textContent = kind === 'count' ? 'Costo actual del producto (USD)' : 'Costo de salida (fijo actual USD)';
+      costLbl.firstChild.textContent = kind === 'count' ? `Costo actual del producto (${curLabel()})` : `Costo de salida (fijo actual ${curLabel()})`;
       costInp.value = curCost;
       costInp.readOnly = true;
       costInp.disabled = true;
@@ -128,16 +128,16 @@ async function viewInventario2() {
         ? ((Math.max(curStock, 0) * curCost) + (qv * uc)) / (Math.max(curStock, 0) + qv)
         : uc;
       $('#mValInfo').innerHTML = qv > 0
-        ? `Valor de entrada: <b>${fmt(tot)} USD</b>${S.rate ? ' (' + fmt(tot * S.rate) + ' Bs)' : ''} | Nuevo costo promedio estimado: <b>${fmt(newAvg, 4)} USD</b>`
-        : `Costo actual: ${fmt(curCost, 4)} USD | Stock actual: ${qty(curStock)} ${esc(p.unit)}`;
+        ? `Valor de entrada: <b>${fmtCur(tot)}</b>${S.rate ? ' (' + fmt(tot * S.rate) + ' Bs)' : ''} | Nuevo costo promedio estimado: <b>${fmtCur(newAvg, 4)}</b>`
+        : `Costo actual: ${fmtCur(curCost, 4)} | Stock actual: ${qty(curStock)} ${esc(p.unit)}`;
     } else if (kind === 'count') {
       const diff = Math.round((qv - curStock) * 1000) / 1000;
-      $('#mValInfo').innerHTML = `Stock en sistema: <b>${qty(curStock)} ${esc(p.unit)}</b> | Diferencia: <b>${diff >= 0 ? '+' : ''}${qty(diff)}</b> (${fmt(Math.abs(diff) * curCost)} USD)`;
+      $('#mValInfo').innerHTML = `Stock en sistema: <b>${qty(curStock)} ${esc(p.unit)}</b> | Diferencia: <b>${diff >= 0 ? '+' : ''}${qty(diff)}</b> (${fmtCur(Math.abs(diff) * curCost)})`;
     } else {
       const tot = qv * curCost;
       $('#mValInfo').innerHTML = qv > 0
-        ? `Salida valorada al costo actual (${fmt(curCost, 4)} USD): <b>${fmt(tot)} USD</b>${S.rate ? ' (' + fmt(tot * S.rate) + ' Bs)' : ''} | Stock restante: <b>${qty(curStock - qv)} ${esc(p.unit)}</b>`
-        : `Sale al costo actual: <b>${fmt(curCost, 4)} USD</b> | Disponible: ${qty(curStock)} ${esc(p.unit)}`;
+        ? `Salida valorada al costo actual (${fmtCur(curCost, 4)}): <b>${fmtCur(tot)}</b>${S.rate ? ' (' + fmt(tot * S.rate) + ' Bs)' : ''} | Stock restante: <b>${qty(curStock - qv)} ${esc(p.unit)}</b>`
+        : `Sale al costo actual: <b>${fmtCur(curCost, 4)}</b> | Disponible: ${qty(curStock)} ${esc(p.unit)}`;
     }
   };
 
@@ -199,7 +199,7 @@ function drawInvTable() {
       <td><button class="lnk" data-kx="${x.product_id}">Kardex</button><button class="lnk" data-adj="${x.product_id}">Ajustar</button></td></tr>`;
   }).join('');
   $('#invTable').innerHTML = rows.length
-    ? `<table><thead><tr><th>Producto</th><th>Tipo</th><th class="n">Stock</th><th class="n">Mínimo</th><th class="n">Costo USD</th><th class="n">Valor USD</th><th class="n">Valor Bs</th><th>Estado</th><th></th></tr></thead><tbody>${body}</tbody></table>`
+    ? `<table><thead><tr><th>Producto</th><th>Tipo</th><th class="n">Stock</th><th class="n">Mínimo</th><th class="n">Costo ${esc(curLabel())}</th><th class="n">Valor ${esc(curLabel())}</th><th class="n">Valor ${esc(secSym())}</th><th>Estado</th><th></th></tr></thead><tbody>${body}</tbody></table>`
     : '<p class="mut">No hay productos con ese filtro.</p>';
 }
 
@@ -215,7 +215,7 @@ async function showKardex(id) {
   const k = $('#kardex');
   k.classList.remove('hidden');
   k.innerHTML = `<div class="title-row"><h2>Kardex de ${esc(p.name)}</h2><button class="btn ghost" id="kxClose">Cerrar</button></div>
-    ${ms.length ? `<div class="scroll"><table><thead><tr><th>Fecha</th><th>Movimiento</th><th>Origen</th><th class="n">Entra</th><th class="n">Sale</th><th class="n">Saldo</th><th class="n">Costo USD</th><th>Nota</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="mut">Este producto aún no tiene movimientos.</p>'}`;
+    ${ms.length ? `<div class="scroll"><table><thead><tr><th>Fecha</th><th>Movimiento</th><th>Origen</th><th class="n">Entra</th><th class="n">Sale</th><th class="n">Saldo</th><th class="n">Costo ${esc(curLabel())}</th><th>Nota</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="mut">Este producto aún no tiene movimientos.</p>'}`;
   $('#kxClose').onclick = () => k.classList.add('hidden');
   k.scrollIntoView({behavior: 'smooth'});
 }
@@ -259,7 +259,7 @@ async function viewProductos2() {
       return `<button class="item" data-id="${p.id}">
       <span class="row0">${D.photos && p.image_url ? `<img class="thumb" src="${esc(p.image_url)}" alt="">` : ''}<span><b>${esc(p.name)}</b>
       <small>${esc(p.sku || 'Sin código')} | ${esc(p.product_categories?.name || 'Sin categoría')} | ${stTxt}</small>
-      <small>Precio: <b>${fmt(pr)} USD</b>${S.bimoneda !== false && S.rate ? ' (' + fmt(pr * S.rate) + ' Bs)' : ''}${c > 0 ? ' | Costo ' + fmt(c) : ''}${mg !== null ? ` | <span class="${mg < 0 ? 'bad' : 'in'}">${mg}% margen</span>` : ''}</small></span></span>
+      <small>Precio: <b>${fmtCur(pr)}</b>${S.bimoneda !== false && S.rate ? ' (' + fmt(pr * S.rate) + ' Bs)' : ''}${c > 0 ? ' | Costo ' + fmt(c) : ''}${mg !== null ? ` | <span class="${mg < 0 ? 'bad' : 'in'}">${mg}% margen</span>` : ''}</small></span></span>
       <span class="mut">&rsaquo;</span></button>`;
     }).join('') || '<p class="mut">No hay productos. Pulsa + para crear el primero.</p>';
   };
@@ -295,9 +295,9 @@ function prodForm(p, D, preSku = '') {
     <label>Nombre<input name="pname" value="${esc(v('name'))}" required></label>
     <label>Categoría<select name="category_id">${opt(cats, v('category_id'), 'id', c => c.name)}</select></label>
     <label>Unidad de medida<select name="unit">${opt(units, v('unit', 'und'), 'symbol', u => `${u.name} (${u.symbol})`)}</select></label>
-    <label>Costo manual en USD (el que tú pones, no cambia solo)<input name="cost" type="number" step="0.0001" min="0" value="${v('manual_cost_usd', 0)}"></label>
-    <label>Precio de venta en USD<input name="price" type="number" step="0.0001" min="0" value="${v('sale_price_usd', 0)}"></label>
-    <label>Costo automático (el real, el que usa el sistema)<input value="${p && p.auto_cost_usd != null ? fmt(p.auto_cost_usd, 4) + ' USD' : 'Aún sin compras ni fabricaciones: se usa el costo manual'}" disabled></label>
+    <label>Costo manual (${esc(curLabel())}) — el que tú pones, no cambia solo<input name="cost" type="number" step="0.0001" min="0" value="${v('manual_cost_usd', 0)}"></label>
+    <label>Precio de venta (${esc(curLabel())})<input name="price" type="number" step="0.0001" min="0" value="${v('sale_price_usd', 0)}"></label>
+    <label>Costo automático (el real, el que usa el sistema)<input value="${p && p.auto_cost_usd != null ? fmtCur(p.auto_cost_usd, 4) : 'Aún sin compras ni fabricaciones: se usa el costo manual'}" disabled></label>
     <p class="mut">El costo automático se actualiza solo con cada compra, fabricación o ajuste de ingreso con costo. Tu costo manual no cambia: solo se usa mientras no haya movimientos con costo.</p>
     <label class="chk"><input type="checkbox" name="no_track" ${p && p.track_inventory === false && !p.is_service ? 'checked' : ''}> Insumo sin inventario (consumo libre en fórmulas, ej: agua, gas, hielo). Puede tener costo 0 y nunca genera stock negativo.</label>
     <label class="chk"><input type="checkbox" name="is_service" ${p?.is_service ? 'checked' : ''}> Es un servicio facturable (ej: delivery). Tu costo es lo que pagas por él.</label>
@@ -321,10 +321,10 @@ function prodForm(p, D, preSku = '') {
     const parts = [];
     if (pr > 0) {
       const low = minM > 0 && curM < minM - 0.1;
-      parts.push(`<span class="${low ? 'warn' : ''}">Margen: <b>${fmt(curM, 0)}%</b> (ganancia de ${fmt(pr - c)} USD/u)${low ? ` · por debajo del objetivo (${qty(minM)}%)` : ''}</span>`);
+      parts.push(`<span class="${low ? 'warn' : ''}">Margen: <b>${fmt(curM, 0)}%</b> (ganancia de ${fmtCur(pr - c)}/u)${low ? ` · por debajo del objetivo (${qty(minM)}%)` : ''}</span>`);
     }
     if (sug > 0) {
-      parts.push(`Precio sugerido para ${qty(minM)}%: <b>${fmt(sug)} USD</b> <button type="button" class="lnk" id="pApplySug" style="padding:0 .3rem">Aplicar</button>`);
+      parts.push(`Precio sugerido para ${qty(minM)}%: <b>${fmtCur(sug)}</b> <button type="button" class="lnk" id="pApplySug" style="padding:0 .3rem">Aplicar</button>`);
     }
     $('#pMargin').innerHTML = parts.join('<br>');
     if ($('#pApplySug')) $('#pApplySug').onclick = () => { el.price.value = sug.toFixed(2); mg(); };
@@ -470,11 +470,11 @@ async function viewPreciosMasivo() {
         ${PM.mode === 'pct'
           ? `<label>Variación sobre precio actual (%)<input id="pmPct" type="number" step="0.5" value="${esc(PM.pct)}" placeholder="Ej: 10 ó -5"></label>`
           : `<label>Margen de ganancia objetivo (%)<input id="pmMg" type="number" step="0.5" min="0" max="95" value="${esc(PM.margin)}" placeholder="Ej: 30"></label>`}
-        <label>Redondeo del precio USD
+        <label>Redondeo del precio (${esc(curLabel())})
           <select id="pmRnd">
             <option value="none" ${PM.round === 'none' ? 'selected' : ''}>Exacto (2 decimales)</option>
             <option value="0.5" ${PM.round === '0.5' ? 'selected' : ''}>Redondear al 0,50 arriba</option>
-            <option value="1" ${PM.round === '1' ? 'selected' : ''}>Redondear al 1,00 USD arriba</option>
+            <option value="1" ${PM.round === '1' ? 'selected' : ''}>Redondear a ${fmtCur(1)} arriba</option>
           </select>
         </label>
       </div>` : ''}
@@ -538,13 +538,13 @@ async function viewPreciosMasivo() {
           <input type="checkbox" data-chk="${p.id}" ${chk ? 'checked' : ''}>
           <span>
             <b>${esc(p.name)}</b>
-            <small>Costo: ${fmt(c, 4)} USD | Actual: <b>${fmt(oldP)} USD</b> (${fmt(oldM, 0)}%)</small>
-            ${changed ? `<small class="df ${newP >= oldP ? 'in' : 'outq'}">Nuevo: ${fmt(newP)} USD${S.rate ? ' (' + fmt(newP * S.rate) + ' Bs)' : ''} · Margen ${fmt(newM, 0)}%</small>` : ''}
+            <small>Costo: ${fmtCur(c, 4)} | Actual: <b>${fmtCur(oldP)}</b> (${fmt(oldM, 0)}%)</small>
+            ${changed ? `<small class="df ${newP >= oldP ? 'in' : 'outq'}">Nuevo: ${fmtCur(newP)}${S.rate ? ' (' + fmt(newP * S.rate) + ' Bs)' : ''} · Margen ${fmt(newM, 0)}%</small>` : ''}
           </span>
         </label>
         ${PM.mode === 'manual'
-          ? `<label style="width:6.8rem;margin:0">Nuevo USD<input data-mp="${p.id}" type="number" step="0.01" min="0" value="${PM.manual[p.id] ?? oldP.toFixed(2)}"></label>`
-          : `<span class="n" style="flex:none"><b>${fmt(newP)} USD</b><small class="${newM < targetMin - 0.1 && c > 0 ? 'warn' : 'mut'}">${fmt(newM, 0)}% margen</small></span>`}
+          ? `<label style="width:6.8rem;margin:0">Nuevo ${esc(curLabel())}<input data-mp="${p.id}" type="number" step="0.01" min="0" value="${PM.manual[p.id] ?? oldP.toFixed(2)}"></label>`
+          : `<span class="n" style="flex:none"><b>${fmtCur(newP)}</b><small class="${newM < targetMin - 0.1 && c > 0 ? 'warn' : 'mut'}">${fmt(newM, 0)}% margen</small></span>`}
       </div>`;
     }).join('') || '<p class="mut">No hay productos con ese filtro.</p>';
     paintSummary();

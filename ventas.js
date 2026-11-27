@@ -1,7 +1,7 @@
 // Ventas: nueva venta o corrección, historial, cobros y ticket
 const METHODS = {efectivo: 'Efectivo', pago_movil: 'Pago móvil', transferencia: 'Transferencia', zelle: 'Zelle', punto: 'Punto de venta', otro: 'Otro'};
 const DOCS = {nota_entrega: 'Nota de entrega (sin IVA)', factura: 'Factura (con IVA)'};
-const V = {cart: [], pays: [], edit: null, dup: null}, VH = {f: 'all', q: '', from: '', to: ''};
+const V = {cart: [], pays: [], edit: null, dup: null, prePid: null}, VH = {f: 'all', q: '', from: '', to: ''};
 const waDigits = (t) => String(t || '').replace(/\D/g, '').replace(/^0/, '58');
 const optList = (obj, sel) => Object.entries(obj).map(([k, v]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${v}</option>`).join('');
 
@@ -76,6 +76,7 @@ async function showTicket(id) {
 async function viewVenta() {
   const fq = V.fromQ; V.fromQ = null;
   const dup = V.dup; V.dup = null;
+  const prePid = V.prePid; V.prePid = null;
   const D = await vData(), old = V.edit ? await saleDetail(V.edit) : null, qd = fq ? await quoteDetail(fq) : null;
   if (old) old.items.forEach(i => { D.st[i.product_id] = (D.st[i.product_id] || 0) + +i.quantity; });   // el stock vuelve a contar lo ya vendido
   const pm = Object.fromEntries(D.products.map(p => [p.id, p]));
@@ -85,7 +86,7 @@ async function viewVenta() {
     return {pid, name: p?.name, unit: p?.unit, qty: qv, price: pr ?? adj, price0: base, svc: !!p?.is_service, untr: p?.track_inventory === false, pct: Number(p?.taxes?.percent || 0)};
   };
   const srcOrder = old || qd || dup;
-  V.cart = srcOrder ? srcOrder.items.filter(i => pm[i.product_id]).map(i => line(i.product_id, +i.quantity, dup ? null : +i.unit_price_usd)) : [];
+  V.cart = srcOrder ? srcOrder.items.filter(i => pm[i.product_id]).map(i => line(i.product_id, +i.quantity, dup ? null : +i.unit_price_usd)) : (prePid && pm[prePid] ? [line(prePid, 1)] : []);
   V.pays = old ? old.pays.map(p => ({acc: p.account_id, method: p.method, amount: +p.amount, ref: p.reference || ''})) : [];
 
   $('#view').innerHTML = `${V.edit ? `<div class="card title-row"><b>Corrigiendo la venta #${V.edit}</b><button class="lnk" id="vCancel">Cancelar</button></div>` : ''}
@@ -101,17 +102,18 @@ async function viewVenta() {
     </div>
     <div class="grid">
       <label>Fecha de la venta<input id="vDate" type="date" value="${esc(old ? old.s.sale_date : caracasDate())}"></label>
-      <label class="${S.bimoneda === false ? 'hidden' : ''}">Tasa (Bs por USD)<input id="vRate" type="number" step="0.0001" min="0.0001"></label>
-      <label>Descuento (USD)<input id="vDisc" type="number" step="0.01" min="0" value="0"></label>
+      <label class="${S.bimoneda === false ? 'hidden' : ''}">Tasa (${esc(secSym())} por ${esc(curLabel())})<input id="vRate" type="number" step="0.0001" min="0.0001"></label>
+      <label>Descuento (${esc(curLabel())})<input id="vDisc" type="number" step="0.01" min="0" value="0"></label>
     </div></div>
   <div class="card"><h2>Productos</h2>
-    ${D.topProds.length ? `<div class="stack" style="gap:.35rem;margin-bottom:.65rem"><small class="mut">Productos rápidos (toca para agregar):</small><div class="chips" id="vFastProds">${D.topProds.map(p => `<button type="button" data-fadd="${p.id}">${esc(p.name)} · <b>$${fmt(p.sale_price_usd)}</b></button>`).join('')}</div></div>` : ''}
+    ${D.topProds.length ? `<div class="stack" style="gap:.35rem;margin-bottom:.65rem"><small class="mut">Productos rápidos (toca para agregar):</small><div class="chips" id="vFastProds">${D.topProds.map(p => `<button type="button" data-fadd="${p.id}">${esc(p.name)} · <b>${fmtCur(p.sale_price_usd)}</b></button>`).join('')}</div></div>` : ''}
     <div class="scan-row"><input id="vSearch" type="search" placeholder="Buscar producto o escanear código"><button type="button" class="icon-btn scan-btn" id="vScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div><div class="list" id="vRes" style="margin:.5rem 0"></div><div id="vCart"></div></div>
   <div class="card"><h2>Total</h2><div id="vTot"></div></div>
   <div class="card"><h2>Pagos</h2>
-    ${D.accs.length ? `<div class="stack" style="gap:.35rem;margin-bottom:.65rem"><small class="mut">Cobro rápido (pago completo en 1 toque):</small><div class="chips" id="vQuickPay">${D.accs.slice(0, 5).map(a => `<button type="button" data-qacc="${a.id}">${esc(a.name)} (${a.currency})</button>`).join('')}</div></div>` : ''}
+    ${D.accs.length ? `<div class="stack" style="gap:.35rem;margin-bottom:.65rem"><small class="mut">Cobro rápido (pago completo en 1 toque):</small><div class="chips" id="vQuickPay">${D.accs.slice(0, 5).map(a => `<button type="button" data-qacc="${a.id}">${esc(a.name)} (${a.currency === 'VES' ? esc(secSym()) : esc(curLabel())})</button>`).join('')}</div></div>` : ''}
+    ${D.accs.some(a => a.currency !== 'VES') ? `<div class="stack" style="gap:.35rem;margin-bottom:.65rem"><small class="mut">Billete recibido en efectivo (calcula vuelto automático):</small><div class="chips" id="vBills">${[5, 10, 20, 50, 100].map(b => `<button type="button" data-bill="${b}">${fmtCur(b, 0)}</button>`).join('')}</div></div>` : ''}
     <div id="vPays"></div><div class="row"><button class="btn ghost" type="button" id="vAddPay">+ Agregar pago parcial / mixto</button></div>
-    <p id="vBal"></p><label id="vDueW" class="hidden">Fecha límite del saldo<input id="vDue" type="date"></label></div>
+    <div id="vBal" style="margin:.65rem 0"></div><label id="vDueW" class="hidden">Fecha límite del saldo<input id="vDue" type="date"></label></div>
   <label>Nota<input id="vNotes"></label>
   <div class="row"><button class="btn" id="vGo">${V.edit ? 'Guardar corrección' : 'Registrar venta'}</button></div>`;
   const rules = S.rules || {};
@@ -157,14 +159,16 @@ async function viewVenta() {
     const maxDisc = Number(rules.max_discount_percent || 0);
     const overDisc = maxDisc > 0 && discPct > maxDisc + 0.05 && (S.role || 'admin') !== 'admin';
     const showBs = S.bimoneda !== false && t.rate > 0;
-    $('#vTot').innerHTML = `Subtotal: ${fmt(t.sub)} USD${t.disc ? ' | Descuento: -' + fmt(t.disc) + ' (' + fmt(discPct, 1) + '%)' : ''}${t.ivaOn ? ' | IVA (' + qty(t.ivaPct) + '%): ' + fmt(t.tax) : ''}${overDisc ? `<br><span class="warn">Supera el tope máximo permitido de descuento (${qty(maxDisc)}%)</span>` : ''}<br><span class="big">${fmt(t.total)} USD</span>${showBs ? `<br><span class="mut">${fmt(t.total * t.rate)} Bs</span>` : ''}`;
-    $('#vBal').innerHTML = `Pagado: <b>${fmt(paid)} USD</b> | ` + (bal > 0.01 ? `<span class="warn">Queda a crédito: <b>${fmt(bal)} USD</b>${showBs ? ' (' + fmt(bal * t.rate) + ' Bs)' : ''}</span>` : bal < -0.01 ? `Vuelto: <b>${fmt(-bal)} USD</b>${showBs ? ' (' + fmt(-bal * t.rate) + ' Bs)' : ''}` : '<span class="in"><b>Pago completo</b></span>');
+    $('#vTot').innerHTML = `Subtotal: ${fmtCur(t.sub)}${t.disc ? ' | Descuento: -' + fmtCur(t.disc) + ' (' + fmt(discPct, 1) + '%)' : ''}${t.ivaOn ? ' | IVA (' + qty(t.ivaPct) + '%): ' + fmtCur(t.tax) : ''}${overDisc ? `<br><span class="warn">Supera el tope máximo permitido de descuento (${qty(maxDisc)}%)</span>` : ''}<br><span class="big">${fmtCur(t.total)}</span>${showBs ? `<br><span class="mut">${fmtSec(t.total * t.rate)}</span>` : ''}`;
+    $('#vBal').innerHTML = bal < -0.01
+      ? `<div class="gain pos" style="margin:0"><span>Vuelto a entregar al cliente</span><b>${fmtCur(-bal)}</b>${showBs ? `<small>${fmtSec(-bal * t.rate)} a la tasa actual · Pagado: ${fmtCur(paid)}</small>` : `<small>Pagado: ${fmtCur(paid)}</small>`}</div>`
+      : `Pagado: <b>${fmtCur(paid)}</b> | ` + (bal > 0.01 ? `<span class="warn">Queda a crédito: <b>${fmtCur(bal)}</b>${showBs ? ' (' + fmtSec(bal * t.rate) + ')' : ''}</span>` : '<span class="in"><b>Pago completo</b></span>');
     $('#vDueW').classList.toggle('hidden', !(bal > 0.01));
     if (bal > 0.01 && !dueTouched && !$('#vDue').value && Number(rules.default_credit_days || 0) > 0 && typeof addDaysISO === 'function') {
       $('#vDue').value = addDaysISO(caracasDate(), rules.default_credit_days);
     }
-    document.querySelectorAll('#vPays .payl').forEach(l => { const u = payUsd(V.pays[+l.dataset.i], t.rate); l.querySelector('.eq').textContent = '≈ ' + fmt(u) + ' USD' + (showBs ? ' | ' + fmt(u * t.rate) + ' Bs' : ''); });
-    document.querySelectorAll('#vCart .pl').forEach(l => { const c = V.cart[+l.dataset.i]; l.querySelector('.lt').textContent = 'Total: ' + fmt(c.qty * c.price) + ' USD'; });
+    document.querySelectorAll('#vPays .payl').forEach(l => { const u = payUsd(V.pays[+l.dataset.i], t.rate); l.querySelector('.eq').textContent = '≈ ' + fmtCur(u) + (showBs ? ' | ' + fmt(u * t.rate) + ' Bs' : ''); });
+    document.querySelectorAll('#vCart .pl').forEach(l => { const c = V.cart[+l.dataset.i]; l.querySelector('.lt').textContent = 'Total: ' + fmtCur(c.qty * c.price); });
     if ($('#vGo') && !V.edit) {
       $('#vGo').textContent = (V.cart.length && bal > 0.01) ? (paid > 0.01 ? 'Registrar venta (con saldo a crédito)' : 'Registrar venta a crédito') : 'Registrar venta';
     }
@@ -172,7 +176,7 @@ async function viewVenta() {
   };
   const drawCart = () => {
     $('#vCart').innerHTML = V.cart.map((c, i) => `<div class="pl" data-i="${i}"><div><b>${esc(c.name)}</b><small>${c.svc ? 'Servicio (sin inventario)' : c.untr ? 'Insumo sin inventario' : 'Disponible: ' + qty(D.st[c.pid] || 0) + ' ' + esc(c.unit)}</small><small class="lt"></small>${c.svc ? `<button class="lnk" data-free="${i}">${c.price > 0 ? 'Asumirlo yo (no cobrar)' : 'Cobrarlo al cliente'}</button>` : ''}<button class="lnk bad" data-rm="${i}">Quitar</button></div>
-      <div class="stack" style="gap:.3rem"><label>Cant.<div class="aj-step"><button type="button" class="aj-sb" data-qdec="${i}" aria-label="Restar 1">&minus;</button><input data-f="qty" type="number" step="0.001" min="0.001" value="${c.qty}" style="width:4rem"><button type="button" class="aj-sb" data-qinc="${i}" aria-label="Sumar 1">+</button></div></label><label>Precio USD<input data-f="price" type="number" step="0.01" min="0" value="${c.price}" ${lockSellerPrice ? 'disabled' : ''}></label></div></div>`).join('') || '<p class="mut">Busca y agrega productos.</p>';
+      <div class="stack" style="gap:.3rem"><label>Cant.<div class="aj-step"><button type="button" class="aj-sb" data-qdec="${i}" aria-label="Restar 1">&minus;</button><input data-f="qty" type="number" step="0.001" min="0.001" value="${c.qty}" style="width:4rem"><button type="button" class="aj-sb" data-qinc="${i}" aria-label="Sumar 1">+</button></div></label><label>Precio (${esc(curLabel())})<input data-f="price" type="number" step="0.01" min="0" value="${c.price}" ${lockSellerPrice ? 'disabled' : ''}></label></div></div>`).join('') || '<p class="mut">Busca y agrega productos.</p>';
     totals();
   };
   const drawPays = () => {
@@ -209,7 +213,7 @@ async function viewVenta() {
     const t = e.target.value.trim().toLowerCase(), pl = curPriceList();
     $('#vRes').innerHTML = t ? (D.products.filter(p => (p.name + ' ' + (p.sku || '')).toLowerCase().includes(t)).slice(0, 6).map(p => {
       const pr = priceWithList(p.sale_price_usd, pl);
-      return `<button class="item" data-add="${p.id}"><span><b>${esc(p.name)}</b><small>${fmt(pr)} USD${pl ? ' (' + esc(pl.name) + ')' : ''} | ${p.is_service ? 'Servicio' : p.track_inventory === false ? 'Sin inventario' : 'Disponible: ' + qty(D.st[p.id] || 0) + ' ' + esc(p.unit)}</small></span><span class="mut">+</span></button>`;
+      return `<button class="item" data-add="${p.id}"><span><b>${esc(p.name)}</b><small>${fmtCur(pr)}${pl ? ' (' + esc(pl.name) + ')' : ''} | ${p.is_service ? 'Servicio' : p.track_inventory === false ? 'Sin inventario' : 'Disponible: ' + qty(D.st[p.id] || 0) + ' ' + esc(p.unit)}</small></span><span class="mut">+</span></button>`;
     }).join('') || '<p class="mut">Sin resultados.</p>') : '';
   };
   const addProdByCode = (code) => {
@@ -220,7 +224,7 @@ async function viewVenta() {
     else V.cart.push(line(p.id, 1));
     drawCart();
     const curQ = V.cart.find(c => c.pid === p.id)?.qty || 1;
-    return {ok: true, msg: `${p.name} (x${qty(curQ)}) — ${fmt(priceWithList(p.sale_price_usd, curPriceList()))} USD`};
+    return {ok: true, msg: `${p.name} (x${qty(curQ)}) — ${fmtCur(priceWithList(p.sale_price_usd, curPriceList()))}`};
   };
   $('#vScan').onclick = () => openScanner({
     title: 'Escanear para vender',
@@ -284,6 +288,17 @@ async function viewVenta() {
       V.pays = [{acc: a.id, method: Object.keys(accMethods(a))[0] || 'efectivo', amount: amt, ref: ''}];
       drawPays();
       toast(`Pago completo cargado en ${a.name}`);
+    };
+  }
+  if ($('#vBills')) {
+    $('#vBills').onclick = (e) => {
+      const b = e.target.closest('[data-bill]'); if (!b) return;
+      if (!V.cart.length) return toast('Agrega productos primero', true);
+      const cashAcc = D.accs.find(a => a.currency !== 'VES' && (!a.methods?.length || a.methods.includes('efectivo'))) || D.accs.find(a => a.currency !== 'VES') || D.accs[0];
+      if (!cashAcc) return;
+      const billAmt = Number(b.dataset.bill || 0);
+      V.pays = [{acc: cashAcc.id, method: 'efectivo', amount: billAmt, ref: ''}];
+      drawPays();
     };
   }
   $('#vAddPay').onclick = () => {
@@ -369,8 +384,8 @@ async function viewHistVentas() {
     const pendUsd = actList.filter(r => r.status === 'pendiente').reduce((s, r) => s + Math.max(0, Number(r.total_usd || 0) - Number(r.paid_usd || 0)), 0);
 
     $('#vhStats').innerHTML = `
-      <div class="stat"><span>Total vendido</span><b>${fmt(totUsd)} USD</b><span>${actList.length} ${actList.length === 1 ? 'venta activa' : 'ventas activas'} · ${fmt(totBsHist)} Bs hist.</span></div>
-      <div class="stat ${pendUsd > 0.01 ? 'warn' : ''}"><span>Por cobrar</span><b>${fmt(pendUsd)} USD</b><span>${S.rate ? fmt(pendUsd * S.rate) + ' Bs a tasa hoy' : ''}</span></div>`;
+      <div class="stat"><span>Total vendido</span><b>${fmtCur(totUsd)}</b><span>${actList.length} ${actList.length === 1 ? 'venta activa' : 'ventas activas'} · ${fmt(totBsHist)} Bs hist.</span></div>
+      <div class="stat ${pendUsd > 0.01 ? 'warn' : ''}"><span>Por cobrar</span><b>${fmtCur(pendUsd)}</b><span>${S.rate ? fmt(pendUsd * S.rate) + ' Bs a tasa hoy' : ''}</span></div>`;
 
     $('#hL').innerHTML = list.map(r => {
       const d = Math.max(0, Number(r.total_usd || 0) - Number(r.paid_usd || 0));
@@ -384,8 +399,8 @@ async function viewHistVentas() {
           <b>${idLbl} ${esc(r.customer || 'Cliente general')}</b>
           <small>${dmy(r.sale_date)} | ${r.doc_type === 'factura' ? 'Con IVA' : 'Sin IVA'}${r.due_date && r.status === 'pendiente' ? ' | vence ' + dmy(r.due_date) : ''}</small>
           <small>${r.status === 'pendiente'
-            ? 'Debe ' + fmt(d) + ' USD (' + fmt(d * (S.rate || r.exchange_rate)) + ' Bs hoy)'
-            : fmt(r.total_usd) + ' USD (' + fmt(r.total_usd * r.exchange_rate) + ' Bs)'}</small>
+            ? 'Debe ' + fmtCur(d) + (S.bimoneda !== false ? ' (' + fmtSec(d * (S.rate || r.exchange_rate)) + ' hoy)' : '')
+            : fmtCur(r.total_usd) + (S.bimoneda !== false ? ' (' + fmtSec(r.total_usd * r.exchange_rate) + ')' : '')}</small>
         </span>
         <span class="badge ${bCls}">${bTxt}</span>
       </button>`;
@@ -408,8 +423,8 @@ async function saleSheet(id) {
   const showBs = S.bimoneda !== false && Number(s.exchange_rate || S.rate || 0) > 0;
   openSheet('Venta ' + (Number(id) < 0 ? 'LOC-' + Math.abs(id) + ' (Sin subir)' : '#' + id), `<p>${esc(s.parties?.name || 'Cliente general')} | ${dmy(s.sale_date)} | ${(s.doc_type === 'factura' || Number(s.tax_usd || 0) > 0) ? 'Con IVA' : 'Sin IVA'}${anul ? ' | <b class="warn">ANULADA</b>' : ''}</p>
     <div class="scroll"><table><thead><tr><th>Producto</th><th class="n">Cant.</th><th class="n">Precio</th><th class="n">Total</th></tr></thead><tbody>${d.items.map(i => `<tr><td>${esc(i.name)}</td><td class="n">${qty(i.quantity)}</td><td class="n">${fmt(i.unit_price_usd)}</td><td class="n">${fmt(i.quantity * i.unit_price_usd)}</td></tr>`).join('')}</tbody></table></div>
-    <p>Subtotal ${fmt(s.subtotal_usd)} | Desc. ${fmt(s.discount_usd)} | IVA ${fmt(s.tax_usd)}<br><b>Total ${fmt(s.total_usd)} USD</b>${showBs ? ` (${fmt(s.total_usd * s.exchange_rate)} Bs)` : ''}<br>Pagado ${fmt(paid)} USD${!anul && bal > 0.01 ? ` | <span class="warn">Debe ${fmt(bal)} USD${showBs ? ' (' + fmt(bal * (S.rate || s.exchange_rate)) + ' Bs a la tasa de hoy)' : ''}</span>` : ''}</p>
-    ${d.pays.length ? `<p class="mut">${d.pays.map(p => `${METHODS[p.method] || p.method} (${esc(p.accounts?.name || '')}): ${fmt(p.amount)} ${p.currency}`).join('<br>')}</p>` : ''}
+    <p>Subtotal ${fmtCur(s.subtotal_usd)} | Desc. ${fmtCur(s.discount_usd)} | IVA ${fmtCur(s.tax_usd)}<br><b>Total ${fmtCur(s.total_usd)}</b>${showBs ? ` (${fmtSec(s.total_usd * s.exchange_rate)})` : ''}<br>Pagado ${fmtCur(paid)}${!anul && bal > 0.01 ? ` | <span class="warn">Debe ${fmtCur(bal)}${showBs ? ' (' + fmtSec(bal * (S.rate || s.exchange_rate)) + ' a la tasa de hoy)' : ''}</span>` : ''}</p>
+    ${d.pays.length ? `<p class="mut">${d.pays.map(p => `${METHODS[p.method] || p.method} (${esc(p.accounts?.name || '')}): ${money(p.amount, p.currency)}`).join('<br>')}</p>` : ''}
     ${canProfit ? profitHtml(d) : ''}
     <div class="row">
       <button class="btn" id="sT">Ticket</button>

@@ -19,7 +19,7 @@ const AJ = {
 // ---------- Ajuste masivo de inventario: panel práctico + historial propio ----------
 const AJMODE = {
   conteo: ['Conteo real', 'Real', 'Escribe la cantidad real que contaste. Las diferencias salen o entran al costo actual del producto.'],
-  ingreso: ['Ingreso', 'Entra', 'Escribe cuánto entra de cada producto y coloca su costo unitario en USD (se recalculará el costo promedio).'],
+  ingreso: ['Ingreso', 'Entra', 'Escribe cuánto entra de cada producto y coloca su costo unitario (se recalculará el costo promedio).'],
   salida: ['Salida', 'Sale', 'Escribe cuánto sale de cada producto. La salida se registra automáticamente con el costo actual que tiene cada producto.']
 };
 const AJREASON = {
@@ -141,9 +141,9 @@ async function viewAjusteMasivo() {
       if (d > 0 && m === 'ingreso') {
         const st0 = Math.max(+r.stock, 0), c0 = +r.avg_cost_usd || 0;
         const newAvg = (st0 + d) > 0 ? ((st0 * c0) + (d * uc)) / (st0 + d) : uc;
-        df.textContent = `+${qty(d)} a ${fmt(uc, 4)} USD = ${fmt(valUsd)} USD (nuevo prom: ${fmt(newAvg, 4)})`;
+        df.textContent = `+${qty(d)} a ${fmtCur(uc, 4)} = ${fmtCur(valUsd)} (nuevo prom: ${fmt(newAvg, 4)})`;
       } else {
-        df.textContent = `${d > 0 ? '+' : '-'}${qty(Math.abs(d))} ${r.unit} · costo ${fmt(uc, 4)} USD · valor ${fmt(valUsd)} USD`;
+        df.textContent = `${d > 0 ? '+' : '-'}${qty(Math.abs(d))} ${r.unit} · costo ${fmtCur(uc, 4)} · valor ${fmtCur(valUsd)}`;
       }
     });
 
@@ -153,13 +153,13 @@ async function viewAjusteMasivo() {
 
     $('#ajStats').innerHTML = `
       <div class="stat"><span>Modificados</span><b>${P.length}</b><span>de ${rows.length} productos</span></div>
-      ${ent.length || m === 'ingreso' ? `<div class="stat"><span>Entradas</span><b class="pos">+${fmt(inUsd)} USD</b><span>${ent.length} prod.${S.rate ? ' · ' + fmt(inUsd * S.rate) + ' Bs' : ''}</span></div>` : ''}
-      ${sal.length || m === 'salida' ? `<div class="stat bad"><span>Salidas</span><b>-${fmt(outUsd)} USD</b><span>${sal.length} prod.${S.rate ? ' · ' + fmt(outUsd * S.rate) + ' Bs' : ''}</span></div>` : ''}`;
+      ${ent.length || m === 'ingreso' ? `<div class="stat"><span>Entradas</span><b class="pos">+${fmtCur(inUsd)}</b><span>${ent.length} prod.${S.rate ? ' · ' + fmt(inUsd * S.rate) + ' Bs' : ''}</span></div>` : ''}
+      ${sal.length || m === 'salida' ? `<div class="stat bad"><span>Salidas</span><b>-${fmtCur(outUsd)}</b><span>${sal.length} prod.${S.rate ? ' · ' + fmt(outUsd * S.rate) + ' Bs' : ''}</span></div>` : ''}`;
 
     if ($('#ajOnlyLbl')) $('#ajOnlyLbl').textContent = `Solo modificados (${P.length})`;
 
     $('#ajS').innerHTML = P.length
-      ? `${ent.length ? `Entran <b>${ent.length}</b> productos por <b class="pos">${fmt(inUsd)} USD</b>.<br>` : ''}${sal.length ? `Salen <b>${sal.length}</b> productos por <b class="neg">${fmt(outUsd)} USD</b> (al costo actual).${AJ.fin === 'gasto' ? ' <b>Se registrará como gasto.</b>' : ''}<br>` : ''}${AJ.fin === 'pago' && ent.length ? `Se descontarán <b>${fmt(inUsd)} USD</b> de la cuenta elegida.` : ''}`
+      ? `${ent.length ? `Entran <b>${ent.length}</b> productos por <b class="pos">${fmtCur(inUsd)}</b>.<br>` : ''}${sal.length ? `Salen <b>${sal.length}</b> productos por <b class="neg">${fmtCur(outUsd)}</b> (al costo actual).${AJ.fin === 'gasto' ? ' <b>Se registrará como gasto.</b>' : ''}<br>` : ''}${AJ.fin === 'pago' && ent.length ? `Se descontarán <b>${fmtCur(inUsd)}</b> de la cuenta elegida.` : ''}`
       : '<span class="mut">Aún no hay cambios. Escribe cantidades o usa los botones - / + o el escáner.</span>';
 
     if ($('#ajAccBal') && AJ.fin === 'pago') {
@@ -183,11 +183,11 @@ async function viewAjusteMasivo() {
       return `<div class="item aj-row" data-pid="${r.product_id}">
         <span style="flex:1;min-width:140px">
           <b>${esc(r.name)}</b>
-          <small>${r.sku ? esc(r.sku) + ' | ' : ''}Sistema: <b>${qty(r.stock)} ${esc(r.unit)}</b> | costo ${fmt(curCost, 4)} USD</small>
+          <small>${r.sku ? esc(r.sku) + ' | ' : ''}Sistema: <b>${qty(r.stock)} ${esc(r.unit)}</b> | costo ${fmtCur(curCost, 4)}</small>
           <small class="df"></small>
         </span>
         <div class="aj-ctrls">
-          ${m === 'ingreso' ? `<label style="width:6.2rem;margin:0">Costo USD<input data-cost="${r.product_id}" type="number" step="0.0001" min="0" value="${costVal}"></label>` : ''}
+          ${m === 'ingreso' ? `<label style="width:6.2rem;margin:0">Costo ${esc(curLabel())}<input data-cost="${r.product_id}" type="number" step="0.0001" min="0" value="${costVal}"></label>` : ''}
           <div class="aj-step-wrap">
             <label style="margin:0">${AJMODE[m][1]}
               <div class="aj-step">
@@ -299,7 +299,7 @@ async function viewAjusteMasivo() {
       p_expense_type_id: AJ.fin === 'gasto' ? +AJ.etype || null : null
     }));
     AJ.vals = {}; AJ.costs = {}; AJ.note = ''; AJ.onlyMod = false;
-    toast(`${res.n} productos ajustados${+res.perdida_usd && AJ.fin === 'gasto' ? ' | pérdida registrada: ' + fmt(res.perdida_usd) + ' USD' : ''}`);
+    toast(`${res.n} productos ajustados${+res.perdida_usd && AJ.fin === 'gasto' ? ' | pérdida registrada: ' + fmtCur(res.perdida_usd) : ''}`);
     AJ.sub = 'historial';
     render();
   });
@@ -316,8 +316,8 @@ function renderAjusteHistorial(tabBar, batches, legacyMoves, accs, types) {
   $('#view').innerHTML = `${tabBar}
     <div class="stats">
       <div class="stat"><span>Ajustes registrados</span><b>${batches.length}</b></div>
-      <div class="stat"><span>Total entradas</span><b class="pos">+${fmt(totIn)} USD</b></div>
-      <div class="stat bad"><span>Total salidas</span><b>-${fmt(totOut)} USD</b></div>
+      <div class="stat"><span>Total entradas</span><b class="pos">+${fmtCur(totIn)}</b></div>
+      <div class="stat bad"><span>Total salidas</span><b>-${fmtCur(totOut)}</b></div>
     </div>
     <div class="card stack">
       <input id="ajHQ" type="search" placeholder="Buscar por motivo, nota, usuario o producto..." value="${esc(AJ.hQ)}">
@@ -330,7 +330,7 @@ function renderAjusteHistorial(tabBar, batches, legacyMoves, accs, types) {
       <div class="list" id="ajHL"></div>
     </div>
     ${legacyMoves.length ? `<details class="card"><summary>Movimientos individuales de ajuste y merma (${legacyMoves.length} recientes)</summary>
-      <div class="scroll"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th class="n">Cant.</th><th class="n">Costo USD</th><th>Nota</th></tr></thead><tbody>
+      <div class="scroll"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th class="n">Cant.</th><th class="n">Costo ${esc(curLabel())}</th><th>Nota</th></tr></thead><tbody>
         ${legacyMoves.map(m => `<tr><td>${fdate(m.created_at)}</td><td>${esc(m.products?.name)}</td><td>${MOV[m.movement_type] || m.movement_type}</td>
           <td class="n ${m.quantity > 0 ? 'in' : 'outq'}">${m.quantity > 0 ? '+' : ''}${qty(m.quantity)} ${esc(m.products?.unit || '')}</td>
           <td class="n">${m.unit_cost_usd != null ? fmt(m.unit_cost_usd, 4) : '-'}</td><td>${esc(m.notes)}</td></tr>`).join('')}
@@ -354,9 +354,9 @@ function renderAjusteHistorial(tabBar, batches, legacyMoves, accs, types) {
           ${b.note ? `<small style="display:block">${esc(b.note)}</small>` : ''}
         </span>
         <span class="n">
-          ${+b.in_usd > 0 ? `<b class="pos">+${fmt(b.in_usd)} USD</b>` : ''}
-          ${+b.out_usd > 0 ? `<b class="neg">-${fmt(b.out_usd)} USD</b>` : ''}
-          ${!(+b.in_usd > 0) && !(+b.out_usd > 0) ? '<small class="mut">0,00 USD</small>' : ''}
+          ${+b.in_usd > 0 ? `<b class="pos">+${fmtCur(b.in_usd)}</b>` : ''}
+          ${+b.out_usd > 0 ? `<b class="neg">-${fmtCur(b.out_usd)}</b>` : ''}
+          ${!(+b.in_usd > 0) && !(+b.out_usd > 0) ? '<small class="mut">${fmtCur(0)}</small>' : ''}
         </span>
       </button>`;
     }).join('') || '<p class="mut">Aún no hay ajustes masivos en el historial. Al aplicar un ajuste aparecerá aquí con todo su detalle.</p>';
@@ -388,10 +388,10 @@ function renderAjusteHistorial(tabBar, batches, legacyMoves, accs, types) {
     openSheet(`Ajuste ${idLbl} · ${MLAB[b.mode] || b.mode}`, `
       <p class="mut" style="margin:0 0 .6rem">${fdate(b.created_at)} · Responsable: <b>${esc(b.created_by || 'Usuario')}</b><br>${esc(finDesc)}${b.note ? '<br>Nota: ' + esc(b.note) : ''}</p>
       <div class="rl"><span>Productos ajustados</span><b>${b.items_count}</b></div>
-      ${+b.in_usd > 0 ? `<div class="rl"><span>Valor entradas</span><b class="pos">+${fmt(b.in_usd)} USD</b></div>` : ''}
-      ${+b.out_usd > 0 ? `<div class="rl"><span>Valor salidas</span><b class="neg">-${fmt(b.out_usd)} USD</b></div>` : ''}
+      ${+b.in_usd > 0 ? `<div class="rl"><span>Valor entradas</span><b class="pos">+${fmtCur(b.in_usd)}</b></div>` : ''}
+      ${+b.out_usd > 0 ? `<div class="rl"><span>Valor salidas</span><b class="neg">-${fmtCur(b.out_usd)}</b></div>` : ''}
       <div class="scroll" style="margin-top:.8rem"><table>
-        <thead><tr><th>Producto</th><th class="n">Antes &rarr; Después</th><th class="n">Cambio</th><th class="n">Costo</th><th class="n">Total USD</th></tr></thead>
+        <thead><tr><th>Producto</th><th class="n">Antes &rarr; Después</th><th class="n">Cambio</th><th class="n">Costo</th><th class="n">Total ${esc(curLabel())}</th></tr></thead>
         <tbody>${items.map(i => `<tr>
           <td>${esc(i.name)}${i.sku ? `<small>${esc(i.sku)}</small>` : ''}</td>
           <td class="n">${qty(i.prev_stock)} &rarr; <b>${qty(i.new_stock)}</b> ${esc(i.unit || '')}</td>
@@ -407,7 +407,7 @@ function renderAjusteHistorial(tabBar, batches, legacyMoves, accs, types) {
 
     $('#ajCsv').onclick = () => {
       const esc2 = (v) => '"' + String(v ?? '').replace(/"/g, '""') + '"';
-      const csv = ['Producto,SKU,Unidad,Stock Anterior,Stock Nuevo,Cambio,Costo USD,Total USD',
+      const csv = [`Producto,SKU,Unidad,Stock Anterior,Stock Nuevo,Cambio,Costo ${curCode()},Total ${curCode()}`, 
         ...items.map(i => [esc2(i.name), esc2(i.sku), esc2(i.unit), i.prev_stock, i.new_stock, i.delta, i.unit_cost_usd, i.total_usd].join(','))].join('\n');
       downloadBlob(new Blob(['\ufeff' + csv], {type: 'text/csv;charset=utf-8'}), `ajuste_${b.id}_${caracasDate()}.csv`);
     };
@@ -417,11 +417,11 @@ function renderAjusteHistorial(tabBar, batches, legacyMoves, accs, types) {
         `Fecha: ${fdate(b.created_at)} · Por: ${b.created_by || 'Usuario'}`,
         b.note ? `Nota: ${b.note}` : '',
         '',
-        ...items.slice(0, 25).map(i => `• ${i.name}: ${+i.delta > 0 ? '+' : ''}${qty(i.delta)} ${i.unit || ''} (${qty(i.prev_stock)} -> ${qty(i.new_stock)}) · ${fmt(i.total_usd)} USD`),
+        ...items.slice(0, 25).map(i => `• ${i.name}: ${+i.delta > 0 ? '+' : ''}${qty(i.delta)} ${i.unit || ''} (${qty(i.prev_stock)} -> ${qty(i.new_stock)}) · ${fmtCur(i.total_usd)}`),
         items.length > 25 ? `... y ${items.length - 25} productos más.` : '',
         '',
-        +b.in_usd > 0 ? `Entradas: +${fmt(b.in_usd)} USD` : '',
-        +b.out_usd > 0 ? `Salidas: -${fmt(b.out_usd)} USD` : ''
+        +b.in_usd > 0 ? `Entradas: +${fmtCur(b.in_usd)}` : '',
+        +b.out_usd > 0 ? `Salidas: -${fmtCur(b.out_usd)}` : ''
       ].filter(Boolean);
       window.open(`https://wa.me/?text=${encodeURIComponent(lines.join('\n'))}`, '_blank');
     };
@@ -437,7 +437,7 @@ async function viewSugerida() {
   const rows = rawSug.filter(r => !untrSet.has(Number(r.product_id)) && +r.min_stock > 0 && +r.stock <= +r.min_stock);
   const sug = (r) => Math.max(Math.ceil(+r.min_stock * 2 - +r.stock), 1);
   $('#view').innerHTML = rows.length ? `<div class="card"><p class="mut">Productos en su mínimo o por debajo. Ajusta las cantidades y llévalos a una nueva compra.</p><div class="list">${rows.map(r => `<div class="item">
-    <label class="chk" style="flex:1"><input type="checkbox" data-s="${r.product_id}" checked><span><b>${esc(r.name)}</b><small>Hay ${qty(r.stock)} ${esc(r.unit)} | mínimo ${qty(r.min_stock)} | costo ${fmt(r.avg_cost_usd)} USD</small></span></label>
+    <label class="chk" style="flex:1"><input type="checkbox" data-s="${r.product_id}" checked><span><b>${esc(r.name)}</b><small>Hay ${qty(r.stock)} ${esc(r.unit)} | mínimo ${qty(r.min_stock)} | costo ${fmtCur(r.avg_cost_usd)}</small></span></label>
     <label style="width:6.5rem;margin:0">Comprar<input data-q="${r.product_id}" type="number" step="0.001" min="0" value="${sug(r)}"></label></div>`).join('')}</div></div>
     <div class="row"><button class="btn" id="sgGo">Pasar a una nueva compra</button></div>` : '<p class="mut">Todo está por encima de su mínimo. Define el stock mínimo de tus productos para recibir sugerencias de compra.</p>';
   if (!rows.length) return;
@@ -623,9 +623,9 @@ async function viewReinicio() {
 // ---------- Deuda general de cada cliente (por cobrar) ----------
 async function viewDeudas() {
   const rows = await q(db.from('deudas_clientes').select('*').order('debt_usd', {ascending: false})), tot = rows.reduce((a, r) => a + +r.debt_usd, 0);
-  $('#view').innerHTML = `<div class="stat warn" style="margin-bottom:1rem"><span>Total por cobrar</span><b>${fmt(tot)} USD</b><span>${S.rate ? fmt(tot * S.rate) + ' Bs a la tasa de hoy | ' : ''}${rows.length} ${rows.length === 1 ? 'cliente' : 'clientes'}</span></div>
+  $('#view').innerHTML = `<div class="stat warn" style="margin-bottom:1rem"><span>Total por cobrar</span><b>${fmtCur(tot)}</b><span>${S.rate ? fmt(tot * S.rate) + ' Bs a la tasa de hoy | ' : ''}${rows.length} ${rows.length === 1 ? 'cliente' : 'clientes'}</span></div>
     <div class="list" id="dcL">${rows.map((r, i) => `<button class="item" data-i="${i}"><span><b>${esc(r.customer)}</b><small>${r.num_ventas} ${r.num_ventas === 1 ? 'venta pendiente' : 'ventas pendientes'} | desde hace ${diasDesde(r.desde)} días</small></span>
-      <span class="n"><b>${fmt(r.debt_usd)} USD</b><small>${S.rate ? fmt(r.debt_usd * S.rate) + ' Bs hoy' : ''}</small></span></button>`).join('') || '<p class="mut">Nadie te debe nada.</p>'}</div>`;
+      <span class="n"><b>${fmtCur(r.debt_usd)}</b><small>${S.rate ? fmt(r.debt_usd * S.rate) + ' Bs hoy' : ''}</small></span></button>`).join('') || '<p class="mut">Nadie te debe nada.</p>'}</div>`;
   $('#dcL').onclick = (e) => { const b = e.target.closest('[data-i]'); if (b) run(() => debtSheet(rows[+b.dataset.i])); };
 }
 async function debtSheet(c) {
@@ -633,13 +633,13 @@ async function debtSheet(c) {
   qb = c.customer_id === null ? qb.is('customer_id', null) : qb.eq('customer_id', c.customer_id);
   const [sales, accs, payTxt] = await Promise.all([q(qb), loadActiveAccounts(), getPaymentDetailsText()]);
   const hoy = caracasDate(), bal = (s) => s.total_usd - s.paid_usd, total = sales.reduce((a, s) => a + bal(s), 0);
-  openSheet(esc(c.customer), `<form id="dcF" class="stack"><p><b>Deuda total: ${fmt(total)} USD</b>${S.rate ? ' (' + fmt(total * S.rate) + ' Bs a la tasa de hoy)' : ''}</p>
+  openSheet(esc(c.customer), `<form id="dcF" class="stack"><p><b>Deuda total: ${fmtCur(total)}</b>${S.rate ? ' (' + fmt(total * S.rate) + ' Bs a la tasa de hoy)' : ''}</p>
     <p class="mut">Marca las ventas que quieres pagar. Si el monto no alcanza para todas, se pagan completas las más antiguas y la siguiente queda con un abono y lo que falta abierto.</p>
     <div class="list" id="dcS">${sales.map(s => `<div class="item"><label class="chk" style="flex:1"><input type="checkbox" data-s="${s.id}" checked><span><b>Venta #${s.id}</b>
-      <small>${s.sale_date}${s.due_date && s.due_date < hoy ? ' | vencida' : ''} | debe ${fmt(bal(s))} USD</small><small class="al" style="display:block"></small></span></label></div>`).join('')}</div>
+      <small>${s.sale_date}${s.due_date && s.due_date < hoy ? ' | vencida' : ''} | debe ${fmtCur(bal(s))}</small><small class="al" style="display:block"></small></span></label></div>`).join('')}</div>
     <label>Cuenta<select name="acc">${acctOpts(accs)}</select></label>
     <small id="dcAccBal" style="display:block;margin-top:-.45rem"></small>
-    <label>Tasa de cambio (Bs por USD)<input name="rate" type="number" step="0.0001" min="0.0001" value="${S.rate || ''}"></label>
+    <label>Tasa de cambio (${esc(secSym())} por ${esc(curLabel())})<input name="rate" type="number" step="0.0001" min="0.0001" value="${S.rate || ''}"></label>
     <label>Método<select name="method"></select></label>
     <label>Monto a cobrar<input name="amount" type="number" step="0.01" min="0.01" required></label><p class="mut" id="dcSum"></p>
     <label>Referencia<input name="ref"></label>
@@ -650,8 +650,8 @@ async function debtSheet(c) {
   const paint = () => {
     const al = alloc(), usd = al.reduce((x, y) => x + y.a, 0), sel = selDebt(), over = (num(el.amount.value) || 0) / (factor() || 1) - sel;
     al.forEach(x => { const l = document.querySelector(`[data-s="${x.s.id}"]`).closest('.item').querySelector('.al'); l.className = 'al ' + (x.st === 'full' ? 'in' : x.st === 'part' ? 'warn' : 'mut'); l.style.display = 'block';
-      l.textContent = x.st === 'full' ? 'Se paga completa' : x.st === 'part' ? `Abono de ${fmt(x.a)} USD: queda abierta debiendo ${fmt(bal(x.s) - x.a)} USD` : x.st === 'none' ? 'No alcanza: queda pendiente' : ''; });
-    $('#dcSum').textContent = over > 0.02 ? `El monto supera la deuda de las ventas elegidas por ${fmt(over)} USD.` : `Cobrarás ${fmt(usd)} USD. Quedan pendientes ${fmt(Math.max(sel - usd, 0))} USD de las ventas elegidas.`;
+      l.textContent = x.st === 'full' ? 'Se paga completa' : x.st === 'part' ? `Abono de ${fmtCur(x.a)}: queda abierta debiendo ${fmtCur(bal(x.s) - x.a)}` : x.st === 'none' ? 'No alcanza: queda pendiente' : ''; });
+    $('#dcSum').textContent = over > 0.02 ? `El monto supera la deuda de las ventas elegidas por ${fmtCur(over)}.` : `Cobrarás ${fmtCur(usd)}. Quedan pendientes ${fmtCur(Math.max(sel - usd, 0))} de las ventas elegidas.`;
     if ($('#dcAccBal')) $('#dcAccBal').innerHTML = accBalanceLine(accs.find(a => String(a.id) === el.acc.value), 0, false);
   };
   const fillM = () => { el.method.innerHTML = optList(accMethods(accs.find(a => String(a.id) === el.acc.value))); };
@@ -695,7 +695,7 @@ async function debtSheet(c) {
       }
     });
   };
-  if (c.phone) $('#dcWa').onclick = () => window.open(waLink(c, `Hola ${(c.customer || '').split(' ')[0]}, te recordamos que tienes un saldo pendiente de ${fmt(total)} USD${S.rate ? ' (' + fmt(total * S.rate) + ' Bs a la tasa de hoy)' : ''}.${payTxt ? '\n\n' + payTxt : ''}\n\nGracias por tu atención.`), '_blank');
+  if (c.phone) $('#dcWa').onclick = () => window.open(waLink(c, `Hola ${(c.customer || '').split(' ')[0]}, te recordamos que tienes un saldo pendiente de ${fmtCur(total)}${S.rate ? ' (' + fmt(total * S.rate) + ' Bs a la tasa de hoy)' : ''}.${payTxt ? '\n\n' + payTxt : ''}\n\nGracias por tu atención.`), '_blank');
 }
 
 // ---------- Módulos opcionales (se activan en Configuración > Negocio) ----------

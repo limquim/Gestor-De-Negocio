@@ -1,5 +1,5 @@
 // Seguridad, Modo Empleado configurable, Recuperación de PIN (2 capas) y bitácora local
-const APP_VERSION = 'E3.6';
+const APP_VERSION = 'E3.7';
 const ROLE_NAMES = {admin: 'Dueño / Administrador', vendedor: 'Modo Empleado'};
 const PIN_LS = 'gdn_owner_pin_v1';
 const PIN_REC_LS = 'gdn_owner_pin_rec_v1';
@@ -511,7 +511,7 @@ async function viewConsultaPrecios() {
           <small>${esc(p.sku || 'Sin código')} · ${esc(p.product_categories?.name || 'General')} · <span class="${stCls}">${stTxt}</span></small>
         </span>
         <span class="n">
-          <b>${fmt(p.sale_price_usd)} USD</b>
+          <b>${fmtCur(p.sale_price_usd)}</b>
           ${S.bimoneda !== false && S.rate ? `<small>${fmt(p.sale_price_usd * S.rate)} Bs</small>` : ''}
         </span>
       </div>`;
@@ -527,7 +527,7 @@ async function viewConsultaPrecios() {
       $('#cpSearch').value = hit ? (hit.sku || hit.name) : code;
       draw();
       return hit
-        ? {ok: true, msg: `${hit.name} — ${fmt(hit.sale_price_usd)} USD`}
+        ? {ok: true, msg: `${hit.name} — ${fmtCur(hit.sale_price_usd)}`}
         : {ok: false, msg: 'Sin producto con código ' + code};
     }
   });

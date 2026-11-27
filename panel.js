@@ -22,7 +22,7 @@ async function viewInicio() {
       </div>
       <div class="tiles">
         <button class="tile main" id="stSell">${ico('<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>')}<span>Nueva venta</span><small>Facturar al cliente</small></button>
-        <button class="tile" id="stPrices">${ico('<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>')}<span>${invFull ? 'Inventario' : 'Consultar precios'}</span><small>${invFull ? 'Stock, productos y catálogo' : 'Stock y precios en USD/Bs'}</small></button>
+        <button class="tile" id="stPrices">${ico('<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>')}<span>${invFull ? 'Inventario' : 'Consultar precios'}</span><small>${invFull ? 'Stock, productos y catálogo' : `Stock y precios en ${esc(curLabel())}`}</small></button>
         ${hasMod('production') && staffCan('produccion') ? `<button class="tile" data-go="produccion">${ico('<path d="M9 3h6M10 3v6L4.5 19a1.5 1.5 0 001.3 2h12.4a1.5 1.5 0 001.3-2L14 9V3"/><path d="M7.5 15h9"/>')}<span>Producción</span><small>Fabricar y fórmulas</small></button>` : ''}
         ${hasMod('purchases') && staffCan('compras') ? `<button class="tile" data-go="compras">${ico('<path d="M6 7h12l-1 13H7z"/><path d="M9 7a3 3 0 016 0"/>')}<span>Compras</span><small>Proveedores y mercancía</small></button>` : ''}
         ${hasMod('quotes') ? `<button class="tile" id="stQuote">${ico('<path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h6"/>')}<span>Cotizaciones</span><small>Presupuestos rápidos</small></button>` : ''}
@@ -59,7 +59,7 @@ async function viewInicio() {
     q(db.from('settings').select('*').eq('id', 1).single())
   ]);
   const stock = stockRaw.filter(x => !untrSet.has(Number(x.product_id)));
-  const U = (n) => fmt(n) + ' USD', ut = (r) => r.ingresos - r.costo_ventas - r.gastos;
+  const U = (n) => fmtCur(n), ut = (r) => r.ingresos - r.costo_ventas - r.gastos;
   const dl = (a, b) => b ? (a - b) / Math.abs(b) * 100 : null, dtxt = (a, b, l) => { const v = dl(a, b); return v === null ? '' : `${v >= 0 ? '+' : ''}${fmt(v, 0)}% ${l}`; };
   const cajaUsdReal = accs.filter(x => x.currency === 'USD').reduce((a, x) => a + Number(x.balance || 0), 0);
   const cajaVesReal = accs.filter(x => x.currency !== 'USD').reduce((a, x) => a + Number(x.balance || 0), 0);
@@ -128,12 +128,12 @@ async function viewInicio() {
   <div class="stats"><div class="stat"><span>Vendido hoy</span><b>${U(h.ingresos)}</b><span>${h.num_ventas} ${h.num_ventas === 1 ? 'venta' : 'ventas'}${S.rate ? ' | ' + fmt(h.ingresos * S.rate) + ' Bs' : ''}</span></div>
     <div class="stat ${gHoy < 0 ? 'bad' : ''}"><span>Ganancia bruta de hoy</span><b>${U(gHoy)}</b><span>ventas menos costo</span></div></div>
   <h2 class="sec">Tu dinero</h2>
-  <div class="stats"><button class="stat" data-go="finanzas"><span>Disponible en cuentas</span><b>${U(caja)}</b><span>${S.bimoneda !== false ? `${fmt(cajaUsdReal)} USD + ${fmt(cajaVesReal)} Bs` : 'En cuentas activas'}</span></button>
+  <div class="stats"><button class="stat" data-go="finanzas"><span>Disponible en cuentas</span><b>${U(caja)}</b><span>${S.bimoneda !== false ? `${fmtCur(cajaUsdReal)} + ${fmt(cajaVesReal)} Bs` : 'En cuentas activas'}</span></button>
     <button class="stat warn" id="pPend"><span>Te deben (por cobrar)</span><b>${U(mes.por_cobrar)}</b><span>${S.rate ? fmt(mes.por_cobrar * S.rate) + ' Bs a la tasa de hoy' : ''}</span></button>
     ${hasMod('purchases') ? `<button class="stat" id="pPag"><span>Debes (por pagar)</span><b>${U(mes.por_pagar)}</b><span>${S.rate ? fmt(mes.por_pagar * S.rate) + ' Bs a la tasa de hoy' : ''}</span></button>` : ''}
     <button class="stat" data-go="apertura"><span>Capital del negocio</span><b>${U(cap)}</b><span>${Number(set.capital_inicial_usd || 0) > 0 ? 'Inicial: ' + U(set.capital_inicial_usd) + ' | ' : ''}Toca para editar saldos iniciales</span></button></div>
-  <div class="card"><h2>Ventas de los últimos 14 días</h2><div class="dayb">${days.map(x => `<i style="height:${Math.max(3, (byDay[x] || 0) / (maxD || 1) * 100)}%" title="${dmy(x)}: ${fmt(byDay[x] || 0)} USD"></i>`).join('')}</div>
-    <p class="mut">${dmy(days[0])} a ${dmy(days[13])}. Total: ${U(quin.ingresos)}</p></div>
+  <div class="card"><h2>Ventas de los últimos 14 días</h2><div class="dayb" id="pDayChart">${days.map(x => `<i data-day="${x}" data-val="${byDay[x] || 0}" style="height:${Math.max(3, (byDay[x] || 0) / (maxD || 1) * 100)}%" title="${dmy(x)}: ${fmtCur(byDay[x] || 0)}"></i>`).join('')}</div>
+    <p class="mut" id="pDayInfo">${dmy(days[0])} a ${dmy(days[13])} · Total: <b>${U(quin.ingresos)}</b> · <small>Toca una barra para ver ese día</small></p></div>
   <div class="card"><h2>Lo que más ganancia te deja este mes</h2>${top.map(x => bar(x.name, +x.utilidad, maxP, U(+x.utilidad))).join('') || '<p class="mut">Aún no hay ventas este mes.</p>'}</div>
   <div class="card"><h2>Mejores clientes del mes</h2>${topC.map(([n, v]) => bar(n, v, maxC, U(v))).join('') || '<p class="mut">Aún no hay ventas este mes.</p>'}</div>
   <div class="card"><h2>Gastos del mes</h2>${gastoTop.map(x => bar(x.tipo + (x.fijo ? ' (fijo)' : ''), +x.total, maxG, U(+x.total))).join('') || '<p class="mut">Sin gastos registrados este mes.</p>'}</div>
@@ -162,6 +162,14 @@ async function viewInicio() {
       bajos,
       cap
     });
+  }
+  if ($('#pDayChart')) {
+    $('#pDayChart').onclick = (e) => {
+      const b = e.target.closest('i[data-day]'); if (!b) return;
+      $('#pDayChart').querySelectorAll('i').forEach(x => x.classList.toggle('sel', x === b));
+      const v = Number(b.dataset.val || 0);
+      $('#pDayInfo').innerHTML = `<b>${dmy(b.dataset.day)}</b>: <b>${U(v)}</b>${S.bimoneda !== false && S.rate ? ' (' + fmtSec(v * S.rate) + ')' : ''} · Total 14 días: ${U(quin.ingresos)}`;
+    };
   }
   $('#pPend').onclick = () => { SUB.ven = 'cobrar'; go('ventas'); };
   if ($('#pPag')) $('#pPag').onclick = () => { SUB.com = 'pagar'; go('compras'); };

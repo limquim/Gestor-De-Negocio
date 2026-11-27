@@ -1,7 +1,7 @@
 // Finanzas: cuentas y métodos de pago, datos bancarios, aportes/retiros, cierre de caja y gastos
 const num = (v) => +String(v ?? '').replace(',', '.');
 const toUsd = (amt, cur) => cur === 'USD' ? +amt : (S.rate ? amt / S.rate : 0);
-const money = (n, cur) => fmt(n) + (cur === 'USD' ? ' USD' : ' Bs');
+const money = (n, cur) => (cur === 'VES' ? fmtSec(n) : fmtCur(n));
 const acctOpts = (accs, sel) => accs.map(a => {
   const bTxt = a.balance !== undefined && a.balance !== null ? ` · Disp: ${money(a.balance, a.currency)}` : '';
   return `<option value="${a.id}" ${String(a.id) === String(sel) ? 'selected' : ''}>${esc(a.name)} (${a.currency})${bTxt}</option>`;
@@ -12,7 +12,7 @@ function accBalanceLine(acc, payAmt = 0, isOutgoing = true) {
   const bal = Number(acc.balance || 0);
   const amt = Math.max(0, Number(payAmt || 0));
   const cur = acc.currency || 'USD';
-  const eq = cur === 'VES' && S.rate ? ` (≈ ${fmt(bal / S.rate)} USD)` : '';
+  const eq = cur === 'VES' && S.rate ? ` (≈ ${fmtCur(bal / S.rate)})` : '';
   if (!isOutgoing) {
     return `<span class="mut">Saldo actual en cuenta: <b>${money(bal, cur)}</b>${eq}</span>`;
   }
@@ -157,7 +157,7 @@ function bindQuickAccountHelpers(formEl) {
 async function cajaStat() {
   const a = await q(db.from('cuentas_saldo').select('balance,currency').eq('active', true));
   const t = a.reduce((s, x) => s + toUsd(+x.balance, x.currency), 0);
-  return `<button class="stat" data-go="finanzas"><span>Dinero disponible</span><b>${fmt(t)} USD</b><span>${S.rate ? fmt(t * S.rate) + ' Bs' : 'Sin tasa'}</span></button>`;
+  return `<button class="stat" data-go="finanzas"><span>Dinero disponible</span><b>${fmtCur(t)}</b><span>${S.rate ? fmt(t * S.rate) + ' Bs' : 'Sin tasa'}</span></button>`;
 }
 
 // ---------- Cuentas ----------
@@ -169,7 +169,7 @@ async function viewCuentas() {
   const act = accs.filter(a => a.active), tot = act.reduce((s, a) => s + toUsd(+a.balance, a.currency), 0), D = {types};
   const hasDetails = act.some(a => (a.payment_details || '').trim());
 
-  $('#view').innerHTML = `<div class="stat" style="margin-bottom:1rem"><span>Dinero disponible</span><b>${fmt(tot)} USD</b><span>${S.rate ? fmt(tot * S.rate) + ' Bs' : 'Sin tasa cargada'}</span></div>
+  $('#view').innerHTML = `<div class="stat" style="margin-bottom:1rem"><span>Dinero disponible</span><b>${fmtCur(tot)}</b><span>${S.rate ? fmt(tot * S.rate) + ' Bs' : 'Sin tasa cargada'}</span></div>
     <div class="row" style="margin:0 0 .8rem">
       <button class="btn ghost" id="acTr">Transferir</button>
       <button class="btn ghost" id="acCap">Aporte / Retiro</button>
@@ -182,7 +182,7 @@ async function viewCuentas() {
         <small>${esc(a.type || 'Cuenta')} | ${a.currency}${a.payment_details ? ' | Con datos de pago' : ''}</small>
         ${mList.length ? `<small style="display:block;color:var(--pri)">Acepta: ${esc(mList.join(' · '))}</small>` : ''}
       </span>
-      <span class="n"><b>${money(a.balance, a.currency)}</b>${a.currency === 'VES' && S.rate ? `<small>${fmt(a.balance / S.rate)} USD</small>` : ''}</span></button>`;
+      <span class="n"><b>${money(a.balance, a.currency)}</b>${a.currency === 'VES' && S.rate ? `<small>${fmtCur(a.balance / S.rate)}</small>` : ''}</span></button>`;
     }).join('') || '<p class="mut">No hay cuentas. Pulsa + para crear una.</p>'}</div>
     <button class="fab" id="acAdd" aria-label="Nueva cuenta">+</button>`;
 
@@ -197,7 +197,7 @@ async function accSheet(a, D, allAccs) {
   const ms = await q(db.from('account_movements').select('amount,kind,note,created_at').eq('account_id', a.id).order('id', {ascending: false}).limit(60));
   const mList = methodNames(a);
   const det = (a.payment_details || '').trim();
-  openSheet(esc(a.name), `<p>Saldo: <b>${money(a.balance, a.currency)}</b>${a.currency === 'VES' && S.rate ? ' (' + fmt(a.balance / S.rate) + ' USD)' : ''}
+  openSheet(esc(a.name), `<p>Saldo: <b>${money(a.balance, a.currency)}</b>${a.currency === 'VES' && S.rate ? ' (' + fmtCur(a.balance / S.rate) + ')' : ''}
     ${a.is_default ? '<br><span class="badge ok">Cuenta principal</span>' : ''}
     ${mList.length ? `<br><small class="mut">Métodos: ${esc(mList.join(', '))}</small>` : ''}</p>
     ${det ? `<div class="card" style="background:var(--bg);padding:.75rem;margin:.6rem 0">
@@ -251,7 +251,7 @@ function accForm(a, D) {
       <button type="button" class="btn ghost" data-t-add="1" aria-label="Nuevo tipo de cuenta" style="flex:none">+</button>
     </div>
     <div class="grid">
-      <label>Moneda<select name="cur" ${a ? 'disabled' : ''}><option value="USD">Dólares (USD)</option><option value="VES">Bolívares (Bs)</option></select></label>
+      <label>Moneda<select name="cur" ${a ? 'disabled' : ''}><option value="USD">Moneda principal (${esc(curLabel())})</option><option value="VES">Bolívares (${esc(secSym())})</option></select></label>
       <label>Saldo inicial<input name="open" type="number" step="0.01" value="${a ? a.opening_balance : 0}"></label>
     </div>
     ${renderMethodsField(a?.methods)}
@@ -329,7 +329,7 @@ function capitalForm(accs, preId) {
     if (!a || !v) { $('#cpEq').textContent = ''; return; }
     $('#cpEq').textContent = a.currency === 'USD'
       ? (S.rate ? `Equivale a ${fmt(v * S.rate)} Bs` : '')
-      : (S.rate ? `Equivale a ${fmt(v / S.rate)} USD` : '');
+      : (S.rate ? `Equivale a ${fmtCur(v / S.rate)}` : '');
   };
   updEq();
   el.kind.onchange = updEq; el.acc.onchange = updEq; el.amt.oninput = updEq;
@@ -458,18 +458,18 @@ async function viewCierreCaja() {
     const tSys = det.reduce((s, x) => s + x.system_usd, 0), tCnt = det.reduce((s, x) => s + x.counted_usd, 0), tDiff = tCnt - tSys;
     const lines = [
       `*CIERRE DE CAJA - ${dmy(day)}*`,
-      S.rate ? `Tasa: ${fmt(S.rate, 4)} Bs/USD` : '',
+      S.rate ? `Tasa: ${fmt(S.rate, 4)} ${secSym()}/${curLabel()}` : '',
       '',
       '*Cobros por método:*',
-      ...(byMethodArr.length ? byMethodArr.map(m => `- ${m.name} (${m.count}): ${fmt(m.usd)} USD${m.origVes ? ` [${fmt(m.origVes)} Bs]` : ''}`) : ['- Sin cobros registrados']),
-      `Total cobrado: ${fmt(cobrosUsd)} USD`,
+      ...(byMethodArr.length ? byMethodArr.map(m => `- ${m.name} (${m.count}): ${fmtCur(m.usd)}${m.origVes ? ` [${fmt(m.origVes)} Bs]` : ''}`) : ['- Sin cobros registrados']),
+      `Total cobrado: ${fmtCur(cobrosUsd)}`,
       '',
       '*Arqueo por cuenta:*',
       ...det.map(d => `- ${d.name}: Sistema ${money(d.system_balance, d.currency)} | Real ${money(d.counted_balance, d.currency)} (${d.diff === 0 ? 'Cuadrado' : (d.diff > 0 ? '+' : '') + money(d.diff, d.currency)})`),
       '',
-      `Total sistema: ${fmt(tSys)} USD`,
-      `Total contado: ${fmt(tCnt)} USD`,
-      `Diferencia: ${tDiff >= 0 ? '+' : ''}${fmt(tDiff)} USD`,
+      `Total sistema: ${fmtCur(tSys)}`,
+      `Total contado: ${fmtCur(tCnt)}`,
+      `Diferencia: ${tDiff >= 0 ? '+' : ''}${fmtCur(tDiff)}`,
       CC.note ? `Nota: ${CC.note}` : ''
     ].filter(x => x !== '');
     return lines.join('\n');
@@ -482,22 +482,22 @@ async function viewCierreCaja() {
     </div>
 
     <div class="stats">
-      <div class="stat"><span>Cobros del día</span><b>${fmt(cobrosUsd)} USD</b><span>${S.rate ? fmt(cobrosUsd * S.rate) + ' Bs' : ''}</span></div>
-      <div class="stat"><span>Pagos a proveedores</span><b>${fmt(pagosProvUsd)} USD</b></div>
+      <div class="stat"><span>Cobros del día</span><b>${fmtCur(cobrosUsd)}</b><span>${S.rate ? fmt(cobrosUsd * S.rate) + ' Bs' : ''}</span></div>
+      <div class="stat"><span>Pagos a proveedores</span><b>${fmtCur(pagosProvUsd)}</b></div>
     </div>
 
     <div class="card">
       <h2>Cobros del día por método de pago</h2>
       ${byMethodArr.length ? byMethodArr.map(m => `<div class="rl">
         <span><b>${esc(m.name)}</b> <small class="mut">(${m.count} ${m.count === 1 ? 'pago' : 'pagos'})</small>
-        ${m.origUsd || m.origVes ? `<small class="mut" style="display:block">${[m.origUsd ? fmt(m.origUsd) + ' USD' : '', m.origVes ? fmt(m.origVes) + ' Bs' : ''].filter(Boolean).join(' + ')}</small>` : ''}</span>
-        <b>${fmt(m.usd)} USD</b>
+        ${m.origUsd || m.origVes ? `<small class="mut" style="display:block">${[m.origUsd ? fmtCur(m.origUsd) : '', m.origVes ? fmt(m.origVes) + ' Bs' : ''].filter(Boolean).join(' + ')}</small>` : ''}</span>
+        <b>${fmtCur(m.usd)}</b>
       </div>`).join('') : '<p class="mut">No se registraron cobros de ventas en esta fecha.</p>'}
     </div>
 
     <div class="card">
-      <h2>Resumen de movimientos del día (USD aprox.)</h2>
-      ${Object.keys(movByKind).length ? Object.entries(movByKind).map(([k, v]) => `<div class="rl"><span>${esc(k)}</span><b class="${v >= 0 ? 'pos' : 'neg'}">${v >= 0 ? '+' : ''}${fmt(v)} USD</b></div>`).join('')
+      <h2>Resumen de movimientos del día (${esc(curLabel())} aprox.)</h2>
+      ${Object.keys(movByKind).length ? Object.entries(movByKind).map(([k, v]) => `<div class="rl"><span>${esc(k)}</span><b class="${v >= 0 ? 'pos' : 'neg'}">${v >= 0 ? '+' : ''}${fmtCur(v)}</b></div>`).join('')
         : '<p class="mut">Sin movimientos de cuentas en esta fecha.</p>'}
     </div>
 
@@ -528,7 +528,7 @@ async function viewCierreCaja() {
       <div class="list" id="ccHist">
         ${closings.map((c, i) => `<button class="item" data-ci="${i}">
           <span><b>Cierre ${dmy(c.closing_date)}</b><small>${esc(c.closed_by || 'Usuario')}${c.adjustments_applied ? ' | Con ajuste' : ''}${c.note ? ' | ' + esc(c.note) : ''}</small></span>
-          <span class="n"><b>${fmt(c.total_counted_usd)} USD</b><small class="${+c.diff_usd === 0 ? 'in' : +c.diff_usd > 0 ? 'in' : 'outq'}">${+c.diff_usd === 0 ? 'Cuadrado' : (+c.diff_usd > 0 ? '+' : '') + fmt(c.diff_usd) + ' USD'}</small></span>
+          <span class="n"><b>${fmtCur(c.total_counted_usd)}</b><small class="${+c.diff_usd === 0 ? 'in' : +c.diff_usd > 0 ? 'in' : 'outq'}">${+c.diff_usd === 0 ? 'Cuadrado' : (+c.diff_usd > 0 ? '+' : '') + fmtCur(c.diff_usd)}</small></span>
         </button>`).join('') || '<p class="mut">Aún no hay cierres de caja guardados.</p>'}
       </div>
     </div>`;
@@ -548,9 +548,9 @@ async function viewCierreCaja() {
     });
     const tSys = det.reduce((s, x) => s + x.system_usd, 0), tCnt = det.reduce((s, x) => s + x.counted_usd, 0), tDiff = tCnt - tSys;
     $('#ccTot').innerHTML = `
-      <div class="rl"><span>Total en sistema</span><b>${fmt(tSys)} USD</b></div>
-      <div class="rl"><span>Total contado real</span><b>${fmt(tCnt)} USD</b></div>
-      <div class="rl tot ${Math.abs(tDiff) < 0.01 ? 'pos' : tDiff > 0 ? 'pos' : 'neg'}"><span>Diferencia total</span><b>${Math.abs(tDiff) < 0.01 ? 'Cuadrado (0,00 USD)' : (tDiff > 0 ? '+' : '') + fmt(tDiff) + ' USD'}</b></div>`;
+      <div class="rl"><span>Total en sistema</span><b>${fmtCur(tSys)}</b></div>
+      <div class="rl"><span>Total contado real</span><b>${fmtCur(tCnt)}</b></div>
+      <div class="rl tot ${Math.abs(tDiff) < 0.01 ? 'pos' : tDiff > 0 ? 'pos' : 'neg'}"><span>Diferencia total</span><b>${Math.abs(tDiff) < 0.01 ? 'Cuadrado (' + fmtCur(0) + ')' : fmtCurSigned(tDiff)}</b></div>`;
   };
   paintArqueo();
 
@@ -587,10 +587,10 @@ async function viewCierreCaja() {
     const met = Array.isArray(c.by_method) ? c.by_method : [];
     openSheet(`Cierre del ${dmy(c.closing_date)}`, `
       <p class="mut">Realizado por: <b>${esc(c.closed_by || 'Usuario')}</b> | ${fdate(c.created_at)}${c.note ? '<br>Nota: ' + esc(c.note) : ''}</p>
-      <div class="rl"><span>Sistema</span><b>${fmt(c.total_system_usd)} USD</b></div>
-      <div class="rl"><span>Contado</span><b>${fmt(c.total_counted_usd)} USD</b></div>
-      <div class="rl tot ${+c.diff_usd >= 0 ? 'pos' : 'neg'}"><span>Diferencia</span><b>${+c.diff_usd >= 0 ? '+' : ''}${fmt(c.diff_usd)} USD</b></div>
-      ${met.length ? `<h2 style="margin-top:1rem">Cobros por método</h2>${met.map(m => `<div class="rl"><span>${esc(m.name)} (${m.count})</span><b>${fmt(m.usd)} USD</b></div>`).join('')}` : ''}
+      <div class="rl"><span>Sistema</span><b>${fmtCur(c.total_system_usd)}</b></div>
+      <div class="rl"><span>Contado</span><b>${fmtCur(c.total_counted_usd)}</b></div>
+      <div class="rl tot ${+c.diff_usd >= 0 ? 'pos' : 'neg'}"><span>Diferencia</span><b>${+c.diff_usd >= 0 ? '+' : ''}${fmtCur(c.diff_usd)}</b></div>
+      ${met.length ? `<h2 style="margin-top:1rem">Cobros por método</h2>${met.map(m => `<div class="rl"><span>${esc(m.name)} (${m.count})</span><b>${fmtCur(m.usd)}</b></div>`).join('')}` : ''}
       ${det.length ? `<h2 style="margin-top:1rem">Detalle por cuenta</h2><div class="scroll"><table><thead><tr><th>Cuenta</th><th class="n">Sistema</th><th class="n">Real</th><th class="n">Dif.</th></tr></thead><tbody>
         ${det.map(d => `<tr><td>${esc(d.name)}</td><td class="n">${money(d.system_balance, d.currency)}</td><td class="n">${money(d.counted_balance, d.currency)}</td><td class="n ${+d.diff < 0 ? 'outq' : 'in'}">${+d.diff > 0 ? '+' : ''}${fmt(d.diff)}</td></tr>`).join('')}
       </tbody></table></div>` : ''}
@@ -662,7 +662,7 @@ async function viewGastos() {
       <label>Nombre del gasto fijo<input name="rname" value="${esc(rec?.name || '')}" placeholder="Ej: Alquiler del local, Internet" required></label>
       <label>Tipo de gasto<select name="etype">${fixedFirst.map(t => `<option value="${t.id}" ${rec && String(t.id) === String(rec.expense_type_id) ? 'selected' : ''}>${esc(t.name)}${t.is_fixed ? ' (fijo)' : ''}</option>`).join('')}</select></label>
       <div class="grid">
-        <label>Moneda<select name="cur"><option value="USD" ${(rec?.currency || 'USD') === 'USD' ? 'selected' : ''}>Dólares (USD)</option><option value="VES" ${rec?.currency === 'VES' ? 'selected' : ''}>Bolívares (Bs)</option></select></label>
+        <label>Moneda<select name="cur"><option value="USD" ${(rec?.currency || 'USD') === 'USD' ? 'selected' : ''}>Moneda principal (${esc(curLabel())})</option><option value="VES" ${rec?.currency === 'VES' ? 'selected' : ''}>Bolívares (${esc(secSym())})</option></select></label>
         <label>Monto estimado<input name="amt" type="number" step="0.01" min="0" value="${rec ? Number(rec.amount || 0) : ''}" required></label>
       </div>
       <div class="grid">
@@ -710,7 +710,7 @@ async function viewGastos() {
       <h2>Gastos fijos del mes (${curYm})</h2>
       <button type="button" class="lnk" id="rcAdd">+ Nuevo fijo</button>
     </div>
-    ${recs.length ? `<small class="mut">Pagados <b>${paidRecCnt} de ${recs.length}</b>${pendRecUsd > 0.01 ? ` · Pendiente del mes: <b>${fmt(pendRecUsd)} USD</b>` : ' · Todo al día este mes'}</small>
+    ${recs.length ? `<small class="mut">Pagados <b>${paidRecCnt} de ${recs.length}</b>${pendRecUsd > 0.01 ? ` · Pendiente del mes: <b>${fmtCur(pendRecUsd)}</b>` : ' · Todo al día este mes'}</small>
       <div class="list" id="rcL">${recs.map(r => {
         const isPaid = r.last_paid_ym === curYm;
         const overdue = !isPaid && r.due_day < curDay;
@@ -748,10 +748,10 @@ async function viewGastos() {
       (!t || ((g.description || '') + ' ' + (g.expense_types?.name || '') + ' ' + (g.accounts?.name || '')).toLowerCase().includes(t))
     );
     const tot = list.filter(g => g.status !== 'anulado').reduce((s, g) => s + +g.amount_usd, 0);
-    $('#gSum').innerHTML = `Mostrando <b>${list.length}</b> gastos | Total activo: <b>${fmt(tot)} USD</b>${S.rate ? ' (' + fmt(tot * S.rate) + ' Bs)' : ''}`;
+    $('#gSum').innerHTML = `Mostrando <b>${list.length}</b> gastos | Total activo: <b>${fmtCur(tot)}</b>${S.rate ? ' (' + fmt(tot * S.rate) + ' Bs)' : ''}`;
     $('#gL').innerHTML = list.map(g => `<button class="item" data-id="${g.id}"><span><b>${esc(g.description || g.expense_types?.name || 'Gasto')}</b>
       <small>${g.expense_date} | ${esc(g.expense_types?.name || 'Sin tipo')} | ${g.expense_types?.is_fixed ? 'Fijo' : 'Variable'}</small><small>${esc(g.accounts?.name || 'Sin cuenta')}</small></span>
-      <span class="n ${g.status === 'anulado' ? 'mut' : ''}"><b>${fmt(g.amount_usd)} USD</b>${g.status === 'anulado' ? '<small>Anulado</small>' : ''}</span></button>`).join('') || '<p class="mut">No hay gastos con ese filtro.</p>';
+      <span class="n ${g.status === 'anulado' ? 'mut' : ''}"><b>${fmtCur(g.amount_usd)}</b>${g.status === 'anulado' ? '<small>Anulado</small>' : ''}</span></button>`).join('') || '<p class="mut">No hay gastos con ese filtro.</p>';
   };
   drawG();
 
@@ -772,7 +772,7 @@ async function viewGastos() {
   $('#gL').onclick = (e) => {
     const b = e.target.closest('[data-id]'); if (!b) return;
     const g = rows.find(x => String(x.id) === b.dataset.id);
-    openSheet('Gasto #' + g.id, `<p><b>${esc(g.description || g.expense_types?.name)}</b><br>${g.expense_date} | ${esc(g.accounts?.name || 'Sin cuenta')}<br>${fmt(g.amount)} ${g.currency === 'USD' ? 'USD' : 'Bs'} (${fmt(g.amount_usd)} USD)</p>
+    openSheet('Gasto #' + g.id, `<p><b>${esc(g.description || g.expense_types?.name)}</b><br>${g.expense_date} | ${esc(g.accounts?.name || 'Sin cuenta')}<br>${money(g.amount, g.currency)} (${fmtCur(g.amount_usd)})</p>
       ${g.status === 'anulado' ? '<p class="warn">Gasto anulado</p>' : '<div class="row"><button class="btn ghost" id="gAnu">Anular gasto</button></div>'}`);
     if (g.status !== 'anulado') $('#gAnu').onclick = () => run(async () => {
       if (!confirm('¿Anular este gasto? El dinero vuelve a la cuenta.')) return;

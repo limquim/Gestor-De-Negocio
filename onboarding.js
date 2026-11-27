@@ -52,7 +52,10 @@ function hasMod(k) {
 
 async function loadModulesConfig() {
   try {
-    const s = await q(db.from('settings').select('*').eq('id', 1).single());
+    const [s, currs] = await Promise.all([
+      q(db.from('settings').select('*').eq('id', 1).single()),
+      db.from('currencies').select('*').eq('active', true).order('id').then(r => r.error ? [] : (r.data || []))
+    ]);
     const mc = (s.modules_config && typeof s.modules_config === 'object') ? s.modules_config : {};
     S.mods = {...DEFAULT_MODS, ...mc};
     // Sincronizar con flags clásicos
@@ -60,7 +63,15 @@ async function loadModulesConfig() {
     if (mc.payroll === undefined && s.enable_payroll !== undefined) S.mods.payroll = s.enable_payroll !== false;
     S.flags = {planning: !!S.mods.planning, payroll: !!S.mods.payroll};
     S.bimoneda = s.bimoneda !== false;
-    S.baseCurrency = s.base_currency || 'USD';
+
+    const baseC = currs.find(c => c.is_base) || currs[0] || null;
+    const secC = currs.find(c => !c.is_base) || null;
+    S.baseCurrency = (baseC?.code || s.base_currency || 'USD').trim();
+    S.curCode = S.baseCurrency;
+    S.curSym = (baseC?.symbol || s.currency_symbol || '$').trim() || '$';
+    S.curPos = s.currency_display || 'prefix';
+    S.secSym = (secC?.symbol || 'Bs').trim() || 'Bs';
+
     S.bizName = s.business_name || (typeof APP_CONFIG !== 'undefined' ? APP_CONFIG.brandName : 'Gestor Emprendedor');
     const hdr = document.querySelector('header strong');
     if (hdr) hdr.textContent = S.bizName;
@@ -69,8 +80,13 @@ async function loadModulesConfig() {
     S.flags = {planning: !!S.mods.planning, payroll: !!S.mods.payroll};
     S.bimoneda = true;
     S.baseCurrency = 'USD';
+    S.curCode = 'USD';
+    S.curSym = '$';
+    S.curPos = 'prefix';
+    S.secSym = 'Bs';
   }
   applyModsUI();
+  if (typeof paintRateChip === 'function') paintRateChip();
 }
 
 function applyModsUI() {
@@ -85,14 +101,58 @@ function applyModsUI() {
   if (chip) chip.classList.toggle('hidden', S.bimoneda === false);
 }
 
-// ---------- Pantalla: Configurar módulos activables ----------
+const CUR_PRESETS = [
+  {code: 'USD', sym: '$', name: 'Dólar ($)'},
+  {code: 'EUR', sym: '€', name: 'Euro (€)'},
+  {code: 'VES', sym: 'Bs', name: 'Bolívar (Bs)'},
+  {code: 'COP', sym: 'COP', name: 'Peso Col. (COP)'},
+  {code: 'PEN', sym: 'S/', name: 'Sol (S/)'},
+  {code: 'MXN', sym: 'MX$', name: 'Peso Mex. (MX$)'},
+  {code: 'CLP', sym: 'CLP$', name: 'Peso Chil. (CLP$)'}
+];
+
+// ---------- Pantalla: Configurar módulos activables y símbolo de moneda ----------
 async function viewModulos() {
-  const s = await q(db.from('settings').select('*').eq('id', 1).single());
+  const [s, currs] = await Promise.all([
+    q(db.from('settings').select('*').eq('id', 1).single()),
+    db.from('currencies').select('*').order('id').then(r => r.error ? [] : (r.data || []))
+  ]);
   const curMods = {...DEFAULT_MODS, ...(s.modules_config || {})};
   const bimoneda = s.bimoneda !== false;
+  const baseC = currs.find(c => c.is_base) || currs[0] || {id: 1, code: 'USD', symbol: '$', name: 'Dólar estadounidense'};
+  const cSym = baseC.symbol || s.currency_symbol || '$';
+  const cCode = baseC.code || s.base_currency || 'USD';
+  const cPos = s.currency_display || 'prefix';
 
   $('#view').innerHTML = `
     <form id="modForm" class="stack">
+      <div class="card stack" style="border-left:5px solid var(--pri)">
+        <h2>Moneda y símbolo en toda la app</h2>
+        <p class="mut" style="margin:0">El símbolo elegido se aplicará automáticamente en el inicio, ventas, reportes, tickets, catálogo, compras y resúmenes de WhatsApp.</p>
+        <div class="chips" id="curPreChips">
+          ${CUR_PRESETS.map(p => `<button type="button" data-code="${p.code}" data-sym="${esc(p.sym)}" data-name="${esc(p.name)}" class="${p.sym === cSym && p.code === cCode ? 'on' : ''}">${esc(p.name)}</button>`).join('')}
+        </div>
+        <div class="grid">
+          <label>Símbolo de moneda (ej: $, €, S/, Bs)<input name="cur_sym" value="${esc(cSym)}" maxlength="5" required></label>
+          <label>Código (ej: USD, EUR, PEN)<input name="cur_code" value="${esc(cCode)}" maxlength="6" required></label>
+        </div>
+        <label>Cómo mostrar los montos en pantalla y reportes
+          <select name="cur_pos">
+            <option value="prefix" ${cPos === 'prefix' ? 'selected' : ''}>Símbolo adelante (ej: $15,00)</option>
+            <option value="suffix" ${cPos === 'suffix' ? 'selected' : ''}>Símbolo atrás (ej: 15,00 $)</option>
+            <option value="code" ${cPos === 'code' ? 'selected' : ''}>Código de moneda (ej: 15,00 USD)</option>
+          </select>
+        </label>
+        <div class="card" style="background:var(--bg);margin:0;padding:.7rem .85rem">
+          <small class="mut" style="display:block">Vista previa en reportes y precios:</small>
+          <b id="curPrevTxt" style="font-size:1.08rem"></b>
+        </div>
+        <label class="chk" style="margin-top:.2rem">
+          <input type="checkbox" name="bimoneda" ${bimoneda ? 'checked' : ''}>
+          <span><b>Modo Bimoneda Venezuela (moneda principal + Bs con tasa BCV / manual)</b><br><small class="mut">Desactívalo si trabajas en una sola moneda y no necesitas convertir a bolívares.</small></span>
+        </label>
+      </div>
+
       <div class="card stack">
         <h2>Módulos activos en tu negocio</h2>
         <p class="mut" style="margin:0">Activa solo lo que usas para mantener la app limpia y rápida. Tus datos nunca se borran al ocultar un módulo.</p>
@@ -104,39 +164,65 @@ async function viewModulos() {
         </div>
       </div>
 
-      <div class="card stack">
-        <h2>Modo de moneda</h2>
-        <label class="chk">
-          <input type="checkbox" name="bimoneda" ${bimoneda ? 'checked' : ''}>
-          <span><b>Modo Bimoneda Venezuela (USD + Bs con tasa BCV / manual)</b><br><small class="mut">Desactívalo si trabajas en una sola moneda y no necesitas convertir a bolívares.</small></span>
-        </label>
-      </div>
-
       <div class="row">
         <button class="btn" type="submit">Guardar cambios</button>
       </div>
     </form>`;
 
-  $('#modForm').onsubmit = (e) => {
+  const f = $('#modForm'), el = f.elements;
+  const paintPrev = () => {
+    const sym = el.cur_sym.value.trim() || '$';
+    const code = (el.cur_code.value.trim() || 'USD').toUpperCase();
+    const pos = el.cur_pos.value;
+    const tag = pos === 'code' ? code : sym;
+    const fmtEx = (val) => {
+      const neg = val < 0, a = fmt(Math.abs(val));
+      if (pos === 'prefix' && tag.length <= 3 && !/^[A-Z]{3}$/.test(tag)) return (neg ? '-' : '') + tag + a;
+      return (neg ? '-' : '') + a + ' ' + tag;
+    };
+    $('#curPrevTxt').textContent = `Venta: ${fmtEx(1250)}  ·  Gasto: ${fmtEx(-45.5)}  ·  Precio: ${fmtEx(12.99)}`;
+  };
+  paintPrev();
+  ['cur_sym', 'cur_code', 'cur_pos'].forEach(k => {
+    el[k].addEventListener('input', paintPrev);
+    el[k].addEventListener('change', paintPrev);
+  });
+  $('#curPreChips').onclick = (e) => {
+    const b = e.target.closest('[data-sym]'); if (!b) return;
+    el.cur_sym.value = b.dataset.sym;
+    el.cur_code.value = b.dataset.code;
+    document.querySelectorAll('#curPreChips button').forEach(x => x.classList.toggle('on', x === b));
+    paintPrev();
+  };
+
+  f.onsubmit = (e) => {
     e.preventDefault();
-    const el = e.target.elements;
     const mods = {};
     MOD_CATALOG.forEach(m => { mods[m.k] = !!el['mod_' + m.k].checked; });
     if (!mods.production) mods.planning = false;
     const isBi = !!el.bimoneda.checked;
+    const nextSym = el.cur_sym.value.trim() || '$';
+    const nextCode = (el.cur_code.value.trim() || 'USD').toUpperCase();
+    const nextPos = el.cur_pos.value || 'prefix';
     run(async () => {
       await q(db.from('settings').update({
         modules_config: mods,
         enable_planning: mods.planning,
         enable_payroll: mods.payroll,
         bimoneda: isBi,
+        base_currency: nextCode,
+        currency_symbol: nextSym,
+        currency_display: nextPos,
         ticket_show_bs: isBi,
         ticket_show_rate: isBi,
         updated_at: new Date().toISOString()
       }).eq('id', 1));
+      if (baseC && baseC.id != null) {
+        await q(db.from('currencies').update({code: nextCode, symbol: nextSym}).eq('id', baseC.id));
+      }
       await loadModulesConfig();
       if (typeof loadRate === 'function') await loadRate();
-      toast('Módulos actualizados');
+      toast('Módulos y moneda actualizados');
       render();
     });
   };
@@ -217,8 +303,8 @@ function showOnboarding() {
             <small>Precios en dólares, cobros en Bs o USD y tasa BCV automática o manual.</small>
           </button>
           <button type="button" class="ob-pick ${!ST.bimoneda ? 'on' : ''}" data-bi="0">
-            <b>Una sola moneda (USD)</b>
-            <small>Ideal si cobras y llevas todo únicamente en dólares sin conversión a Bs.</small>
+            <b>Una sola moneda ($, €, S/, etc.)</b>
+            <small>Ideal si cobras y llevas todo en una sola moneda sin conversión a Bs.</small>
           </button>
         </div>
         ${ST.bimoneda ? `<label>Tasa inicial (Bs por 1 USD) — opcional
