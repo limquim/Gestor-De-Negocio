@@ -221,7 +221,7 @@ const CFG_MAP = {
   ticket: {title: 'Diseño del ticket', fn: () => viewSettings('ticket')},
   apertura: {title: 'Saldos iniciales (Apertura)', fn: () => viewApertura()},
   importar: {title: 'Importar datos (Excel / CSV)', fn: () => viewImportar()},
-  respaldo: {title: 'Respaldo y Restauración', fn: () => viewRespaldo()},
+  respaldo: {title: 'Respaldo y Google Drive', fn: () => viewRespaldo()},
   bitacora: {title: 'Bitácora de cambios', fn: () => viewBitacora()},
   acerca: {title: 'App, espacio y soporte', fn: () => viewAcercaDe()},
   reinicio: {title: 'Comenzar desde 0', fn: () => viewReinicio()}
@@ -294,10 +294,16 @@ async function viewConfiguracion() {
       title: 'Tus Datos y Respaldos',
       items: [
         {
-          k: 'respaldo', name: 'Respaldo y Restauración',
-          desc: 'Guarda una copia segura de tu negocio o restaura en un teléfono nuevo',
-          pill: bkDays === null ? 'Sin respaldo' : (bkDays === 0 ? 'Hoy' : `Hace ${bkDays}d`),
-          pillCls: bkDays === null || bkDays > 7 ? 'low' : 'ok'
+          k: 'respaldo', name: 'Respaldo y Google Drive',
+          desc: (typeof GDRIVE !== 'undefined' && GDRIVE.state.connected)
+            ? `Conectado a ${GDRIVE.state.email || 'Google Drive'} · copias automáticas y restauración`
+            : 'Conecta tu Google Drive para respaldo automático gratis o guarda copia local',
+          pill: (typeof GDRIVE !== 'undefined' && GDRIVE.state.connected)
+            ? (Number(LDB.meta?.dirtySinceBackup || 0) > 0 ? `${LDB.meta.dirtySinceBackup} pend.` : 'Drive al día')
+            : (bkDays === null ? 'Sin respaldo' : (bkDays === 0 ? 'Local hoy' : `Hace ${bkDays}d`)),
+          pillCls: (typeof GDRIVE !== 'undefined' && GDRIVE.state.connected)
+            ? (Number(LDB.meta?.dirtySinceBackup || 0) > 0 ? 'low' : 'ok')
+            : (bkDays === null || bkDays > 7 ? 'low' : 'ok')
         },
         {
           k: 'apertura', name: 'Saldos iniciales (Apertura)',

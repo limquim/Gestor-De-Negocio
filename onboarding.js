@@ -180,8 +180,9 @@ function showOnboarding() {
         <div class="row">
           <button type="button" class="btn" id="obNext">Continuar &rsaquo;</button>
         </div>
-        <div style="text-align:center;margin-top:.2rem">
-          <button type="button" class="lnk" id="obRestoreBtn" style="font-size:.86rem">¿Ya tienes un respaldo (.json)? Restaurar aquí</button>
+        <div class="stack" style="gap:.35rem;text-align:center;margin-top:.2rem">
+          ${typeof GDRIVE !== 'undefined' && GDRIVE.getClientId() ? '<button type="button" class="btn ghost" id="obDriveRestore">Restaurar negocio desde mi Google Drive</button>' : ''}
+          <button type="button" class="lnk" id="obRestoreBtn" style="font-size:.86rem">¿Tienes un archivo de respaldo (.json)? Restaurar aquí</button>
           <input type="file" id="obRestoreFile" accept=".json,application/json" class="hidden">
         </div>`;
     } else if (ST.step === 2) {
@@ -242,6 +243,7 @@ function showOnboarding() {
         if (!ST.businessName.trim()) { toast('Escribe el nombre de tu negocio para continuar', true); $('#obBiz').focus(); return; }
         ST.step = 2; drawStep();
       };
+      if ($('#obDriveRestore')) $('#obDriveRestore').onclick = () => run(() => GDRIVE.openRestorePicker(true));
       $('#obRestoreBtn').onclick = () => $('#obRestoreFile').click();
       $('#obRestoreFile').onchange = (e) => {
         const file = e.target.files[0]; if (!file) return;

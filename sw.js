@@ -1,5 +1,5 @@
-// Service Worker — Gestor Emprendedor v1 (100% Local-First)
-const CACHE_NAME = 'gestor-emprendedor-v1';
+// Service Worker — Gestor Emprendedor v2 (100% Local-First)
+const CACHE_NAME = 'gestor-emprendedor-v2';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -11,6 +11,7 @@ const CORE_ASSETS = [
   './diseno.css',
   './config.js',
   './localdb.js',
+  './drive_sync.js',
   './onboarding.js',
   './escaner.js',
   './compras.js',
@@ -61,7 +62,7 @@ self.addEventListener('fetch', (event) => {
   const req = event.request;
   if (req.method !== 'GET') return;
   const url = new URL(req.url);
-  if (url.hostname.includes('dolarapi.com') || url.hostname.includes('googleapis.com/drive')) return;
+  if (url.hostname.includes('dolarapi.com') || url.hostname.includes('googleapis.com') || url.hostname.includes('accounts.google.com') || url.hostname.includes('gstatic.com/gsi')) return;
 
   if (CDN_HOSTS.some(h => url.hostname.includes(h))) {
     event.respondWith((async () => {

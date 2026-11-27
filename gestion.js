@@ -460,31 +460,93 @@ async function descargarRespaldo() {
 }
 
 async function viewRespaldo() {
-  const last = LDB.meta?.lastBackupAt || (typeof getLastBackupDate === 'function' ? getLastBackupDate() : null);
+  const gd = typeof GDRIVE !== 'undefined' ? GDRIVE : null;
+  const gs = gd ? gd.state : {};
+  const hasCid = !!(gd && gd.getClientId());
+  const last = gd?.state?.lastSyncAt || LDB.meta?.lastBackupAt || (typeof getLastBackupDate === 'function' ? getLastBackupDate() : null);
   const dirty = Number(LDB.meta?.dirtySinceBackup || 0);
+  const tokenOk = !!(gd && gd.hasValidToken());
+
   $('#view').innerHTML = `
+    <div class="card stack" style="border-left:5px solid var(--pri)">
+      <div class="title-row">
+        <h2>Respaldo automático en tu Google Drive</h2>
+        <span class="badge ${gs.connected ? (tokenOk ? 'ok' : 'low') : ''}">${gs.connected ? (tokenOk ? 'Conectado' : 'Vinculado') : 'Sin conectar'}</span>
+      </div>
+      <p class="mut" style="margin:0">Guarda automáticamente una copia privada de tu negocio en <b>tu propio Google Drive</b> (carpeta <i>${esc(gd ? gd.folderName() : 'Respaldos')}</i>). Mantiene el respaldo más reciente y los últimos 7 días. La app no puede ver tus demás archivos de Drive.</p>
+
+      ${gs.connected ? `
+        <div class="rl"><span>Cuenta Google</span><b>${esc(gs.email || 'Conectada')}</b></div>
+        <div class="rl"><span>Última sincronización Drive</span><b>${gs.lastSyncAt ? fdate(gs.lastSyncAt) : 'Pendiente'}</b></div>
+        <div class="rl"><span>Cambios pendientes por subir</span><b class="${dirty ? 'neg' : 'pos'}">${dirty}</b></div>
+
+        <label class="chk" style="margin-top:.2rem">
+          <input type="checkbox" id="gdAuto" ${gs.autoSync ? 'checked' : ''}>
+          Activar respaldo automático cuando haya internet
+        </label>
+        <label>Frecuencia de respaldo automático
+          <select id="gdInt">
+            <option value="1" ${Number(gs.intervalMin) === 1 ? 'selected' : ''}>Casi al instante (45 segundos tras cambios)</option>
+            <option value="10" ${Number(gs.intervalMin) === 10 ? 'selected' : ''}>Cada 10 minutos (recomendado)</option>
+            <option value="30" ${Number(gs.intervalMin) === 30 ? 'selected' : ''}>Cada 30 minutos</option>
+            <option value="0" ${Number(gs.intervalMin) === 0 ? 'selected' : ''}>Solo cuando yo pulse "Respaldar ahora"</option>
+          </select>
+        </label>
+
+        <div class="row">
+          <button type="button" class="btn" id="gdSyncBtn">Respaldar en Drive ahora</button>
+          <button type="button" class="btn ghost" id="gdRestBtn">Ver copias / Restaurar</button>
+        </div>
+        <div class="row" style="margin-top:0">
+          <button type="button" class="lnk bad" id="gdDiscBtn" style="padding:0">Desvincular cuenta Google</button>
+        </div>
+      ` : hasCid ? `
+        <div class="row">
+          <button type="button" class="btn" id="gdConnBtn">Conectar con Google Drive</button>
+          <button type="button" class="btn ghost" id="gdRestBtn">Restaurar desde Drive</button>
+        </div>
+      ` : `
+        <p class="warn" style="margin:0">Aún falta colocar el <b>Google Drive Client ID</b> en <code>config.js</code> (o pegarlo abajo para pruebas).</p>
+        <details>
+          <summary>Configurar Client ID de prueba</summary>
+          <form id="gdCidF" class="stack" style="margin-top:.6rem">
+            <label>Google OAuth Client ID<input name="cid" value="${esc(gs.customClientId || '')}" placeholder="1234567890-xxxx.apps.googleusercontent.com" required></label>
+            <button type="submit" class="btn ghost">Guardar Client ID</button>
+          </form>
+        </details>
+      `}
+    </div>
+
     <div class="card stack">
-      <h2>Respaldo de tu negocio</h2>
-      <p class="mut" style="margin:0">Como tus datos viven en tu propio teléfono (100% privados y sin servidores externos), descarga un respaldo periódicamente o guárdalo en tu Google Drive / WhatsApp.</p>
-      <div class="rl"><span>Último respaldo</span><b>${last ? fdate(last) : 'Aún sin respaldo'}</b></div>
-      <div class="rl"><span>Cambios desde el último respaldo</span><b class="${dirty > 10 ? 'neg' : 'pos'}">${dirty}</b></div>
+      <h2>Respaldo manual en archivo (.json)</h2>
+      <p class="mut" style="margin:0">También puedes descargar una copia local en cualquier momento sin usar internet.</p>
+      <div class="rl"><span>Último respaldo (Drive o archivo)</span><b>${last ? fdate(last) : 'Aún sin respaldo'}</b></div>
       <div class="row">
-        <button class="btn" id="bkGo">Descargar respaldo (.json)</button>
+        <button class="btn ghost" id="bkGo">Descargar respaldo (.json)</button>
         <button class="btn ghost" id="bkShare">Compartir archivo</button>
       </div>
-    </div>
-
-    <div class="card stack">
-      <h2>Restaurar desde un respaldo</h2>
-      <p class="mut" style="margin:0">Si cambiaste de teléfono o quieres recuperar una copia anterior, selecciona tu archivo <b>.json</b>. Esto reemplazará los datos actuales de este dispositivo.</p>
       <input type="file" id="bkFile" accept=".json,application/json" class="hidden">
-      <div class="row"><button class="btn ghost" id="bkRest">Seleccionar archivo de respaldo</button></div>
-    </div>
-
-    <div class="card stack" style="border-left:4px solid var(--pri)">
-      <h2>Sincronización automática con tu Google Drive</h2>
-      <p class="mut" style="margin:0">Próxima fase: vincula tu cuenta de Google para que la app guarde automáticamente tu respaldo diario en tu propio Google Drive sin pagar servidores.</p>
+      <div class="row" style="margin-top:0"><button class="lnk" id="bkRest" style="padding:0">Restaurar desde un archivo .json del teléfono</button></div>
     </div>`;
+
+  if ($('#gdConnBtn')) $('#gdConnBtn').onclick = () => run(async () => { await gd.connect(); render(); });
+  if ($('#gdSyncBtn')) $('#gdSyncBtn').onclick = () => run(async () => { await gd.syncNow({manual: true}); render(); });
+  if ($('#gdRestBtn')) $('#gdRestBtn').onclick = () => run(() => gd.openRestorePicker(false));
+  if ($('#gdDiscBtn')) $('#gdDiscBtn').onclick = () => {
+    if (!confirm('¿Desvincular tu cuenta de Google Drive de este dispositivo? Tus respaldos en Drive no se borran.')) return;
+    gd.disconnect();
+    toast('Google Drive desvinculado');
+    render();
+  };
+  if ($('#gdAuto')) $('#gdAuto').onchange = (e) => { gd.state.autoSync = e.target.checked; gd.saveState(); toast(gd.state.autoSync ? 'Respaldo automático activado' : 'Respaldo automático pausado'); };
+  if ($('#gdInt')) $('#gdInt').onchange = (e) => { gd.state.intervalMin = Number(e.target.value); gd.saveState(); toast('Frecuencia actualizada'); };
+  if ($('#gdCidF')) $('#gdCidF').onsubmit = (e) => {
+    e.preventDefault();
+    gd.state.customClientId = e.target.elements.cid.value.trim();
+    gd.saveState();
+    toast('Client ID guardado');
+    render();
+  };
 
   $('#bkGo').onclick = () => run(descargarRespaldo);
   $('#bkShare').onclick = () => run(async () => {

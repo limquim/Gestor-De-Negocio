@@ -152,6 +152,7 @@ const LDB = {
       this.meta.updatedAt = new Date().toISOString();
       this.meta.dirtySinceBackup = (Number(this.meta.dirtySinceBackup) || 0) + 1;
       await this.idbPut('kv', this.meta, 'meta');
+      if (typeof this.onDirty === 'function') this.onDirty();
     }
   },
 
@@ -1673,12 +1674,26 @@ const LDB = {
     if (!bar) return;
     const online = typeof navigator === 'undefined' || navigator.onLine !== false;
     const dirty = Number(this.meta?.dirtySinceBackup || 0);
-    if (!online) {
-      bar.className = 'netbar off';
-      bar.innerHTML = '<span><b>Sin internet</b> · Trabajando 100% local en tu dispositivo</span>';
+    const gd = typeof GDRIVE !== 'undefined' ? GDRIVE : null;
+
+    if (gd?.syncing) {
+      bar.className = 'netbar sync';
+      bar.innerHTML = '<span>Guardando respaldo en tu Google Drive...</span>';
       return;
     }
-    if (dirty >= 25) {
+    if (!online) {
+      bar.className = 'netbar off';
+      bar.innerHTML = `<span><b>Sin internet</b> · Trabajando 100% local${gd?.state?.connected && dirty ? ` · ${dirty} por respaldar en Drive` : ''}</span>`;
+      return;
+    }
+    if (gd?.state?.connected && dirty > 0 && !gd.hasValidToken()) {
+      bar.className = 'netbar pend';
+      bar.innerHTML = `<span><b>${dirty} ${dirty === 1 ? 'cambio' : 'cambios'}</b> pendientes por subir a tu Google Drive</span><button type="button" class="netbar-btn" id="nbGdSync">Respaldar ahora</button>`;
+      const b = document.querySelector('#nbGdSync');
+      if (b) b.onclick = () => run(async () => { await gd.syncNow({manual: true}); render(); });
+      return;
+    }
+    if (!gd?.state?.connected && dirty >= 25) {
       bar.className = 'netbar pend';
       bar.innerHTML = `<span><b>${dirty} cambios</b> desde tu último respaldo</span><button type="button" class="netbar-btn" id="nbBk">Respaldar</button>`;
       const b = document.querySelector('#nbBk');
