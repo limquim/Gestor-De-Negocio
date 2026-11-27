@@ -448,57 +448,93 @@ async function viewSugerida() {
   };
 }
 
-// ---------- Respaldo de datos ----------
+// ---------- Respaldo y Restauración local (preparado para Google Drive en Fase 2) ----------
 async function descargarRespaldo() {
-  const T = ['settings', 'products', 'product_categories', 'units', 'taxes', 'parties', 'accounts', 'account_movements', 'payments', 'sales', 'sale_items', 'sale_returns', 'sale_return_items', 'purchases', 'purchase_items',
-    'inventory_movements', 'recipes', 'recipe_items', 'production_orders', 'production_items', 'expenses', 'expense_types', 'quotes', 'quote_items', 'price_lists', 'payment_methods', 'message_templates', 'exchange_rates',
-    'employees', 'employee_advances', 'payroll_runs', 'payroll_items', 'cash_closings', 'inventory_adjustments', 'recurring_expenses'];
-  const all = async (t) => { let r = [], f = 0; for (;;) { const d = await q(db.from(t).select('*').range(f, f + 999)); r = r.concat(d); if (d.length < 1000) return r; f += 1000; } };
-  const out = {fecha: new Date().toISOString(), tablas: {}};
-  toast('Preparando el respaldo...');
-  for (const t of T) { try { out.tablas[t] = await all(t); } catch (e) { out.tablas[t] = 'no disponible'; } }
-  downloadBlob(new Blob([JSON.stringify(out)], {type: 'application/json'}), 'respaldo_' + caracasDate() + '.json');
-  const nowIso = new Date().toISOString();
-  try { localStorage.setItem('gdn_last_backup_at', nowIso); } catch (e) {}
-  if (S.rules) S.rules.last_backup_at = nowIso;
-  try { await db.from('settings').update({last_backup_at: nowIso}).eq('id', 1); } catch (e) {}
+  toast('Preparando el respaldo completo...');
+  const out = await LDB.exportFullJson();
+  const bizSlug = String(LDB.mem.settings?.[0]?.business_name || 'negocio').toLowerCase().replace(/[^a-z0-9]+/g, '_').slice(0, 24);
+  downloadBlob(new Blob([JSON.stringify(out)], {type: 'application/json'}), `respaldo_${bizSlug}_${caracasDate()}.json`);
   toast('Respaldo descargado');
+  LDB.paintBar();
   if (tab === 'configuracion' && SUB.cfg === 'respaldo') render();
 }
+
 async function viewRespaldo() {
-  let set = {};
-  try { set = await q(db.from('settings').select('last_backup_at').eq('id', 1).single()); } catch (e) {}
-  const last = typeof getLastBackupDate === 'function' ? getLastBackupDate(set) : set?.last_backup_at;
-  $('#view').innerHTML = `<div class="card stack"><h2>Respaldo de tus datos</h2>
-    <p class="mut">Descarga una copia de toda tu información (productos, ventas, compras, cuentas, clientes, producción, nómina, cierres de caja, etc.) en un archivo. Guárdala en un lugar seguro, por ejemplo una vez por semana.</p>
-    <div class="rl"><span>Último respaldo registrado</span><b>${last ? fdate(last) : 'Aún sin respaldo'}</b></div>
-    <button class="btn" id="bkGo">Descargar respaldo ahora</button></div>`;
+  const last = LDB.meta?.lastBackupAt || (typeof getLastBackupDate === 'function' ? getLastBackupDate() : null);
+  const dirty = Number(LDB.meta?.dirtySinceBackup || 0);
+  $('#view').innerHTML = `
+    <div class="card stack">
+      <h2>Respaldo de tu negocio</h2>
+      <p class="mut" style="margin:0">Como tus datos viven en tu propio teléfono (100% privados y sin servidores externos), descarga un respaldo periódicamente o guárdalo en tu Google Drive / WhatsApp.</p>
+      <div class="rl"><span>Último respaldo</span><b>${last ? fdate(last) : 'Aún sin respaldo'}</b></div>
+      <div class="rl"><span>Cambios desde el último respaldo</span><b class="${dirty > 10 ? 'neg' : 'pos'}">${dirty}</b></div>
+      <div class="row">
+        <button class="btn" id="bkGo">Descargar respaldo (.json)</button>
+        <button class="btn ghost" id="bkShare">Compartir archivo</button>
+      </div>
+    </div>
+
+    <div class="card stack">
+      <h2>Restaurar desde un respaldo</h2>
+      <p class="mut" style="margin:0">Si cambiaste de teléfono o quieres recuperar una copia anterior, selecciona tu archivo <b>.json</b>. Esto reemplazará los datos actuales de este dispositivo.</p>
+      <input type="file" id="bkFile" accept=".json,application/json" class="hidden">
+      <div class="row"><button class="btn ghost" id="bkRest">Seleccionar archivo de respaldo</button></div>
+    </div>
+
+    <div class="card stack" style="border-left:4px solid var(--pri)">
+      <h2>Sincronización automática con tu Google Drive</h2>
+      <p class="mut" style="margin:0">Próxima fase: vincula tu cuenta de Google para que la app guarde automáticamente tu respaldo diario en tu propio Google Drive sin pagar servidores.</p>
+    </div>`;
+
   $('#bkGo').onclick = () => run(descargarRespaldo);
+  $('#bkShare').onclick = () => run(async () => {
+    const out = await LDB.exportFullJson();
+    const fname = `respaldo_${caracasDate()}.json`;
+    const blob = new Blob([JSON.stringify(out)], {type: 'application/json'});
+    const file = new File([blob], fname, {type: 'application/json'});
+    if (navigator.canShare && navigator.canShare({files: [file]})) {
+      try { await navigator.share({files: [file], title: 'Respaldo de mi negocio'}); render(); return; }
+      catch (e) { if (e.name === 'AbortError') return; }
+    }
+    downloadBlob(blob, fname);
+    toast('Archivo descargado. Puedes enviarlo a tu correo o subirlo a Drive.');
+    render();
+  });
+  $('#bkRest').onclick = () => $('#bkFile').click();
+  $('#bkFile').onchange = (e) => {
+    const f = e.target.files[0]; if (!f) return;
+    run(async () => {
+      if (!confirm('Esto reemplazará TODOS los datos actuales de este dispositivo por los del archivo seleccionado. ¿Continuar?')) { e.target.value = ''; return; }
+      const data = JSON.parse(await f.text());
+      await LDB.importFullJson(data);
+      toast('Respaldo restaurado correctamente');
+      setTimeout(() => location.reload(), 900);
+    });
+  };
 }
 
-// ---------- Comenzar desde 0 (con varias confirmaciones de seguridad) ----------
+// ---------- Comenzar desde 0 (100% local con confirmaciones de seguridad) ----------
 async function viewReinicio() {
-  const DESC = {movimientos: '<b>Borra:</b> ventas, cotizaciones, devoluciones, compras, producciones, gastos, nómina, adelantos y todos los movimientos de inventario y de cuentas. Los saldos iniciales de las cuentas quedan en 0 y los costos automáticos se reinician.<br><b>Conserva:</b> productos, fórmulas, clientes, proveedores, empleados, cuentas y configuración.',
-    todo: '<b>Borra todo lo anterior y además:</b> productos, fórmulas, clientes, proveedores, empleados, cuentas, tasas guardadas y configuraciones del catálogo.<br><b>Conserva:</b> usuarios, datos del negocio, directorios (unidades, impuestos, categorías, métodos de pago, tipos de gasto) y plantillas. Se recrean las cuentas básicas.'};
-  $('#view').innerHTML = `<div class="card stack" id="rsBox"><h2 class="warn">Comenzar desde 0</h2><p>Esta opción borra datos para empezar de nuevo. <b>No se puede deshacer.</b> Solo puede usarla un administrador.</p>
-    <label>¿Qué quieres borrar?<select id="rsN"><option value="movimientos">Solo los movimientos</option><option value="todo">Todo</option></select></label><p class="mut" id="rsD">${DESC.movimientos}</p>
-    <button class="btn ghost" id="rsBk" type="button">Descargar un respaldo ahora</button>
+  const DESC = {
+    movimientos: '<b>Borra:</b> ventas, cotizaciones, devoluciones, compras, producciones, gastos, nómina, adelantos y movimientos de inventario/cuentas. Los saldos quedan en 0.<br><b>Conserva:</b> productos, fórmulas, clientes, proveedores, empleados, cuentas y configuración.',
+    todo: '<b>Borra todo lo anterior y además:</b> productos, fórmulas, clientes, proveedores, empleados y plantillas de catálogo. Al finalizar volverás al asistente de bienvenida.'
+  };
+  $('#view').innerHTML = `<div class="card stack" id="rsBox"><h2 class="warn">Comenzar desde 0</h2><p>Esta opción borra datos locales para empezar de nuevo. <b>No se puede deshacer.</b></p>
+    <label>¿Qué quieres borrar?<select id="rsN"><option value="movimientos">Solo los movimientos</option><option value="todo">Todo (volver al asistente inicial)</option></select></label><p class="mut" id="rsD">${DESC.movimientos}</p>
+    <button class="btn ghost" id="rsBk" type="button">Descargar un respaldo primero</button>
     <label class="chk"><input type="checkbox" id="rsC1"> Entiendo que se borrará de forma permanente</label>
     <label class="chk"><input type="checkbox" id="rsC2"> Ya descargué un respaldo</label>
     <label>Escribe BORRAR TODO para confirmar<input id="rsT" autocomplete="off"></label>
-    <label>Tu contraseña<input id="rsP" type="password" autocomplete="current-password"></label>
     <button class="btn" id="rsGo" style="background:var(--bad);color:#fff" disabled>Borrar y comenzar desde 0</button></div>`;
-  const chk = () => { $('#rsGo').disabled = !($('#rsC1').checked && $('#rsC2').checked && $('#rsT').value.trim() === 'BORRAR TODO' && $('#rsP').value.length > 0); };
+  const chk = () => { $('#rsGo').disabled = !($('#rsC1').checked && $('#rsC2').checked && $('#rsT').value.trim() === 'BORRAR TODO'); };
   $('#rsBox').addEventListener('input', chk); $('#rsBox').addEventListener('change', chk);
   $('#rsN').onchange = (e) => { $('#rsD').innerHTML = DESC[e.target.value]; };
   $('#rsBk').onclick = () => run(descargarRespaldo);
   $('#rsGo').onclick = () => run(async () => {
-    const email = (await db.auth.getUser()).data.user?.email, {error} = await db.auth.signInWithPassword({email, password: $('#rsP').value});
-    if (error) throw new Error('La contraseña no es correcta');
     if (!confirm('ÚLTIMA ADVERTENCIA: se borrarán los datos seleccionados de forma permanente. ¿Continuar?')) return;
     await q(db.rpc('reiniciar_sistema', {p_nivel: $('#rsN').value, p_frase: $('#rsT').value.trim()}));
-    await db.from('settings').update({apertura_completada: false, fecha_apertura: null, capital_inicial_usd: 0}).eq('id', 1);
-    toast('Listo: el sistema quedó en cero'); setTimeout(() => location.reload(), 1200);
+    toast('Listo: el sistema quedó en cero');
+    setTimeout(() => location.reload(), 900);
   });
 }
 

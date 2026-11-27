@@ -1,17 +1,16 @@
-// Estructura móvil: navegación, pantalla de inicio y organización de módulos
+// Estructura móvil: navegación, pantalla de inicio y módulos activables (Edición Emprendedores)
 const MAIN = ['inicio', 'ventas', 'inventario', 'produccion', 'mas'];
 const SUB = {};
 
 function go(t) {
   if (typeof closeScanner === 'function') closeScanner();
-  if (!canSee(t)) { toast('Tu rol no tiene acceso a esta sección', true); t = 'inicio'; }
+  if (!canSee(t)) { toast('Esta sección está desactivada. Puedes activarla en Configuración > Módulos.', true); t = 'inicio'; }
   tab = t;
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === (MAIN.includes(t) ? t : 'mas')));
   window.scrollTo(0, 0); render();
 }
 document.addEventListener('click', (e) => { const g = e.target.closest('[data-go]'); if (g) go(g.dataset.go); });
 
-// Hoja deslizable inferior (formularios)
 function openSheet(title, html) {
   let s = $('#sheet');
   if (!s) { s = document.createElement('div'); s.id = 'sheet'; document.body.appendChild(s); }
@@ -21,53 +20,79 @@ function openSheet(title, html) {
 }
 function closeSheet() { $('#sheet')?.classList.add('hidden'); }
 
-// Sub-secciones con chips (se mantienen al recargar)
 const withSubs = (key, opts, fns) => async () => {
   const cur = SUB[key] && opts[SUB[key]] ? SUB[key] : Object.keys(opts)[0];
   await fns[cur]();
   $('#view').insertAdjacentHTML('afterbegin', `<div class="chips sub" id="subChips">${Object.entries(opts).map(([k, v]) => `<button data-s="${k}" class="${k === cur ? 'on' : ''}">${v}</button>`).join('')}</div>`);
   $('#subChips').onclick = (e) => { const b = e.target.closest('button'); if (b) { SUB[key] = b.dataset.s; render(); } };
 };
-// Título de página (con enlace de regreso a "Más" en los módulos secundarios)
 const page = (title, fn, back = true) => async () => {
   await fn();
   $('#view').insertAdjacentHTML('afterbegin', `<div class="title-row" style="margin-bottom:.8rem"><h1 class="pt">${title}</h1>${back ? '<button class="lnk" data-go="mas">Volver a Más</button>' : ''}</div>`);
 };
-const soon = (note, items) => async () => {
-  $('#view').innerHTML = `<div class="card"><h2>En construcción</h2><p class="mut">${note}</p><ul>${items.map(i => `<li>${i}</li>`).join('')}</ul></div>`;
-};
 
-views.inicio = () => (['admin', 'contador'].includes(S.role || 'admin') ? viewInicio() : viewInicioBasico());
+views.inicio = () => viewInicio();
 views.apertura = page('Saldos iniciales (Arranque)', viewApertura);
-views.offline = page('Modo sin conexión', viewOffline);
 
-const MODS = [['compras', 'Compras', 'Proveedores y entrada de mercancía'], ['marketing', 'Marketing', 'Clientes, ofertas y WhatsApp'],
-  ['nomina', 'Nómina', 'Empleados, adelantos y pagos'], ['finanzas', 'Finanzas', 'Cajas, cuentas y gastos'], ['contabilidad', 'Reportes', 'Rentabilidad, caja y resultados'],
-  ['directorios', 'Directorios', 'Clientes, proveedores, unidades e impuestos'], ['configuracion', 'Configuración', 'Tasa, negocio, reglas, metas y sistema']];
+const MODS = [
+  ['compras', 'Compras', 'Proveedores y entrada de mercancía', 'purchases'],
+  ['marketing', 'Marketing', 'Clientes, ofertas y WhatsApp', 'marketing'],
+  ['nomina', 'Nómina', 'Empleados, adelantos y pagos', 'payroll'],
+  ['finanzas', 'Finanzas', 'Cajas, cuentas y gastos', null],
+  ['contabilidad', 'Reportes', 'Rentabilidad, caja y resultados', null],
+  ['directorios', 'Directorios', 'Clientes, proveedores, unidades e impuestos', null],
+  ['configuracion', 'Configuración', 'Módulos, tasa, negocio, respaldo y metas', null]
+];
 views.mas = async () => {
-  $('#view').innerHTML = `<h1 class="pt">Más módulos</h1><div class="menu" id="masMenu" style="margin-top:.8rem">${MODS.filter(m => canSee(m[0]) && (m[0] !== 'nomina' || S.flags?.payroll !== false)).map(([k, t, d]) => `<button data-go="${k}"><b>${t}</b><small>${d}</small></button>`).join('')}</div>
-    <div class="row"><button class="btn ghost" id="mOut">Cerrar sesión</button></div>`;
+  const items = MODS.filter(([k, , , mk]) => (!mk || hasMod(mk)) && canSee(k));
+  const extraProd = !hasMod('inventory') ? `<button id="mSrvProds"><b>Productos / Servicios</b><small>Catálogo de servicios y precios</small></button>` : '';
+  $('#view').innerHTML = `<h1 class="pt">Más módulos</h1>
+    <div class="menu" id="masMenu" style="margin-top:.8rem">
+      ${extraProd}
+      ${items.map(([k, t, d]) => `<button data-go="${k}"><b>${t}</b><small>${d}</small></button>`).join('')}
+    </div>
+    <div class="row">
+      <button class="btn ghost" id="mModBtn">Activar / desactivar módulos</button>
+      <button class="btn ghost" id="mBkBtn">Respaldo de datos</button>
+    </div>`;
   $('#masMenu').addEventListener('click', (e) => {
     const b = e.target.closest('[data-go]');
     if (!b) return;
     if (b.dataset.go === 'configuracion') SUB.cfg = 'menu';
     if (b.dataset.go === 'directorios') { SUB.dir = 'menu'; if (typeof DIR_STATE !== 'undefined') DIR_STATE.hubQ = ''; }
   }, true);
-  $('#mOut').onclick = () => (typeof safeSignOut === 'function' ? safeSignOut() : db.auth.signOut());
+  if ($('#mSrvProds')) $('#mSrvProds').onclick = () => { SUB.inv = 'productos'; go('inventario'); };
+  $('#mModBtn').onclick = () => { SUB.cfg = 'modulos'; go('configuracion'); };
+  $('#mBkBtn').onclick = () => { SUB.cfg = 'respaldo'; go('configuracion'); };
 };
 
 views.inventario = page('Inventario', async () => {
-  const subs = {stock: 'Existencias', productos: 'Productos', precios: 'Precios', catalogo: 'Catálogo', ajuste: 'Ajuste masivo'}, fns = {stock: viewInventario2, productos: viewProductos2, precios: viewPreciosMasivo, catalogo: viewCatalogo, ajuste: viewAjusteMasivo};
-  if (S.role === 'vendedor') { delete subs.productos; delete subs.precios; delete subs.ajuste; }
+  if (!hasMod('inventory')) {
+    await viewProductos2();
+    return;
+  }
+  const subs = {stock: 'Existencias', productos: 'Productos', precios: 'Precios', catalogo: 'Catálogo', ajuste: 'Ajuste masivo'};
+  const fns = {stock: viewInventario2, productos: viewProductos2, precios: viewPreciosMasivo, catalogo: viewCatalogo, ajuste: viewAjusteMasivo};
+  if (!hasMod('catalog')) delete subs.catalogo;
   await withSubs('inv', subs, fns)();
 }, false);
+
 views.compras = page('Compras', withSubs('com', {nueva: 'Nueva compra', sugerida: 'Reposición sugerida', historial: 'Historial', pagar: 'Por pagar'}, {nueva: viewCompra, sugerida: viewSugerida, historial: viewHistCompras, pagar: viewDeudasProv}));
-views.ventas = page('Ventas', withSubs('ven', {nueva: 'Nueva venta', cotizaciones: 'Cotizaciones', historial: 'Historial', devoluciones: 'Devoluciones', cobrar: 'Por cobrar'}, {nueva: viewVenta, cotizaciones: viewCotizaciones, historial: viewHistVentas, devoluciones: viewDevoluciones, cobrar: viewDeudas}), false);
+
+views.ventas = page('Ventas', async () => {
+  const subs = {nueva: 'Nueva venta', cotizaciones: 'Cotizaciones', historial: 'Historial', devoluciones: 'Devoluciones', cobrar: 'Por cobrar'};
+  const fns = {nueva: viewVenta, cotizaciones: viewCotizaciones, historial: viewHistVentas, devoluciones: viewDevoluciones, cobrar: viewDeudas};
+  if (!hasMod('quotes')) delete subs.cotizaciones;
+  await withSubs('ven', subs, fns)();
+}, false);
+
 views.produccion = page('Producciones', async () => {
-  const subs = {producir: 'Producir', formulas: 'Fórmulas', historial: 'Historial'}, fns = {producir: viewProducir, formulas: viewFormulas, historial: viewHistorialProd};
-  if (S.flags?.planning !== false) { subs.planificar = 'Planificar'; fns.planificar = viewPlanificar; }
+  const subs = {producir: 'Producir', formulas: 'Fórmulas', historial: 'Historial'};
+  const fns = {producir: viewProducir, formulas: viewFormulas, historial: viewHistorialProd};
+  if (hasMod('planning')) { subs.planificar = 'Planificar'; fns.planificar = viewPlanificar; }
   await withSubs('prod', subs, fns)();
 }, false);
+
 views.marketing = page('Marketing', viewMarketing);
 views.nomina = page('Nómina', withSubs('nom', {pagar: 'Pagar nómina', empleados: 'Empleados', adelantos: 'Adelantos', historial: 'Historial'}, {pagar: viewNomina, empleados: () => viewDir('empleados'), adelantos: viewAdelantos, historial: viewNominaHist}));
 views.finanzas = page('Finanzas', withSubs('fin', {cuentas: 'Cuentas', cierre: 'Cierre de caja', gastos: 'Gastos'}, {cuentas: viewCuentas, cierre: viewCierreCaja, gastos: viewGastos}));
@@ -75,7 +100,6 @@ views.contabilidad = page('Reportes', viewReportes);
 views.directorios = viewDirectorios;
 views.configuracion = viewConfiguracion;
 
-// Fondo claro / oscuro (se recuerda la elección)
 const SUN = '<svg class="ic" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
 const MOON = '<svg class="ic" viewBox="0 0 24 24"><path d="M21 13A9 9 0 1111 3a7 7 0 0010 10z"/></svg>';
 const isDark = () => (document.documentElement.dataset.theme || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')) === 'dark';
@@ -88,7 +112,6 @@ $('#themeBtn').onclick = () => {
 };
 paintTheme();
 
-// Evita duplicados: si se toca dos veces el mismo botón en menos de 2 segundos, se ignora el segundo toque
 document.addEventListener('click', (e) => {
   const b = e.target.closest('button.btn'); if (!b) return;
   const t = Date.now(); if (b._t && t - b._t < 2000) { e.stopImmediatePropagation(); e.preventDefault(); return; }

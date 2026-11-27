@@ -171,19 +171,59 @@ async function viewReglasYMetas() {
   };
 }
 
-// ---------- Hub organizado de Configuración ----------
+// ---------- Pantalla: Acerca de, almacenamiento local y Soporte ----------
+async function viewAcercaDe() {
+  const nProds = (LDB.mem.products || []).filter(p => p.active !== false).length;
+  const nSales = (LDB.mem.sales || []).length;
+  const nParties = (LDB.mem.parties || []).filter(p => p.active !== false).length;
+  const rev = LDB.meta?.rev || 0;
+  const supPhone = (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.supportWhatsApp) ? APP_CONFIG.supportWhatsApp : '';
+  const isStandalone = window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+
+  let storageTxt = 'Disponible';
+  try {
+    if (navigator.storage && navigator.storage.estimate) {
+      const est = await navigator.storage.estimate();
+      const mb = ((est.usage || 0) / (1024 * 1024)).toFixed(2);
+      storageTxt = `${mb} MB usados en este dispositivo`;
+    }
+  } catch (e) {}
+
+  $('#view').innerHTML = `
+    <div class="card stack">
+      <h2>${esc(typeof APP_CONFIG !== 'undefined' ? APP_CONFIG.brandName : 'Gestor Emprendedor')}</h2>
+      <div class="rl"><span>Edición</span><b>${esc(typeof APP_CONFIG !== 'undefined' ? APP_CONFIG.edition : 'Emprendedores (Local)')}</b></div>
+      <div class="rl"><span>Modo de trabajo</span><b class="pos">100% Local (funciona sin internet)</b></div>
+      <div class="rl"><span>Espacio en teléfono</span><b>${esc(storageTxt)}</b></div>
+      <div class="rl"><span>Productos / Ventas / Contactos</span><b>${nProds} / ${nSales} / ${nParties}</b></div>
+      <div class="rl"><span>Revisión local</span><b>#${rev}</b></div>
+      ${supPhone ? `<div class="row"><button class="btn" id="acSup">Soporte por WhatsApp</button></div>` : ''}
+    </div>
+
+    <div class="card stack">
+      <h2>Instalar como aplicación (PWA)</h2>
+      ${isStandalone
+        ? '<p class="pos" style="margin:0"><b>Ya estás usando la app instalada en tu dispositivo.</b></p>'
+        : '<p class="mut" style="margin:0"><b>En Android (Chrome):</b> menú (⋮) &rarr; <i>Instalar aplicación</i>.<br><b>En iPhone (Safari):</b> Compartir &rarr; <i>Agregar a pantalla de inicio</i>.</p>'}
+    </div>`;
+
+  if (supPhone && $('#acSup')) {
+    $('#acSup').onclick = () => window.open(`https://wa.me/${waDigits(supPhone)}?text=${encodeURIComponent('Hola, necesito soporte con ' + (APP_CONFIG.brandName || 'la app'))}`, '_blank');
+  }
+}
+
+// ---------- Hub organizado de Configuración (Edición Emprendedores) ----------
 const CFG_MAP = {
+  modulos: {title: 'Módulos del negocio', fn: () => viewModulos()},
   tasa: {title: 'Tasa del dólar', fn: () => viewTasa()},
-  negocio: {title: 'Negocio y módulos', fn: () => viewSettings('negocio')},
+  negocio: {title: 'Información del negocio', fn: () => viewSettings('negocio')},
   reglas: {title: 'Reglas de venta y Metas', fn: () => viewReglasYMetas()},
   ticket: {title: 'Diseño del ticket', fn: () => viewSettings('ticket')},
   apertura: {title: 'Saldos iniciales (Apertura)', fn: () => viewApertura()},
   importar: {title: 'Importar datos (Excel / CSV)', fn: () => viewImportar()},
-  respaldo: {title: 'Respaldo de datos', fn: () => viewRespaldo()},
-  offline: {title: 'Modo sin conexión y PWA', fn: () => viewOffline()},
-  usuarios: {title: 'Usuarios y roles', fn: () => viewDir('usuarios')},
+  respaldo: {title: 'Respaldo y Restauración', fn: () => viewRespaldo()},
   bitacora: {title: 'Bitácora de cambios', fn: () => viewBitacora()},
-  estado: {title: 'Estado del sistema', fn: () => viewEstado()},
+  acerca: {title: 'App, espacio y soporte', fn: () => viewAcercaDe()},
   reinicio: {title: 'Comenzar desde 0', fn: () => viewReinicio()}
 };
 
@@ -206,13 +246,11 @@ async function viewConfiguracion() {
   const r = applyRulesObj(set);
   const lastBk = getLastBackupDate(set);
   const bkDays = lastBk ? Math.floor((Date.now() - new Date(lastBk).getTime()) / 864e5) : null;
-  const offOps = typeof OFF !== 'undefined' ? (OFF.ops || []).length : 0;
-  const isOff = typeof OFF !== 'undefined' && OFF.isOffline();
+  const activeModCnt = MOD_CATALOG.filter(m => hasMod(m.k)).length;
 
   const activeControls = [
     r.monthly_sales_goal_usd > 0 ? 'Meta: ' + fmt(r.monthly_sales_goal_usd, 0) + ' USD' : '',
     r.block_negative_stock ? 'Stock estricto' : '',
-    !r.allow_seller_price_edit ? 'Precios fijos' : '',
     r.max_discount_percent > 0 ? 'Desc. máx ' + qty(r.max_discount_percent) + '%' : ''
   ].filter(Boolean);
 
@@ -221,37 +259,49 @@ async function viewConfiguracion() {
       title: 'Mi Negocio y Operación diaria',
       items: [
         {
+          k: 'modulos', name: 'Módulos del negocio y moneda',
+          desc: 'Activa o desactiva inventario, compras, producción, nómina, catálogo y modo bimoneda',
+          pill: `${activeModCnt} de ${MOD_CATALOG.length} activos`,
+          pillCls: 'ok'
+        },
+        ...(S.bimoneda !== false ? [{
           k: 'tasa', name: 'Tasa del dólar',
           desc: 'BCV automática, tasa manual e historial de cambios',
           pill: S.rate ? `${fmt(S.rate, 2)} Bs · ${S.mode === 'auto' ? 'Auto' : 'Manual'}` : 'Sin tasa',
           pillCls: S.rate ? 'ok' : 'out'
-        },
+        }] : []),
         {
-          k: 'negocio', name: 'Información del negocio y módulos',
-          desc: 'Nombre, RIF, logo, método de costo, nómina y planificación',
+          k: 'negocio', name: 'Información del negocio',
+          desc: 'Nombre, RIF, logo, teléfono, dirección y método de costo',
           pill: set.business_name ? set.business_name.slice(0, 18) : 'Configurar',
           pillCls: ''
         },
         {
           k: 'reglas', name: 'Reglas de venta y Metas',
-          desc: 'Meta mensual, margen objetivo, crédito, tope de descuento y control de stock',
+          desc: 'Meta mensual, margen mínimo objetivo, días de crédito y control de stock',
           pill: activeControls.length ? activeControls[0] : 'Opcional',
           pillCls: activeControls.length ? 'ok' : ''
         },
         {
           k: 'ticket', name: 'Diseño del ticket y recibo',
-          desc: 'Estilo moderno o clásico, color de marca, ancho de papel y vista previa',
-          pill: set.ticket_style === 'clasico' ? 'Clásico' : 'Moderno',
+          desc: 'Estilo moderno, minimalista o clásico, color de marca, datos de pago y firma',
+          pill: set.ticket_style === 'clasico' ? 'Clásico' : set.ticket_style === 'minimal' ? 'Minimal' : 'Moderno',
           pillCls: ''
         }
       ]
     },
     {
-      title: 'Arranque y Datos',
+      title: 'Tus Datos y Respaldos',
       items: [
         {
+          k: 'respaldo', name: 'Respaldo y Restauración',
+          desc: 'Guarda una copia segura de tu negocio o restaura en un teléfono nuevo',
+          pill: bkDays === null ? 'Sin respaldo' : (bkDays === 0 ? 'Hoy' : `Hace ${bkDays}d`),
+          pillCls: bkDays === null || bkDays > 7 ? 'low' : 'ok'
+        },
+        {
           k: 'apertura', name: 'Saldos iniciales (Apertura)',
-          desc: 'Caja inicial, inventario base, cuentas pendientes y capital de arranque',
+          desc: 'Caja inicial, inventario base, deudas pendientes y capital de arranque',
           pill: set.apertura_completada ? 'Completada' : 'Pendiente',
           pillCls: set.apertura_completada ? 'ok' : 'low'
         },
@@ -260,50 +310,27 @@ async function viewConfiguracion() {
           desc: 'Carga masiva de productos, stock inicial, clientes y proveedores',
           pill: 'Excel / CSV',
           pillCls: ''
-        },
-        {
-          k: 'respaldo', name: 'Respaldo de datos (Backup)',
-          desc: 'Descarga una copia completa de tu negocio en formato JSON',
-          pill: bkDays === null ? 'Sin respaldo' : (bkDays === 0 ? 'Hoy' : `Hace ${bkDays}d`),
-          pillCls: bkDays === null || bkDays > 14 ? 'low' : 'ok'
         }
       ]
     },
     {
-      title: 'Equipo, Conexión y Control',
+      title: 'Control y Sistema',
       items: [
-        {
-          k: 'offline', name: 'Modo sin conexión y App (PWA)',
-          desc: 'Réplica local en el teléfono, cola de sincronización e instalación',
-          pill: offOps ? `${offOps} pend.` : (isOff ? 'Sin red' : 'En línea'),
-          pillCls: offOps ? 'low' : (isOff ? 'out' : 'ok')
-        },
-        {
-          k: 'usuarios', name: 'Usuarios y roles',
-          desc: 'Administra permisos de administrador, vendedor, almacén y contador',
-          pill: ROLE_NAMES[S.role] || 'Admin',
-          pillCls: ''
-        },
         {
           k: 'bitacora', name: 'Bitácora de cambios',
-          desc: 'Historial de quién creó, modificó o anuló ventas, precios y cuentas',
+          desc: 'Historial de modificaciones importantes en ventas, productos y cuentas',
           pill: 'Auditoría',
           pillCls: ''
-        }
-      ]
-    },
-    {
-      title: 'Sistema y Zona de Peligro',
-      items: [
+        },
         {
-          k: 'estado', name: 'Estado del sistema',
-          desc: 'Verifica tablas, pasos SQL instalados y versión de la aplicación',
-          pill: 'v' + (typeof APP_VERSION !== 'undefined' ? APP_VERSION : '25'),
-          pillCls: ''
+          k: 'acerca', name: 'App, espacio y soporte',
+          desc: 'Uso de memoria local, instalación como app (PWA) y contacto de soporte',
+          pill: '100% Local',
+          pillCls: 'ok'
         },
         {
           k: 'reinicio', name: 'Comenzar desde 0',
-          desc: 'Elimina movimientos o reinicia toda la base de datos (irreversible)',
+          desc: 'Borra movimientos o reinicia todo para configurar otro negocio',
           pill: 'Peligro',
           pillCls: 'out',
           danger: true
@@ -317,7 +344,7 @@ async function viewConfiguracion() {
       <h1 class="pt">Configuración</h1>
       <button class="lnk" data-go="mas">Volver a Más</button>
     </div>
-    <input id="cfgQ" type="search" placeholder="Buscar ajuste (ej: tasa, meta, ticket, respaldo, usuarios...)" value="${esc(CFG_STATE.q)}" style="margin-bottom:.9rem">
+    <input id="cfgQ" type="search" placeholder="Buscar ajuste (ej: módulos, tasa, meta, ticket, respaldo...)" value="${esc(CFG_STATE.q)}" style="margin-bottom:.9rem">
     <div id="cfgHub"></div>`;
 
   const drawHub = () => {

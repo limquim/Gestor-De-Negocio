@@ -71,33 +71,36 @@ async function viewInicio() {
   </div>
   ${welcomeCard}
   <div class="hero"><span>Ganancia neta del mes</span><b class="${U1 < 0 ? 'neg2' : ''}">${U(U1)}</b>
-    <small>${mesBs.ok ? `Bs históricos: <b>${fmt(mesBs.netaBs)} Bs</b>` : (S.rate ? fmt(U1 * S.rate) + ' Bs hoy' : '')}${mesBs.ok && S.rate ? ` · Equiv. hoy: ${fmt(U1 * S.rate)} Bs` : ''}</small>
+    ${S.bimoneda !== false ? `<small>${mesBs.ok ? `Bs históricos: <b>${fmt(mesBs.netaBs)} Bs</b>` : (S.rate ? fmt(U1 * S.rate) + ' Bs hoy' : '')}${mesBs.ok && S.rate ? ` · Equiv. hoy: ${fmt(U1 * S.rate)} Bs` : ''}</small>` : ''}
     <small>${dtxt(U1, ut(ant), 'vs el mismo período del mes pasado') || 'después de costos y gastos'}</small>
     <div class="hero3"><div><span>Ventas</span><b>${U(mes.ingresos)}</b><small>${dtxt(mes.ingresos, ant.ingresos, 'vs mes pasado')}</small></div><div><span>Gastos</span><b>${U(mes.gastos)}</b></div><div><span>Margen neto</span><b>${fmt(mg, 0)}%</b></div></div></div>
   ${goalCard}
   <div class="tiles">
     <button class="tile main" data-go="ventas">${ico('<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>')}<span>Vender</span><small>Nueva venta</small></button>
-    <button class="tile" data-go="compras">${ico('<path d="M6 7h12l-1 13H7z"/><path d="M9 7a3 3 0 016 0"/>')}<span>Comprar</span><small>Registrar compra</small></button>
-    <button class="tile" data-go="produccion">${ico('<path d="M9 3h6M10 3v6L4.5 19a1.5 1.5 0 001.3 2h12.4a1.5 1.5 0 001.3-2L14 9V3"/><path d="M7.5 15h9"/>')}<span>Producir</span><small>Fabricar productos</small></button>
-    <button class="tile" data-go="inventario">${ico('<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>')}<span>Inventario</span><small>Existencias y catálogo</small></button></div>
+    ${hasMod('purchases') ? `<button class="tile" data-go="compras">${ico('<path d="M6 7h12l-1 13H7z"/><path d="M9 7a3 3 0 016 0"/>')}<span>Comprar</span><small>Registrar compra</small></button>` : ''}
+    ${hasMod('production') ? `<button class="tile" data-go="produccion">${ico('<path d="M9 3h6M10 3v6L4.5 19a1.5 1.5 0 001.3 2h12.4a1.5 1.5 0 001.3-2L14 9V3"/><path d="M7.5 15h9"/>')}<span>Producir</span><small>Fabricar productos</small></button>` : ''}
+    ${hasMod('inventory') ? `<button class="tile" data-go="inventario">${ico('<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>')}<span>Inventario</span><small>Existencias y precios</small></button>` : ''}
+    ${!hasMod('inventory') ? `<button class="tile" data-go="finanzas">${ico('<path d="M2 7h20v12H2z"/><path d="M2 11h20"/>')}<span>Finanzas</span><small>Cuentas y gastos</small></button>` : ''}
+    ${!hasMod('purchases') && hasMod('marketing') ? `<button class="tile" data-go="marketing">${ico('<path d="M4 4h16v12H5.17L4 17.17z"/>')}<span>Marketing</span><small>Clientes y WhatsApp</small></button>` : ''}
+  </div>
   ${alertHtml}
   <h2 class="sec">Hoy</h2>
   <div class="stats"><div class="stat"><span>Vendido hoy</span><b>${U(h.ingresos)}</b><span>${h.num_ventas} ${h.num_ventas === 1 ? 'venta' : 'ventas'}${S.rate ? ' | ' + fmt(h.ingresos * S.rate) + ' Bs' : ''}</span></div>
     <div class="stat ${gHoy < 0 ? 'bad' : ''}"><span>Ganancia bruta de hoy</span><b>${U(gHoy)}</b><span>ventas menos costo</span></div></div>
   <h2 class="sec">Tu dinero</h2>
-  <div class="stats"><button class="stat" data-go="finanzas"><span>Disponible en cuentas</span><b>${U(caja)}</b><span>${fmt(cajaUsdReal)} USD + ${fmt(cajaVesReal)} Bs</span></button>
+  <div class="stats"><button class="stat" data-go="finanzas"><span>Disponible en cuentas</span><b>${U(caja)}</b><span>${S.bimoneda !== false ? `${fmt(cajaUsdReal)} USD + ${fmt(cajaVesReal)} Bs` : 'En cuentas activas'}</span></button>
     <button class="stat warn" id="pPend"><span>Te deben (por cobrar)</span><b>${U(mes.por_cobrar)}</b><span>${S.rate ? fmt(mes.por_cobrar * S.rate) + ' Bs a la tasa de hoy' : ''}</span></button>
-    <button class="stat" id="pPag"><span>Debes (por pagar)</span><b>${U(mes.por_pagar)}</b><span>${S.rate ? fmt(mes.por_pagar * S.rate) + ' Bs a la tasa de hoy' : ''}</span></button>
+    ${hasMod('purchases') ? `<button class="stat" id="pPag"><span>Debes (por pagar)</span><b>${U(mes.por_pagar)}</b><span>${S.rate ? fmt(mes.por_pagar * S.rate) + ' Bs a la tasa de hoy' : ''}</span></button>` : ''}
     <button class="stat" data-go="apertura"><span>Capital del negocio</span><b>${U(cap)}</b><span>${Number(set.capital_inicial_usd || 0) > 0 ? 'Inicial: ' + U(set.capital_inicial_usd) + ' | ' : ''}Toca para editar saldos iniciales</span></button></div>
   <div class="card"><h2>Ventas de los últimos 14 días</h2><div class="dayb">${days.map(x => `<i style="height:${Math.max(3, (byDay[x] || 0) / (maxD || 1) * 100)}%" title="${dmy(x)}: ${fmt(byDay[x] || 0)} USD"></i>`).join('')}</div>
     <p class="mut">${dmy(days[0])} a ${dmy(days[13])}. Total: ${U(quin.ingresos)}</p></div>
   <div class="card"><h2>Lo que más ganancia te deja este mes</h2>${top.map(x => bar(x.name, +x.utilidad, maxP, U(+x.utilidad))).join('') || '<p class="mut">Aún no hay ventas este mes.</p>'}</div>
   <div class="card"><h2>Mejores clientes del mes</h2>${topC.map(([n, v]) => bar(n, v, maxC, U(v))).join('') || '<p class="mut">Aún no hay ventas este mes.</p>'}</div>
   <div class="card"><h2>Gastos del mes</h2>${gastoTop.map(x => bar(x.tipo + (x.fijo ? ' (fijo)' : ''), +x.total, maxG, U(+x.total))).join('') || '<p class="mut">Sin gastos registrados este mes.</p>'}</div>
-  <h2 class="sec">Inventario</h2>
+  ${hasMod('inventory') ? `<h2 class="sec">Inventario</h2>
   <div class="stats"><button class="stat" data-go="inventario"><span>Valor del inventario</span><b>${U(inv)}</b><span>${S.rate ? fmt(inv * S.rate) + ' Bs' : ''}</span></button>
     <button class="stat bad" data-go="inventario"><span>Por reponer</span><b>${bajos}</b><span>en el mínimo o agotados</span></button>
-    <button class="stat warn" data-go="inventario"><span>Sin vender en 30 días</span><b>${slow.length}</b><span>${U(slowV)} detenidos (sin contar materia prima)</span></button></div>`;
+    <button class="stat warn" data-go="inventario"><span>Sin vender en 30 días</span><b>${slow.length}</b><span>${U(slowV)} detenidos (sin contar materia prima)</span></button></div>` : ''}`;
   if ($('#pWaSum') && typeof shareExecutiveSummaryWhatsApp === 'function') {
     $('#pWaSum').onclick = () => shareExecutiveSummaryWhatsApp({
       business: set.business_name || 'Mi negocio',
@@ -121,7 +124,7 @@ async function viewInicio() {
     });
   }
   $('#pPend').onclick = () => { SUB.ven = 'cobrar'; go('ventas'); };
-  $('#pPag').onclick = () => { SUB.com = 'pagar'; go('compras'); };
+  if ($('#pPag')) $('#pPag').onclick = () => { SUB.com = 'pagar'; go('compras'); };
   if ($('#pSkipAp')) $('#pSkipAp').onclick = () => run(async () => {
     await q(db.from('settings').update({apertura_completada: true, fecha_apertura: hoy, updated_at: new Date().toISOString()}).eq('id', 1));
     toast('Configuración inicial omitida. Puedes abrirla cuando quieras desde Configuración > Saldos iniciales.');

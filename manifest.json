@@ -1,7 +1,7 @@
 {
-  "name": "Gestor de Negocio",
+  "name": "Gestor Emprendedor",
   "short_name": "Gestor",
-  "description": "Sistema de gestión de ventas, inventario, producción y finanzas con modo sin internet.",
+  "description": "Sistema de gestión para emprendedores: ventas, caja, clientes, catálogo y reportes 100% sin internet.",
   "start_url": "./",
   "scope": "./",
   "display": "standalone",

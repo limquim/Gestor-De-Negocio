@@ -1,4 +1,12 @@
-// Datos de tu proyecto Supabase. Este archivo se crea una sola vez.
-// La URL termina en .supabase.co (sin barra al final y sin /rest/v1).
-const SUPABASE_URL = 'https://tzennwnijesnllmcqomm.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InR6ZW5ud25pamVzbmxsbWNxb21tIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTM4MzQ5MzEsImV4cCI6MjEwOTQxMDkzMX0.ru_lhpyKBhmng3bx17LNCjUZet7ellemyk4DRKp2ooI';
+// Configuración comercial de Gestor de Negocio — Edición Emprendedores (Local-First)
+// Edita estos datos una sola vez con tu marca antes de publicar en GitHub / Cloudflare Pages.
+const APP_CONFIG = {
+  brandName: 'Gestor Emprendedor',
+  edition: 'Emprendedores v1 (Local)',
+  // Tu número de WhatsApp para soporte y renovaciones (con código de país, sin +, ej: '584141234567')
+  supportWhatsApp: '',
+  // Fase 2: ID de cliente OAuth de Google Cloud para respaldo automático en el Google Drive del cliente
+  googleDriveClientId: '',
+  // Fase 3: URL de tu validador ligero de licencias ($10/mes)
+  licenseApiUrl: ''
+};

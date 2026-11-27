@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>Gestor de Negocio</title>
+<title>Gestor Emprendedor</title>
 <link rel="manifest" href="manifest.json">
 <meta name="theme-color" content="#0b7285">
 <meta name="mobile-web-app-capable" content="yes">
@@ -14,7 +14,6 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <style>
 :root{--bg:#f1f6f7;--card:#fff;--ink:#12303a;--mut:#5f7983;--line:#d9e5e8;--pri:#0b7285;--pri-ink:#fff;--tag:#f4c430;--tag-ink:#3a2e00;--bad:#b4381a;--ok:#1b7f4b}
 @media(prefers-color-scheme:dark){:root{--bg:#0d1a1f;--card:#14262d;--ink:#e6f1f4;--mut:#8fa9b2;--line:#25404a;--pri:#3cb6cc;--pri-ink:#04222a;--tag:#f4c430;--tag-ink:#2a2100;--bad:#ff8a6b;--ok:#5fd394}}
@@ -31,8 +30,6 @@ input:focus-visible,select:focus-visible,button:focus-visible{outline:2px solid 
 .btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
 .lnk{background:none;border:0;color:var(--pri);font:inherit;font-weight:600;cursor:pointer;padding:.2rem .4rem}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:1.1rem;margin-bottom:1rem}
-.login{min-height:100vh;display:grid;place-items:center;padding:1rem}
-.login .card{width:100%;max-width:360px;display:grid;gap:.8rem}
 header{display:flex;align-items:center;gap:.8rem;padding:.7rem 1rem;background:var(--card);border-bottom:1px solid var(--line);flex-wrap:wrap}
 header strong{font-size:1.05rem;font-weight:800;margin-right:auto}
 .price-tag{background:var(--tag);color:var(--tag-ink);padding:.3rem .8rem .3rem 1.1rem;border-radius:4px 14px 14px 4px;font-weight:600;position:relative}
@@ -56,7 +53,7 @@ th.n{text-align:right}
 .radios{display:flex;gap:1.2rem;flex-wrap:wrap}
 .radios label{display:flex;align-items:center;gap:.4rem;color:var(--ink)}
 .radios input{width:auto;margin:0}
-#toast{position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:.6rem 1rem;border-radius:10px;font-weight:600;max-width:90vw;z-index:9}
+#toast{position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:.6rem 1rem;border-radius:10px;font-weight:600;max-width:90vw;z-index:95}
 #toast.err{background:var(--bad);color:#fff}
 </style>
 <link rel="stylesheet" href="tema.css">
@@ -66,22 +63,13 @@ th.n{text-align:right}
 <body>
 <div id="toast" class="hidden" role="status"></div>
 
-<section id="login" class="login hidden">
-  <form id="loginForm" class="card">
-    <h1>Gestor de Negocio</h1>
-    <p class="mut" style="margin:0">Inicia sesión para entrar a tu negocio.</p>
-    <label>Correo<input type="email" id="email" required autocomplete="username"></label>
-    <label>Contraseña<input type="password" id="pass" required autocomplete="current-password"></label>
-    <button class="btn" type="submit">Entrar</button>
-  </form>
-</section>
+<section id="onboarding" class="ob-wrap hidden"></section>
 
 <div id="app" class="hidden">
   <header>
-    <strong>Gestor de Negocio</strong>
+    <strong>Gestor Emprendedor</strong>
     <div id="rateChip"></div>
     <button class="icon-btn" id="themeBtn" aria-label="Cambiar entre fondo claro y oscuro"></button>
-    <button class="btn ghost" id="logout">Salir</button>
   </header>
   <div id="netBar" class="hidden" role="status"></div>
   <nav id="tabs">
@@ -95,10 +83,8 @@ th.n{text-align:right}
 </div>
 
 <script src="config.js"></script>
-<script src="offline.js"></script>
+<script src="localdb.js"></script>
 <script>
-// Las claves de Supabase están en config.js
-
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 const fmt = (n, d = 2) => Number(n || 0).toLocaleString('es-VE', {minimumFractionDigits: d, maximumFractionDigits: d});
@@ -108,7 +94,7 @@ const TIPOS = {materia_prima:'Materia prima', envase:'Envase', producto_terminad
 const MOV = {compra:'Compra', venta:'Venta', produccion_entrada:'Producción (entra)', produccion_consumo:'Producción (consumo)', ajuste:'Ajuste', merma:'Merma', devolucion:'Devolución'};
 
 let db, tab = 'inicio';
-const S = {rate: null, mode: 'auto', rates: [], products: []};
+const S = {rate: null, mode: 'auto', rates: [], products: [], bimoneda: true, baseCurrency: 'USD', mods: null};
 
 let toastTimer;
 function toast(msg, err) {
@@ -120,34 +106,21 @@ const q = async (p) => { const {data, error} = await p; if (error) throw error; 
 
 // ---------- Tasa ----------
 function paintRateChip() {
+  if (S.bimoneda === false) { $('#rateChip').innerHTML = ''; return; }
   $('#rateChip').innerHTML = S.rate
     ? `<span class="price-tag">1 USD = <b>${fmt(S.rate, 4)} Bs</b><small>${S.mode === 'auto' ? 'BCV auto' : 'manual'}</small></span>`
-    : '<span class="bad">Sin tasa: configúrala en la pestaña Tasa</span>';
+    : '<span class="bad">Sin tasa</span>';
 }
 async function loadRate() {
-  if (typeof OFF !== 'undefined' && OFF.isOffline()) {
-    const b = OFF.loadBoot();
-    if (b) { S.mode = b.mode || 'auto'; S.rate = b.rate ? Number(b.rate) : null; S.rates = b.rates || []; }
-    paintRateChip();
-    return;
-  }
-  try {
-    const req = Promise.all([
-      q(db.from('settings').select('rate_mode').eq('id', 1).single()),
-      q(db.rpc('current_rate', {p_currency: 'USD'})),
-      q(db.from('exchange_rates').select('*').eq('currency', 'USD').order('rate_date', {ascending: false}).order('created_at', {ascending: false}).limit(10))
-    ]);
-    const [set, rate, hist] = await (typeof OFF !== 'undefined' ? OFF.withTimeout(req, 9000) : req);
-    S.mode = set?.rate_mode || 'auto'; S.rate = rate ? Number(rate) : null; S.rates = hist || [];
-    if (typeof OFF !== 'undefined') OFF.saveBoot({mode: S.mode, rate: S.rate, rates: S.rates});
-  } catch (e) {
-    if (typeof OFF !== 'undefined' && OFF.isNetError(e)) {
-      const b = OFF.loadBoot();
-      if (b) { S.mode = b.mode || 'auto'; S.rate = b.rate ? Number(b.rate) : null; S.rates = b.rates || []; }
-    } else {
-      throw e;
-    }
-  }
+  const [set, rate, hist] = await Promise.all([
+    q(db.from('settings').select('rate_mode,bimoneda').eq('id', 1).single()),
+    q(db.rpc('current_rate', {p_currency: 'USD'})),
+    q(db.from('exchange_rates').select('*').eq('currency', 'USD').order('rate_date', {ascending: false}).order('created_at', {ascending: false}).limit(10))
+  ]);
+  S.bimoneda = set?.bimoneda !== false;
+  S.mode = set?.rate_mode || 'auto';
+  S.rate = S.bimoneda ? (rate ? Number(rate) : null) : 0;
+  S.rates = hist || [];
   paintRateChip();
 }
 
@@ -162,96 +135,22 @@ async function fetchBCV() {
 }
 
 async function autoRate() {
-  if (S.mode !== 'auto' || (typeof OFF !== 'undefined' && OFF.isOffline())) return;
+  if (S.bimoneda === false || S.mode !== 'auto' || !navigator.onLine) return;
   const last = await q(db.from('exchange_rates').select('rate_date').eq('currency', 'USD').eq('source', 'bcv_auto').order('rate_date', {ascending: false}).limit(1));
   if (last[0]?.rate_date === caracasDate()) return;
   try { await fetchBCV(); await loadRate(); }
-  catch (e) { toast('No se pudo traer la tasa BCV. Puedes cargarla en modo manual.', true); }
+  catch (e) {}
 }
 
-// ---------- Productos ----------
-async function viewProductos() {
-  S.products = await q(db.from('products').select('*').eq('active', true).order('name'));
-  const opts = Object.entries(TIPOS).map(([k, v]) => `<option value="${k}">${v}</option>`).join('');
-  const rows = S.products.map(p => `<tr>
-    <td>${esc(p.sku)}</td><td>${esc(p.name)}</td><td>${TIPOS[p.type]}</td><td>${esc(p.unit)}</td>
-    <td class="n">${fmt(p.avg_cost_usd)}</td><td class="n">${fmt(p.sale_price_usd)}</td>
-    <td class="n">${S.rate ? fmt(p.sale_price_usd * S.rate) : '-'}</td>
-    <td><button class="lnk" data-act="edit" data-id="${p.id}">Editar</button><button class="lnk bad" data-act="del" data-id="${p.id}">Quitar</button></td></tr>`).join('');
-  $('#view').innerHTML = `
-  <div class="card"><h2 id="pTitle">Nuevo producto</h2>
-    <form id="pForm"><input type="hidden" name="pid">
-      <div class="grid">
-        <label>Código (SKU)<input name="sku"></label>
-        <label>Nombre<input name="name" required></label>
-        <label>Tipo<select name="type">${opts}</select></label>
-        <label>Unidad (und, kg, L)<input name="unit" value="und"></label>
-        <label>Costo en USD<input name="avg_cost_usd" type="number" step="0.0001" min="0" value="0"></label>
-        <label>Precio de venta en USD<input name="sale_price_usd" type="number" step="0.0001" min="0" value="0"></label>
-        <label>Stock mínimo<input name="min_stock" type="number" step="0.001" min="0" value="0"></label>
-      </div>
-      <div class="row"><button class="btn" type="submit">Guardar producto</button><button class="btn ghost" type="button" data-act="cancel">Limpiar</button></div>
-    </form></div>
-  <div class="card"><h2>Productos (${S.products.length})</h2>
-    ${S.products.length ? `<div class="scroll"><table><thead><tr><th>Código</th><th>Producto</th><th>Tipo</th><th>Unidad</th><th class="n">Costo USD</th><th class="n">Precio USD</th><th class="n">Precio Bs</th><th></th></tr></thead><tbody>${rows}</tbody></table></div>`
-    : '<p class="mut">Aún no hay productos. Crea el primero con el formulario de arriba.</p>'}</div>`;
-  $('#pForm').onsubmit = (e) => {
-    e.preventDefault();
-    const f = new FormData(e.target), id = f.get('pid');
-    const row = {sku: f.get('sku').trim() || null, name: f.get('name').trim(), type: f.get('type'), unit: f.get('unit').trim() || 'und',
-      avg_cost_usd: +f.get('avg_cost_usd') || 0, sale_price_usd: +f.get('sale_price_usd') || 0, min_stock: +f.get('min_stock') || 0};
-    run(async () => {
-      await q(id ? db.from('products').update(row).eq('id', id) : db.from('products').insert(row));
-      toast('Producto guardado'); render();
-    });
-  };
-}
-function editProduct(id) {
-  const p = S.products.find(x => x.id == id); if (!p) return;
-  const el = $('#pForm').elements;
-  el.pid.value = p.id; el.sku.value = p.sku || ''; el.name.value = p.name; el.type.value = p.type; el.unit.value = p.unit;
-  el.avg_cost_usd.value = p.avg_cost_usd; el.sale_price_usd.value = p.sale_price_usd; el.min_stock.value = p.min_stock;
-  $('#pTitle').textContent = 'Editar producto'; window.scrollTo({top: 0, behavior: 'smooth'});
-}
-
-// ---------- Inventario ----------
-async function viewInventario() {
-  const [stock, moves] = await Promise.all([
-    q(db.from('stock_actual').select('*').order('name')),
-    q(db.from('inventory_movements').select('id,movement_type,quantity,notes,created_at,products(name,unit)').order('created_at', {ascending: false}).limit(12))
-  ]);
-  const opts = stock.map(s => `<option value="${s.product_id}">${esc(s.name)} (${esc(s.unit)})</option>`).join('');
-  const rows = stock.map(s => {
-    const st = Number(s.stock);
-    const b = st <= 0 ? '<span class="badge out">Agotado</span>' : s.bajo_minimo ? '<span class="badge low">Bajo mínimo</span>' : '<span class="badge ok">Disponible</span>';
-    return `<tr><td>${esc(s.name)}</td><td>${TIPOS[s.type]}</td><td class="n">${qty(st)} ${esc(s.unit)}</td><td class="n">${qty(s.min_stock)}</td><td>${b}</td></tr>`;
-  }).join('');
-  const mrows = moves.map(m => `<tr><td>${new Date(m.created_at).toLocaleString('es-VE', {dateStyle: 'short', timeStyle: 'short'})}</td><td>${esc(m.products?.name)}</td><td>${MOV[m.movement_type]}</td><td class="n">${m.quantity > 0 ? '+' : ''}${qty(m.quantity)}</td><td>${esc(m.notes)}</td></tr>`).join('');
-  $('#view').innerHTML = `
-  <div class="card"><h2>Registrar movimiento</h2>
-    ${stock.length ? `<form id="mForm"><div class="grid">
-      <label>Producto<select name="product_id" required>${opts}</select></label>
-      <label>Movimiento<select name="kind"><option value="in">Entrada o carga inicial</option><option value="out">Salida o corrección</option><option value="merma">Merma o pérdida</option></select></label>
-      <label>Cantidad<input name="qty" type="number" step="0.001" min="0.001" required></label>
-      <label>Nota<input name="notes" placeholder="Ej: inventario inicial"></label></div>
-      <div class="row"><button class="btn" type="submit">Registrar movimiento</button></div></form>`
-    : '<p class="mut">Primero crea productos en la pestaña Productos.</p>'}</div>
-  <div class="card"><h2>Existencias</h2>
-    ${stock.length ? `<div class="scroll"><table><thead><tr><th>Producto</th><th>Tipo</th><th class="n">Stock</th><th class="n">Mínimo</th><th>Estado</th></tr></thead><tbody>${rows}</tbody></table></div>` : '<p class="mut">Sin productos todavía.</p>'}</div>
-  <div class="card"><h2>Últimos movimientos</h2>
-    ${moves.length ? `<div class="scroll"><table><thead><tr><th>Fecha</th><th>Producto</th><th>Tipo</th><th class="n">Cantidad</th><th>Nota</th></tr></thead><tbody>${mrows}</tbody></table></div>` : '<p class="mut">Aún no hay movimientos.</p>'}</div>`;
-  const form = $('#mForm');
-  if (form) form.onsubmit = (e) => {
-    e.preventDefault();
-    const f = new FormData(e.target), kind = f.get('kind'), n = Math.abs(+f.get('qty'));
-    const row = {product_id: +f.get('product_id'), movement_type: kind === 'merma' ? 'merma' : 'ajuste', quantity: kind === 'in' ? n : -n, notes: f.get('notes').trim() || null};
-    run(async () => { await q(db.from('inventory_movements').insert(row)); toast('Movimiento registrado'); render(); });
-  };
-}
-
-// ---------- Tasa ----------
 async function viewTasa() {
   await loadRate();
+  if (S.bimoneda === false) {
+    $('#view').innerHTML = `<div class="card stack"><h2>Modo moneda única activo</h2>
+      <p class="mut" style="margin:0">Actualmente trabajas en una sola moneda (USD) sin bolívares. Si deseas activar la tasa BCV y cobros en bolívares, activa el <b>Modo Bimoneda</b> en <b>Configuración &gt; Módulos del negocio</b>.</p>
+      <div class="row"><button class="btn" id="tsModBtn">Ir a Módulos del negocio</button></div></div>`;
+    $('#tsModBtn').onclick = () => { SUB.cfg = 'modulos'; go('configuracion'); };
+    return;
+  }
   const rows = S.rates.map(r => `<tr><td>${r.rate_date}</td><td class="n">${fmt(r.rate, 4)}</td><td>${r.source === 'bcv_auto' ? 'BCV automática' : 'Manual'}</td></tr>`).join('');
   $('#view').innerHTML = `
   <div class="card"><h2>Tasa del dólar (Bs por 1 USD)</h2>
@@ -275,29 +174,12 @@ async function viewTasa() {
   };
 }
 
-// ---------- Navegación y eventos ----------
-const views = {productos: viewProductos, inventario: viewInventario, tasa: viewTasa};
+// ---------- Navegación ----------
+const views = {tasa: viewTasa};
 const render = () => run(async () => {
   $('#view').innerHTML = '<p class="mut">Cargando...</p>';
-  try {
-    await views[tab]();
-  } catch (e) {
-    if (typeof OFF !== 'undefined' && OFF.isNetError(e)) {
-      OFF.paintBar();
-      $('#view').innerHTML = `<div class="card stack" style="border-left:5px solid var(--tag)">
-        <h2>Sin conexión a internet</h2>
-        <p class="mut" style="margin:0">Aún no hay datos descargados de esta sección en este dispositivo. Conéctate una vez a internet y pulsa Actualizar réplica offline para usar todo sin señal.</p>
-        <div class="row">
-          <button class="btn" data-go="ventas">Ir a Ventas</button>
-          <button class="btn ghost" data-go="inventario">Ver Inventario</button>
-          <button class="btn ghost" id="offRetryBtn">Reintentar</button>
-        </div>
-      </div>`;
-      $('#offRetryBtn').onclick = () => render();
-      return;
-    }
-    throw e;
-  }
+  await views[tab]();
+  LDB.paintBar();
 });
 
 $('#tabs').onclick = (e) => {
@@ -308,14 +190,8 @@ $('#tabs').onclick = (e) => {
 };
 $('#view').addEventListener('click', (e) => {
   const t = e.target.closest('[data-act]'); if (!t) return;
-  const {act, id} = t.dataset;
+  const {act} = t.dataset;
   run(async () => {
-    if (act === 'edit') editProduct(id);
-    if (act === 'cancel') render();
-    if (act === 'del') {
-      if (!confirm('¿Quitar este producto de la lista?')) return;
-      await q(db.from('products').update({active: false}).eq('id', id)); toast('Producto quitado'); render();
-    }
     if (act === 'bcv') { const r = await fetchBCV(); await loadRate(); toast('Tasa BCV guardada: ' + fmt(r, 4) + ' Bs'); render(); }
   });
 });
@@ -326,109 +202,33 @@ $('#view').addEventListener('change', (e) => {
     await loadRate(); if (e.target.value === 'auto') await autoRate(); toast('Modo de tasa actualizado'); render();
   });
 });
-$('#loginForm').onsubmit = (e) => {
-  e.preventDefault();
-  run(async () => {
-    const {error} = await db.auth.signInWithPassword({email: $('#email').value, password: $('#pass').value});
-    if (error) throw new Error(error.message === 'Invalid login credentials' ? 'Correo o contraseña incorrectos' : error.message);
-    await enter();
-  });
-};
-async function safeSignOut() {
-  if (typeof OFF !== 'undefined') {
-    await OFF.ensureReady();
-    if (OFF.ops.length && !confirm(`Tienes ${OFF.ops.length} cambio(s) sin subir a Supabase. ¿Seguro que quieres cerrar sesión?`)) return;
-    OFF.clearSessionHint();
-  }
-  try { await db.auth.signOut(); } catch (e) {}
-  showLogin();
-}
-$('#logout').onclick = safeSignOut;
 
 async function enter() {
-  $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
-  const off = typeof OFF !== 'undefined' && OFF.isOffline();
-  const boot = typeof OFF !== 'undefined' ? OFF.loadBoot() : null;
-
-  try { await loadRate(); } catch (e) {}
-  if (!off) { try { await autoRate(); } catch (e) {} }
-
-  // Métodos de pago con respaldo offline
-  try {
-    if (off) throw new Error('offline');
-    await (typeof OFF !== 'undefined' ? OFF.withTimeout(loadMethods(), 8000) : loadMethods());
-    if (typeof OFF !== 'undefined') OFF.saveBoot({methods: {...METHODS}, mOff: [...M_OFF]});
-  } catch (e) {
-    if (boot?.methods) {
-      Object.keys(METHODS).forEach(k => delete METHODS[k]);
-      Object.assign(METHODS, boot.methods);
-      M_OFF.clear(); (boot.mOff || []).forEach(k => M_OFF.add(k));
-    }
-  }
-
-  // Flags, reglas de negocio y rol con respaldo offline
-  try {
-    if (off) throw new Error('offline');
-    await (typeof OFF !== 'undefined' ? OFF.withTimeout(loadFlags(), 8000) : loadFlags());
-    if (typeof OFF !== 'undefined') OFF.saveBoot({flags: S.flags});
-  } catch (e) { S.flags = boot?.flags || {planning: true, payroll: true}; }
-
-  try {
-    if (typeof loadBusinessRules === 'function') await loadBusinessRules();
-  } catch (e) {}
-
-  try {
-    await loadRole();
-  } catch (e) {
-    S.role = boot?.role || 'admin';
-    S.userName = boot?.userName || boot?.sessionEmail || '';
-  }
-
-  // Guardar correo de sesión para poder abrir sin internet luego
-  if (!off && typeof OFF !== 'undefined') {
-    db.auth.getUser().then(({data}) => { if (data?.user?.email) OFF.saveBoot({sessionEmail: data.user.email}); }).catch(() => {});
-  }
-
+  $('#onboarding').classList.add('hidden');
+  $('#app').classList.remove('hidden');
+  await loadModulesConfig();
+  await loadRate();
+  await autoRate();
+  await loadMethods();
+  if (typeof loadBusinessRules === 'function') await loadBusinessRules();
+  await loadRole();
   applyRoleUI();
-  if (typeof OFF !== 'undefined') {
-    await OFF.ensureReady();
-    OFF.paintBar();
-    if (!off) {
-      if (OFF.ops.length) setTimeout(() => OFF.syncNow(false), 1200);
-      else setTimeout(() => OFF.refreshAll(true), 800);
-    }
-  }
+  applyModsUI();
+  LDB.paintBar();
   render();
 }
-function showLogin() { $('#app').classList.add('hidden'); $('#login').classList.remove('hidden'); }
 
 run(async () => {
-  if (SUPABASE_URL.startsWith('PEGA')) {
-    document.body.innerHTML = '<p style="padding:2rem;font-family:sans-serif">Falta configurar SUPABASE_URL y SUPABASE_ANON_KEY dentro de index.html.</p>'; return;
-  }
-  const rawDb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-  db = typeof OFF !== 'undefined' ? OFF.wrapClient(rawDb) : rawDb;
-  if (typeof OFF !== 'undefined') await OFF.ensureReady();
-  db.auth.onAuthStateChange((ev) => {
-    if (ev === 'SIGNED_OUT') {
-      if (typeof OFF !== 'undefined' && OFF.isOffline() && OFF.loadBoot()?.sessionEmail) return;
-      showLogin();
-    }
-  });
-  let session = null;
-  try {
-    const res = await db.auth.getSession();
-    session = res?.data?.session || null;
-  } catch (e) { session = null; }
-
-  const hasOfflineSession = typeof OFF !== 'undefined' && OFF.isOffline() && !!OFF.loadBoot()?.sessionEmail;
-  if (session || hasOfflineSession) {
-    await enter();
+  db = LDB.createClient();
+  await LDB.ensureReady();
+  if (!LDB.isInitialized()) {
+    showOnboarding();
   } else {
-    showLogin();
+    await enter();
   }
 });
 </script>
+<script src="onboarding.js"></script>
 <script src="escaner.js"></script>
 <script src="compras.js"></script>
 <script src="inventario.js"></script>
