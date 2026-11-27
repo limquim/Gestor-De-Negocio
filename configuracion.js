@@ -107,10 +107,10 @@ async function viewReglasYMetas() {
       <div class="card stack">
         <h2>Reglas al registrar ventas</h2>
         <div class="grid">
-          <label>Documento por defecto
+          <label>IVA en nuevas ventas
             <select name="default_doc_type">
-              <option value="nota_entrega" ${r.default_doc_type === 'nota_entrega' ? 'selected' : ''}>Nota de entrega (sin IVA)</option>
-              <option value="factura" ${r.default_doc_type === 'factura' ? 'selected' : ''}>Factura (con IVA)</option>
+              <option value="nota_entrega" ${r.default_doc_type === 'nota_entrega' ? 'selected' : ''}>Sin IVA por defecto (tilde desmarcado)</option>
+              <option value="factura" ${r.default_doc_type === 'factura' ? 'selected' : ''}>Con IVA por defecto (tilde marcado)</option>
             </select>
           </label>
           <label>Días de crédito por defecto

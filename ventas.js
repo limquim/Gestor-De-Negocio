@@ -20,9 +20,11 @@ async function vData() {
     db.from('parties').select('id,name,phone,price_list_id').eq('is_customer', true).eq('active', true).order('name')
       .then(r => r.error ? q(db.from('parties').select('id,name,phone').eq('is_customer', true).eq('active', true).order('name')) : r.data),
     db.from('accounts').select('id,name,currency,methods,is_default').eq('active', true).order('is_default', {ascending: false}).order('id').then(r => r.error ? q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id')) : r.data),
-    db.from('price_lists').select('id,name,adjust_percent').eq('active', true).order('name').then(r => r.error ? [] : (r.data || []))
+    db.from('price_lists').select('id,name,adjust_percent').eq('active', true).order('name').then(r => r.error ? [] : (r.data || [])),
+    db.from('taxes').select('percent').eq('active', true).then(r => r.error ? [] : (r.data || []))
   ]);
-  return {products, st: Object.fromEntries(stock.map(s => [s.product_id, Number(s.stock)])), custs, accs, lists};
+  const defIva = Number((taxes || []).find(t => Number(t.percent) > 0)?.percent || 16);
+  return {products, st: Object.fromEntries(stock.map(s => [s.product_id, Number(s.stock)])), custs, accs, lists, defIva};
 }
 async function saleDetail(id) {
   const [s, items, pays, ret, rit] = await Promise.all([
@@ -80,9 +82,13 @@ async function viewVenta() {
   $('#view').innerHTML = `${V.edit ? `<div class="card title-row"><b>Corrigiendo la venta #${V.edit}</b><button class="lnk" id="vCancel">Cancelar</button></div>` : ''}
   <div class="card stack">
     <div class="row0"><label style="flex:1">Cliente<select id="vCust"><option value="">Cliente general</option>${D.custs.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label><button class="btn ghost" type="button" id="vNewC" aria-label="Nuevo cliente">+</button></div>
-    <div class="grid">
-      <label>Documento<select id="vDoc">${optList(DOCS)}</select></label>
-      ${D.lists.length ? `<label>Lista de precios<select id="vList"><option value="">Precio normal (0%)</option>${D.lists.map(l => `<option value="${l.id}">${esc(l.name)} (${+l.adjust_percent > 0 ? '+' : ''}${qty(l.adjust_percent)}%)</option>`).join('')}</select></label>` : ''}
+    ${D.lists.length ? `<label>Lista de precios<select id="vList"><option value="">Precio normal (0%)</option>${D.lists.map(l => `<option value="${l.id}">${esc(l.name)} (${+l.adjust_percent > 0 ? '+' : ''}${qty(l.adjust_percent)}%)</option>`).join('')}</select></label>` : ''}
+    <div class="row0" style="justify-content:space-between;flex-wrap:wrap;gap:.5rem;padding:.45rem .65rem;background:var(--bg);border:1px solid var(--line);border-radius:10px">
+      <label class="chk" style="margin:0"><input type="checkbox" id="vIva"> <b>Aplicar IVA</b></label>
+      <label id="vIvaPctW" class="row0 hidden" style="margin:0;gap:.35rem">
+        <span class="mut" style="font-size:.82rem">% IVA:</span>
+        <input id="vIvaPct" type="number" step="0.5" min="0" max="100" value="${D.defIva}" style="width:4.8rem;min-height:36px;margin:0;padding:.25rem .45rem;text-align:right">
+      </label>
     </div>
     <div class="grid"><label>Tasa (Bs por USD)<input id="vRate" type="number" step="0.0001" min="0.0001"></label><label>Descuento (USD)<input id="vDisc" type="number" step="0.01" min="0" value="0"></label></div></div>
   <div class="card"><h2>Productos</h2><div class="scan-row"><input id="vSearch" type="search" placeholder="Buscar producto o escanear código"><button type="button" class="icon-btn scan-btn" id="vScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div><div class="list" id="vRes" style="margin:.5rem 0"></div><div id="vCart"></div></div>
@@ -94,17 +100,36 @@ async function viewVenta() {
   const rules = S.rules || {};
   const lockSellerPrice = (S.role === 'vendedor') && rules.allow_seller_price_edit === false;
   $('#vRate').value = old ? old.s.exchange_rate : (S.rate || '');
-  if (!old && !qd && rules.default_doc_type) $('#vDoc').value = rules.default_doc_type;
-  if (old) { $('#vCust').value = old.s.customer_id || ''; $('#vDoc').value = old.s.doc_type; $('#vDisc').value = old.s.discount_usd; $('#vDue').value = old.s.due_date || ''; $('#vNotes').value = old.s.notes || ''; }
-
-  if (qd) { $('#vCust').value = qd.s.customer_id || ''; $('#vDoc').value = qd.s.doc_type; $('#vDisc').value = qd.s.discount_usd; }
+  const inferIvaPct = (rec) => {
+    if (rec?.iva_percent != null && Number(rec.iva_percent) > 0) return Number(rec.iva_percent);
+    const base = Math.max(0, Number(rec?.subtotal_usd || 0) - Number(rec?.discount_usd || 0));
+    if (base > 0 && Number(rec?.tax_usd || 0) > 0) return Math.round((Number(rec.tax_usd) / base) * 1000) / 10;
+    return D.defIva;
+  };
+  if (!old && !qd) { $('#vIva').checked = rules.default_doc_type === 'factura'; }
+  if (old) {
+    $('#vCust').value = old.s.customer_id || '';
+    $('#vIva').checked = old.s.doc_type === 'factura' || Number(old.s.tax_usd || 0) > 0;
+    $('#vIvaPct').value = inferIvaPct(old.s);
+    $('#vDisc').value = old.s.discount_usd;
+    $('#vDue').value = old.s.due_date || '';
+    $('#vNotes').value = old.s.notes || '';
+  }
+  if (qd) {
+    $('#vCust').value = qd.s.customer_id || '';
+    $('#vIva').checked = qd.s.doc_type === 'factura' || Number(qd.s.tax_usd || 0) > 0;
+    $('#vIvaPct').value = inferIvaPct(qd.s);
+    $('#vDisc').value = qd.s.discount_usd;
+  }
+  const syncIvaUI = () => { $('#vIvaPctW').classList.toggle('hidden', !$('#vIva').checked); };
+  syncIvaUI();
   let dueTouched = !!(old && old.s.due_date);
   $('#vDue').addEventListener('input', () => { dueTouched = true; });
   const calc = () => {
     const rate = +$('#vRate').value || 0, sub = V.cart.reduce((a, c) => a + c.qty * c.price, 0), disc = Math.min(+$('#vDisc').value || 0, sub);
-    let tax = $('#vDoc').value === 'factura' ? V.cart.reduce((a, c) => a + c.qty * c.price * c.pct / 100, 0) : 0;
-    if (sub > 0) tax *= (sub - disc) / sub;
-    return {sub, disc, tax, total: sub - disc + tax, rate};
+    const ivaOn = $('#vIva').checked, ivaPct = ivaOn ? Math.max(0, +$('#vIvaPct').value || 0) : 0;
+    const tax = ivaOn ? (sub - disc) * ivaPct / 100 : 0;
+    return {sub, disc, tax, ivaOn, ivaPct, total: sub - disc + tax, rate};
   };
   const payUsd = (p, rate) => { const a = D.accs.find(x => x.id === +p.acc); return !a ? 0 : a.currency === 'USD' ? p.amount : (rate ? p.amount / rate : 0); };
   const totals = () => {
@@ -112,7 +137,7 @@ async function viewVenta() {
     const discPct = t.sub > 0 ? (t.disc / t.sub * 100) : 0;
     const maxDisc = Number(rules.max_discount_percent || 0);
     const overDisc = maxDisc > 0 && discPct > maxDisc + 0.05 && (S.role || 'admin') !== 'admin';
-    $('#vTot').innerHTML = `Subtotal: ${fmt(t.sub)} USD${t.disc ? ' | Descuento: -' + fmt(t.disc) + ' (' + fmt(discPct, 1) + '%)' : ''}${t.tax ? ' | IVA: ' + fmt(t.tax) : ''}${overDisc ? `<br><span class="warn">Supera el tope máximo permitido de descuento (${qty(maxDisc)}%)</span>` : ''}<br><span class="big">${fmt(t.total)} USD</span><br><span class="mut">${fmt(t.total * t.rate)} Bs</span>`;
+    $('#vTot').innerHTML = `Subtotal: ${fmt(t.sub)} USD${t.disc ? ' | Descuento: -' + fmt(t.disc) + ' (' + fmt(discPct, 1) + '%)' : ''}${t.ivaOn ? ' | IVA (' + qty(t.ivaPct) + '%): ' + fmt(t.tax) : ''}${overDisc ? `<br><span class="warn">Supera el tope máximo permitido de descuento (${qty(maxDisc)}%)</span>` : ''}<br><span class="big">${fmt(t.total)} USD</span><br><span class="mut">${fmt(t.total * t.rate)} Bs</span>`;
     $('#vBal').innerHTML = `Pagado: <b>${fmt(paid)} USD</b> | ` + (bal > 0.01 ? `<span class="warn">Queda a crédito: <b>${fmt(bal)} USD</b> (${fmt(bal * t.rate)} Bs)</span>` : bal < -0.01 ? `Vuelto: <b>${fmt(-bal)} USD</b> (${fmt(-bal * t.rate)} Bs)` : 'Pago completo');
     $('#vDueW').classList.toggle('hidden', !(bal > 0.01));
     if (bal > 0.01 && !dueTouched && !$('#vDue').value && Number(rules.default_credit_days || 0) > 0 && typeof addDaysISO === 'function') {
@@ -211,7 +236,8 @@ async function viewVenta() {
     p[f] = f === 'amount' ? +e.target.value || 0 : e.target.value; totals();
   });
   $('#vPays').addEventListener('click', (e) => { if (e.target.dataset.rmp !== undefined) { V.pays.splice(+e.target.dataset.rmp, 1); drawPays(); } });
-  ['vRate', 'vDoc', 'vDisc'].forEach(id => $('#' + id).addEventListener('input', totals));
+  ['vRate', 'vDisc', 'vIvaPct'].forEach(id => $('#' + id).addEventListener('input', totals));
+  $('#vIva').addEventListener('change', () => { syncIvaUI(); totals(); });
   $('#vAddPay').onclick = () => {
     const t = totals(), a = D.accs[0]; if (!a) return toast('No hay cuentas de pago configuradas', true);
     V.pays.push({acc: a.id, method: Object.keys(accMethods(a))[0], amount: t.bal > 0 ? Math.round(t.bal * (a.currency === 'USD' ? 1 : t.rate) * 100) / 100 : 0, ref: ''}); drawPays();
@@ -243,7 +269,7 @@ async function viewVenta() {
       }
       if (!confirm('Hay productos con inventario insuficiente. ¿Registrar la venta de todos modos?')) return;
     }
-    const id = await q(db.rpc('registrar_venta', {p_id: V.edit, p_customer_id: +$('#vCust').value || null, p_doc_type: $('#vDoc').value, p_rate: t.rate, p_discount_usd: t.disc,
+    const id = await q(db.rpc('registrar_venta', {p_id: V.edit, p_customer_id: +$('#vCust').value || null, p_doc_type: t.ivaOn ? 'factura' : 'nota_entrega', p_iva_percent: t.ivaOn ? t.ivaPct : 0, p_rate: t.rate, p_discount_usd: t.disc,
       p_due_date: $('#vDue').value || null, p_notes: $('#vNotes').value.trim() || null,
       p_items: V.cart.map(c => ({product_id: c.pid, quantity: c.qty, unit_price_usd: c.price})),
       p_payments: pays.map(p => ({account_id: +p.acc, method: p.method, amount: p.amount, reference: p.ref}))}));
@@ -308,7 +334,7 @@ async function viewHistVentas() {
       return `<button class="item" data-id="${r.id}">
         <span>
           <b>${idLbl} ${esc(r.customer || 'Cliente general')}</b>
-          <small>${dmy(r.sale_date)} | ${r.doc_type === 'factura' ? 'Factura' : 'Nota de entrega'}${r.due_date && r.status === 'pendiente' ? ' | vence ' + dmy(r.due_date) : ''}</small>
+          <small>${dmy(r.sale_date)} | ${r.doc_type === 'factura' ? 'Con IVA' : 'Sin IVA'}${r.due_date && r.status === 'pendiente' ? ' | vence ' + dmy(r.due_date) : ''}</small>
           <small>${r.status === 'pendiente'
             ? 'Debe ' + fmt(d) + ' USD (' + fmt(d * (S.rate || r.exchange_rate)) + ' Bs hoy)'
             : fmt(r.total_usd) + ' USD (' + fmt(r.total_usd * r.exchange_rate) + ' Bs)'}</small>
@@ -329,7 +355,7 @@ async function viewHistVentas() {
 
 async function saleSheet(id) {
   const d = await saleDetail(id), s = d.s, paid = covered(d), bal = s.total_usd - paid, anul = s.status === 'anulada';
-  openSheet('Venta ' + (Number(id) < 0 ? 'LOC-' + Math.abs(id) + ' (Sin subir)' : '#' + id), `<p>${esc(s.parties?.name || 'Cliente general')} | ${s.sale_date} | ${s.doc_type === 'factura' ? 'Factura' : 'Nota de entrega'}${anul ? ' | <b class="warn">ANULADA</b>' : ''}</p>
+  openSheet('Venta ' + (Number(id) < 0 ? 'LOC-' + Math.abs(id) + ' (Sin subir)' : '#' + id), `<p>${esc(s.parties?.name || 'Cliente general')} | ${s.sale_date} | ${(s.doc_type === 'factura' || Number(s.tax_usd || 0) > 0) ? 'Con IVA' : 'Sin IVA'}${anul ? ' | <b class="warn">ANULADA</b>' : ''}</p>
     <div class="scroll"><table><thead><tr><th>Producto</th><th class="n">Cant.</th><th class="n">Precio</th><th class="n">Total</th></tr></thead><tbody>${d.items.map(i => `<tr><td>${esc(i.name)}</td><td class="n">${qty(i.quantity)}</td><td class="n">${fmt(i.unit_price_usd)}</td><td class="n">${fmt(i.quantity * i.unit_price_usd)}</td></tr>`).join('')}</tbody></table></div>
     <p>Subtotal ${fmt(s.subtotal_usd)} | Desc. ${fmt(s.discount_usd)} | IVA ${fmt(s.tax_usd)}<br><b>Total ${fmt(s.total_usd)} USD</b> (${fmt(s.total_usd * s.exchange_rate)} Bs)<br>Pagado ${fmt(paid)} USD${!anul && bal > 0.01 ? ` | <span class="warn">Debe ${fmt(bal)} USD (${fmt(bal * (S.rate || s.exchange_rate))} Bs a la tasa de hoy)</span>` : ''}</p>
     ${d.pays.length ? `<p class="mut">${d.pays.map(p => `${METHODS[p.method] || p.method} (${esc(p.accounts?.name || '')}): ${fmt(p.amount)} ${p.currency}`).join('<br>')}</p>` : ''}

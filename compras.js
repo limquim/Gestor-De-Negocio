@@ -3,12 +3,14 @@ const CV = {cart: [], pays: [], edit: null}, CH = {f: 'all', q: '', from: '', to
 const r2 = (n) => Math.round(n * 100) / 100;
 
 async function cData() {
-  const [products, sups, accs] = await Promise.all([
+  const [products, sups, accs, taxes] = await Promise.all([
     q(db.from('products').select('id,name,sku,unit,avg_cost_usd,last_cost_usd').eq('active', true).order('name')),
     q(db.from('parties').select('id,name,phone').eq('is_supplier', true).eq('active', true).order('name')),
-    loadActiveAccounts()
+    loadActiveAccounts(),
+    db.from('taxes').select('percent').eq('active', true).then(r => r.error ? [] : (r.data || []))
   ]);
-  return {products, sups, accs};
+  const defIva = Number((taxes || []).find(t => Number(t.percent) > 0)?.percent || 16);
+  return {products, sups, accs, defIva};
 }
 
 async function purchaseDetail(id) {
@@ -58,6 +60,13 @@ async function viewCompra() {
       <label>Moneda de la factura<select id="cCur"><option value="USD">Dólares (USD)</option><option value="VES">Bolívares (Bs)</option></select></label>
       <label>Tasa (Bs por USD)<input id="cRate" type="number" step="0.0001" min="0.0001"></label>
     </div>
+    <div class="row0" style="justify-content:space-between;flex-wrap:wrap;gap:.5rem;padding:.45rem .65rem;background:var(--bg);border:1px solid var(--line);border-radius:10px">
+      <label class="chk" style="margin:0"><input type="checkbox" id="cIva"> <b>Aplicar IVA a esta compra</b></label>
+      <label id="cIvaPctW" class="row0 hidden" style="margin:0;gap:.35rem">
+        <span class="mut" style="font-size:.82rem">% IVA:</span>
+        <input id="cIvaPct" type="number" step="0.5" min="0" max="100" value="${D.defIva}" style="width:4.8rem;min-height:36px;margin:0;padding:.25rem .45rem;text-align:right">
+      </label>
+    </div>
   </div>
   <div class="card"><h2>Productos</h2>
     ${openingNoItems ? '<p class="mut" style="margin:0 0 .5rem">Esta compra viene de saldo inicial (sin detalle de artículos). Puedes modificar sus datos arriba o agregar productos.</p>' : ''}
@@ -75,7 +84,11 @@ async function viewCompra() {
     $('#cSup').value = old.b.supplier_id || '';
     $('#cDue').value = old.b.due_date || '';
     $('#cNotes').value = old.b.notes || '';
+    $('#cIva').checked = !!old.b.apply_iva || Number(old.b.tax_usd || 0) > 0;
+    if (Number(old.b.iva_percent || 0) > 0) $('#cIvaPct').value = Number(old.b.iva_percent);
   }
+  const syncCIva = () => { $('#cIvaPctW').classList.toggle('hidden', !$('#cIva').checked); };
+  syncCIva();
 
   let pcur = initCur;
   const cur = () => $('#cCur').value, rate = () => +$('#cRate').value || 0;
@@ -84,10 +97,12 @@ async function viewCompra() {
   const newLine = (pid) => { const p = pm[pid], u = +p.last_cost_usd || +p.avg_cost_usd || 0; return {pid, name: p.name, unit: p.unit, qty: 1, cost: r2(cur() === 'USD' ? u : u * rate())}; };
 
   const totals = () => {
-    const cartTot = CV.cart.reduce((a, c) => a + c.qty * inUsd(c.cost), 0);
-    const tot = (openingNoItems && !CV.cart.length) ? +old.b.total_usd : cartTot;
+    const cartSub = CV.cart.reduce((a, c) => a + c.qty * inUsd(c.cost), 0);
+    const ivaOn = $('#cIva').checked, ivaPct = ivaOn ? Math.max(0, +$('#cIvaPct').value || 0) : 0;
+    const tax = (openingNoItems && !CV.cart.length) ? 0 : (ivaOn ? cartSub * ivaPct / 100 : 0);
+    const tot = (openingNoItems && !CV.cart.length) ? +old.b.total_usd : (cartSub + tax);
     const paid = CV.pays.reduce((a, p) => a + payUsd(p), 0), bal = tot - paid, rt = rate();
-    $('#cTot').innerHTML = `<span class="big">${fmt(tot)} USD</span><br><span class="mut">${fmt(tot * rt)} Bs a la tasa indicada</span>`;
+    $('#cTot').innerHTML = `${ivaOn ? `Subtotal: ${fmt(cartSub)} USD | IVA (${qty(ivaPct)}%): ${fmt(tax)} USD<br>` : ''}<span class="big">${fmt(tot)} USD</span><br><span class="mut">${fmt(tot * rt)} Bs a la tasa indicada${ivaOn ? ' · El IVA se prorratea al costo real en inventario' : ''}</span>`;
     $('#cBal').innerHTML = `Pagado: <b>${fmt(paid)} USD</b> | ` + (bal > 0.01 ? `<span class="warn">Queda por pagar: <b>${fmt(bal)} USD</b> (${fmt(bal * rt)} Bs)</span>` : bal < -0.01 ? `<span class="warn">El pago supera el total por ${fmt(-bal)} USD</span>` : 'Pago completo');
     $('#cDueW').classList.toggle('hidden', !(bal > 0.01));
     document.querySelectorAll('#cCart .pl').forEach(l => { const c = CV.cart[+l.dataset.i]; l.querySelector('.lt').textContent = 'Total: ' + fmt(c.qty * c.cost) + (cur() === 'USD' ? ' USD' : ' Bs'); });
@@ -97,7 +112,7 @@ async function viewCompra() {
       const bl = l.querySelector('.abal');
       if (bl) bl.innerHTML = accBalanceLine(a, p.amount, true);
     });
-    return {tot, paid, bal};
+    return {sub: cartSub, tax, ivaOn, ivaPct, tot, paid, bal};
   };
   const drawCart = () => {
     $('#cCart').innerHTML = CV.cart.map((c, i) => `<div class="pl" data-i="${i}"><div><b>${esc(c.name)}</b><small class="lt"></small><button class="lnk bad" data-rm="${i}">Quitar</button></div>
@@ -168,6 +183,8 @@ async function viewCompra() {
     drawCart();
   };
   $('#cRate').addEventListener('input', totals);
+  $('#cIvaPct').addEventListener('input', totals);
+  $('#cIva').addEventListener('change', () => { syncCIva(); totals(); });
   $('#cAddPay').onclick = () => {
     const t = totals(), a = D.accs[0]; if (!a) return toast('No hay cuentas de pago configuradas', true);
     CV.pays.push({acc: a.id, method: Object.keys(accMethods(a))[0], amount: t.bal > 0 ? r2(t.bal * (a.currency === 'USD' ? 1 : rate())) : 0, ref: ''}); drawPays();
@@ -195,6 +212,8 @@ async function viewCompra() {
           p_notes: $('#cNotes').value.trim() || null,
           p_items: CV.cart.map(c => ({product_id: c.pid, quantity: c.qty, unit_cost: c.cost})),
           p_purchase_date: $('#cDate')?.value || old.b.purchase_date || null,
+          p_apply_iva: t.ivaOn,
+          p_iva_percent: t.ivaOn ? t.ivaPct : 0,
           p_replace_payments: paysChanged,
           p_payments: paysChanged ? cleanPays : []
         }));
@@ -212,7 +231,7 @@ async function viewCompra() {
       return;
     }
 
-    const id = await q(db.rpc('registrar_compra', {p_supplier_id: +$('#cSup').value || null, p_currency: cur(), p_rate: rate(), p_notes: $('#cNotes').value.trim() || null,
+    const id = await q(db.rpc('registrar_compra', {p_supplier_id: +$('#cSup').value || null, p_currency: cur(), p_rate: rate(), p_apply_iva: t.ivaOn, p_iva_percent: t.ivaOn ? t.ivaPct : 0, p_notes: $('#cNotes').value.trim() || null,
       p_items: CV.cart.map(c => ({product_id: c.pid, quantity: c.qty, unit_cost: c.cost}))}));
     let perr = null;
     try { for (const p of cleanPays) await q(db.rpc('registrar_pago_compra', {p_purchase_id: id, p_account_id: p.account_id, p_method: p.method, p_amount: p.amount, p_reference: p.reference, p_rate: rate()})); }
@@ -310,7 +329,7 @@ async function purchaseSheet(id) {
       <thead><tr><th>Producto</th><th class="n">Cant.</th><th class="n">Costo</th><th class="n">Total</th></tr></thead>
       <tbody>${items.map(i => `<tr><td>${esc(i.products?.name)}</td><td class="n">${qty(i.quantity)} ${esc(i.products?.unit || '')}</td><td class="n">${fmt(i.unit_cost_usd, 4)}</td><td class="n">${fmt(i.quantity * i.unit_cost_usd)}</td></tr>`).join('')}</tbody>
     </table></div>` : '<p class="mut">Compra de saldo inicial sin detalle de artículos.</p>'}
-    <p><b>Total ${fmt(b.total_usd)} USD</b> (${fmt(b.total_usd * b.exchange_rate)} Bs a la tasa de la compra)<br>Pagado ${fmt(paid)} USD${open ? `<br><span class="warn">Debes ${fmt(bal)} USD (${fmt(bal * (S.rate || b.exchange_rate))} Bs a la tasa de hoy)</span>` : ''}</p>
+    <p>${Number(b.tax_usd || 0) > 0 ? `Subtotal ${fmt(b.subtotal_usd ?? (b.total_usd - b.tax_usd))} USD | IVA (${qty(b.iva_percent || 16)}%): ${fmt(b.tax_usd)} USD<br>` : ''}<b>Total ${fmt(b.total_usd)} USD</b> (${fmt(b.total_usd * b.exchange_rate)} Bs a la tasa de la compra)<br>Pagado ${fmt(paid)} USD${open ? `<br><span class="warn">Debes ${fmt(bal)} USD (${fmt(bal * (S.rate || b.exchange_rate))} Bs a la tasa de hoy)</span>` : ''}</p>
     ${pays.length ? `<p class="mut">${pays.map(p => `${METHODS[p.method] || p.method} (${esc(p.accounts?.name)}): ${fmt(p.amount)} ${p.currency === 'USD' ? 'USD' : 'Bs'} a tasa ${fmt(p.exchange_rate, 2)}`).join('<br>')}</p>` : ''}
     <div class="row">
       ${open ? '<button class="btn" id="pcPay">Registrar pago</button>' : ''}

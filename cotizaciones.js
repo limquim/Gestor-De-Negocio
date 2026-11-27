@@ -56,9 +56,13 @@ async function quoteForm(id) {
   const v7 = new Date(caracasDate() + 'T12:00:00'); v7.setDate(v7.getDate() + 7);
   openSheet(old ? 'Editar cotización #' + id : 'Nueva cotización', `<form id="qF" class="stack">
     <label>Cliente<select name="cust"><option value="">Cliente general</option>${D.custs.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label>
-    <div class="grid">
-      <label>Documento<select name="doc">${optList(DOCS)}</select></label>
-      ${D.lists.length ? `<label>Lista de precios<select name="plist"><option value="">Precio normal (0%)</option>${D.lists.map(l => `<option value="${l.id}">${esc(l.name)} (${+l.adjust_percent > 0 ? '+' : ''}${qty(l.adjust_percent)}%)</option>`).join('')}</select></label>` : ''}
+    ${D.lists.length ? `<label>Lista de precios<select name="plist"><option value="">Precio normal (0%)</option>${D.lists.map(l => `<option value="${l.id}">${esc(l.name)} (${+l.adjust_percent > 0 ? '+' : ''}${qty(l.adjust_percent)}%)</option>`).join('')}</select></label>` : ''}
+    <div class="row0" style="justify-content:space-between;flex-wrap:wrap;gap:.5rem;padding:.45rem .65rem;background:var(--bg);border:1px solid var(--line);border-radius:10px">
+      <label class="chk" style="margin:0"><input type="checkbox" name="iva"> <b>Aplicar IVA</b></label>
+      <label id="qIvaPctW" class="row0 hidden" style="margin:0;gap:.35rem">
+        <span class="mut" style="font-size:.82rem">% IVA:</span>
+        <input name="iva_pct" type="number" step="0.5" min="0" max="100" value="${D.defIva}" style="width:4.8rem;min-height:36px;margin:0;padding:.25rem .45rem;text-align:right">
+      </label>
     </div>
     <div class="grid"><label>Tasa (Bs por USD)<input name="rate" type="number" step="0.0001" min="0.0001" required></label>
       <label>Descuento (USD)<input name="disc" type="number" step="0.01" min="0" value="0"></label><label>Válida hasta<input name="valid" type="date"></label></div>
@@ -66,12 +70,24 @@ async function quoteForm(id) {
     <label>Nota<input name="notes" placeholder="Ej: entrega en 2 días"></label><button class="btn" type="submit">Guardar cotización</button></form>`);
   const el = $('#qF').elements;
   el.rate.value = old ? old.s.exchange_rate : (S.rate || ''); el.valid.value = old ? (old.s.valid_until || '') : dstr(v7);
-  if (old) { el.cust.value = old.s.customer_id || ''; el.doc.value = old.s.doc_type; el.disc.value = old.s.discount_usd; el.notes.value = old.s.notes || ''; }
+  if (old) {
+    el.cust.value = old.s.customer_id || '';
+    el.iva.checked = old.s.doc_type === 'factura' || Number(old.s.tax_usd || 0) > 0;
+    const baseOld = Math.max(0, Number(old.s.subtotal_usd || 0) - Number(old.s.discount_usd || 0));
+    el.iva_pct.value = old.s.iva_percent > 0 ? old.s.iva_percent : (baseOld > 0 && old.s.tax_usd > 0 ? Math.round((old.s.tax_usd / baseOld) * 1000) / 10 : D.defIva);
+    el.disc.value = old.s.discount_usd;
+    el.notes.value = old.s.notes || '';
+  } else if (S.rules?.default_doc_type === 'factura') {
+    el.iva.checked = true;
+  }
+  const syncQIva = () => { $('#qIvaPctW').classList.toggle('hidden', !el.iva.checked); };
+  syncQIva();
   const tot = () => {
     const sub = cart.reduce((a, c) => a + c.qty * c.price, 0), disc = Math.min(+el.disc.value || 0, sub);
-    let tax = el.doc.value === 'factura' ? cart.reduce((a, c) => a + c.qty * c.price * Number(pm[c.pid]?.taxes?.percent || 0) / 100, 0) : 0;
-    if (sub > 0) tax *= (sub - disc) / sub;
-    const t = sub - disc + tax; $('#qT').innerHTML = `${fmt(t)} USD <span class="mut">(${fmt(t * (+el.rate.value || 0))} Bs)</span>`;
+    const ivaPct = el.iva.checked ? Math.max(0, +el.iva_pct.value || 0) : 0;
+    const tax = el.iva.checked ? (sub - disc) * ivaPct / 100 : 0;
+    const t = sub - disc + tax;
+    $('#qT').innerHTML = `${fmt(t)} USD <span class="mut">(${fmt(t * (+el.rate.value || 0))} Bs)${el.iva.checked ? ` · IVA ${qty(ivaPct)}%: ${fmt(tax)}` : ''}</span>`;
   };
   const draw = () => {
     $('#qC').innerHTML = cart.map((c, i) => `<div class="pl" data-i="${i}"><div><b>${esc(c.name)}</b><button type="button" class="lnk bad" data-rm="${i}">Quitar</button></div>
@@ -119,12 +135,13 @@ async function quoteForm(id) {
   $('#qR').onclick = (e) => { const b = e.target.closest('[data-add]'); if (!b) return; const pid = +b.dataset.add, ex = cart.find(c => c.pid === pid); ex ? ex.qty++ : cart.push(line(pid, 1)); $('#qS').value = ''; $('#qR').innerHTML = ''; draw(); };
   $('#qC').addEventListener('input', (e) => { const l = e.target.closest('.pl'); if (l && e.target.dataset.f) { cart[+l.dataset.i][e.target.dataset.f] = +e.target.value || 0; tot(); } });
   $('#qC').addEventListener('click', (e) => { if (e.target.dataset.rm !== undefined) { cart.splice(+e.target.dataset.rm, 1); draw(); } });
-  ['rate', 'doc', 'disc'].forEach(k => el[k].addEventListener('input', tot));
+  ['rate', 'disc', 'iva_pct'].forEach(k => el[k].addEventListener('input', tot));
+  el.iva.addEventListener('change', () => { syncQIva(); tot(); });
   $('#qF').onsubmit = (e) => {
     e.preventDefault();
     run(async () => {
       if (!cart.length) throw new Error('Agrega al menos un producto');
-      const qid = await q(db.rpc('guardar_cotizacion', {p_id: id, p_customer_id: +el.cust.value || null, p_doc_type: el.doc.value, p_rate: +el.rate.value, p_discount_usd: +el.disc.value || 0,
+      const qid = await q(db.rpc('guardar_cotizacion', {p_id: id, p_customer_id: +el.cust.value || null, p_doc_type: el.iva.checked ? 'factura' : 'nota_entrega', p_iva_percent: el.iva.checked ? Math.max(0, +el.iva_pct.value || 0) : 0, p_rate: +el.rate.value, p_discount_usd: +el.disc.value || 0,
         p_valid_until: el.valid.value || null, p_notes: el.notes.value.trim() || null, p_items: cart.map(c => ({product_id: c.pid, quantity: c.qty, unit_price_usd: c.price}))}));
       toast('Cotización guardada'); closeSheet(); render(); await quoteSheet(qid);
     });

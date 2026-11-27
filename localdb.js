@@ -938,10 +938,11 @@ const LDB = {
 
       let sub = 0, rawTax = 0;
       const newItems = [];
+      const hasExplicitIva = P.p_iva_percent !== undefined && P.p_iva_percent !== null;
       for (const it of items) {
         const pr = prodById(it.product_id);
         const tx = taxes.find(x => Number(x.id) === Number(pr?.tax_id));
-        const pct = docType === 'factura' ? Number(tx?.percent || 0) : 0;
+        const pct = docType === 'factura' ? (hasExplicitIva ? Math.max(0, Number(P.p_iva_percent || 0)) : Number(tx?.percent || 0)) : 0;
         const ls = Number(it.quantity) * Number(it.unit_price_usd);
         sub += ls; rawTax += ls * pct / 100;
         const ucost = Number(pr?.avg_cost_usd ?? pr?.manual_cost_usd ?? 0);
@@ -966,6 +967,7 @@ const LDB = {
       const oldSale = isEdit ? (this.mem.sales || []).find(s => Number(s.id) === saleId) : null;
       const saleRow = {
         id: saleId, customer_id: P.p_customer_id || null, sale_date: oldSale?.sale_date || today, doc_type: docType,
+        iva_percent: docType === 'factura' ? (hasExplicitIva ? Math.max(0, Number(P.p_iva_percent || 0)) : 16) : 0,
         exchange_rate: rate, subtotal_usd: this.r2(sub), discount_usd: this.r2(disc), tax_usd: tax, total_usd: total,
         status, due_date: P.p_due_date || null, notes: P.p_notes || null, created_at: oldSale?.created_at || now
       };
@@ -1080,17 +1082,21 @@ const LDB = {
     // ---- COMPRAS ----
     if (fnName === 'registrar_compra') {
       const pid = this.nextId('purchases'), cur = P.p_currency || 'USD', items = P.p_items || [];
-      let totalUsd = 0;
+      const applyIva = !!P.p_apply_iva, ivaPct = applyIva ? Math.max(0, Number(P.p_iva_percent || 0)) : 0, ivaMult = 1 + ivaPct / 100;
+      let subUsd = 0;
       const pItems = [];
       for (const it of items) {
         const uUsd = this.r4(this.toUsdLocal(it.unit_cost, cur, rate));
-        totalUsd += Number(it.quantity) * uUsd;
+        const landedUsd = this.r4(uUsd * ivaMult);
+        subUsd += Number(it.quantity) * uUsd;
         pItems.push({id: this.nextId('purchase_items'), purchase_id: pid, product_id: Number(it.product_id), quantity: Number(it.quantity), unit_cost_usd: uUsd});
-        await this.addInvMove(it.product_id, Number(it.quantity), uUsd, 'compra', 'purchase', pid, P.p_notes || null, true);
+        await this.addInvMove(it.product_id, Number(it.quantity), landedUsd, 'compra', 'purchase', pid, P.p_notes || null, true);
       }
-      totalUsd = this.r2(totalUsd);
+      subUsd = this.r2(subUsd);
+      const taxUsd = applyIva ? this.r2(subUsd * ivaPct / 100) : 0;
+      const totalUsd = this.r2(subUsd + taxUsd);
       const purs = this.mem.purchases || [];
-      purs.unshift({id: pid, supplier_id: P.p_supplier_id || null, purchase_date: today, currency: cur, exchange_rate: rate, total_usd: totalUsd, status: 'registrada', due_date: null, notes: P.p_notes || null, created_at: now});
+      purs.unshift({id: pid, supplier_id: P.p_supplier_id || null, purchase_date: today, currency: cur, exchange_rate: rate, subtotal_usd: subUsd, tax_usd: taxUsd, apply_iva: applyIva, iva_percent: ivaPct, total_usd: totalUsd, status: 'registrada', due_date: null, notes: P.p_notes || null, created_at: now});
       await this.saveTable('purchases', purs);
       await this.saveTable('purchase_items', [...(this.mem.purchase_items || []), ...pItems], false);
       return {data: pid, error: null};
@@ -1159,18 +1165,24 @@ const LDB = {
       const pid = Number(P.p_id), cur = P.p_currency || 'USD', items = P.p_items || [];
       const b = (this.mem.purchases || []).find(x => Number(x.id) === pid);
       if (!b) return {data: null, error: new Error('Compra no encontrada')};
-      let totalUsd = Number(b.total_usd || 0);
+      const applyIva = P.p_apply_iva !== undefined ? !!P.p_apply_iva : !!b.apply_iva;
+      const ivaPct = applyIva ? Math.max(0, Number(P.p_iva_percent ?? b.iva_percent ?? 0)) : 0;
+      const ivaMult = 1 + ivaPct / 100;
+      let subUsd = Number(b.subtotal_usd ?? b.total_usd ?? 0), taxUsd = Number(b.tax_usd || 0), totalUsd = Number(b.total_usd || 0);
       if (items.length > 0) {
         await this.saveTable('inventory_movements', (this.mem.inventory_movements || []).filter(m => !(m.ref_type === 'purchase' && Number(m.ref_id) === pid)), false);
-        totalUsd = 0;
+        subUsd = 0;
         const newItems = [];
         for (const it of items) {
           const uUsd = this.r4(this.toUsdLocal(it.unit_cost, cur, rate));
-          totalUsd += Number(it.quantity) * uUsd;
+          const landedUsd = this.r4(uUsd * ivaMult);
+          subUsd += Number(it.quantity) * uUsd;
           newItems.push({id: this.nextId('purchase_items'), purchase_id: pid, product_id: Number(it.product_id), quantity: Number(it.quantity), unit_cost_usd: uUsd});
-          await this.addInvMove(it.product_id, Number(it.quantity), uUsd, 'compra', 'purchase', pid, P.p_notes || null, false);
+          await this.addInvMove(it.product_id, Number(it.quantity), landedUsd, 'compra', 'purchase', pid, P.p_notes || null, false);
         }
-        totalUsd = this.r2(totalUsd);
+        subUsd = this.r2(subUsd);
+        taxUsd = applyIva ? this.r2(subUsd * ivaPct / 100) : 0;
+        totalUsd = this.r2(subUsd + taxUsd);
         await this.saveTable('purchase_items', [...(this.mem.purchase_items || []).filter(x => Number(x.purchase_id) !== pid), ...newItems], false);
       }
       if (P.p_replace_payments) {
@@ -1190,7 +1202,7 @@ const LDB = {
       if (paidUsd > totalUsd + 0.02) return {data: null, error: new Error(`Los pagos (${paidUsd} USD) superan el nuevo total (${totalUsd} USD).`)};
       Object.assign(b, {
         supplier_id: P.p_supplier_id || null, purchase_date: P.p_purchase_date || b.purchase_date,
-        currency: cur, exchange_rate: rate, total_usd: totalUsd, due_date: P.p_due_date || null, notes: P.p_notes || null,
+        currency: cur, exchange_rate: rate, subtotal_usd: subUsd, tax_usd: taxUsd, apply_iva: applyIva, iva_percent: ivaPct, total_usd: totalUsd, due_date: P.p_due_date || null, notes: P.p_notes || null,
         status: paidUsd >= totalUsd - 0.01 ? 'pagada' : 'registrada'
       });
       await this.saveTable('purchases', this.mem.purchases);
@@ -1315,16 +1327,17 @@ const LDB = {
     // ---- COTIZACIONES ----
     if (fnName === 'guardar_cotizacion') {
       const isEdit = P.p_id != null, qid = isEdit ? Number(P.p_id) : this.nextId('quotes'), docType = P.p_doc_type || 'nota_entrega';
+      const hasExplicitIva = P.p_iva_percent !== undefined && P.p_iva_percent !== null;
       let sub = 0, rawTax = 0;
       const qItems = (P.p_items || []).map(it => {
         const pr = prodById(it.product_id), tx = taxes.find(x => Number(x.id) === Number(pr?.tax_id));
-        const pct = docType === 'factura' ? Number(tx?.percent || 0) : 0;
+        const pct = docType === 'factura' ? (hasExplicitIva ? Math.max(0, Number(P.p_iva_percent || 0)) : Number(tx?.percent || 0)) : 0;
         const ls = Number(it.quantity) * Number(it.unit_price_usd);
         sub += ls; rawTax += ls * pct / 100;
         return {id: this.nextId('quote_items'), quote_id: qid, product_id: Number(it.product_id), quantity: Number(it.quantity), unit_price_usd: Number(it.unit_price_usd)};
       });
       const disc = Math.min(Number(P.p_discount_usd || 0), sub), tax = sub > 0 ? this.r2(rawTax * (sub - disc) / sub) : 0, total = this.r2(sub - disc + tax);
-      const qRow = {id: qid, customer_id: P.p_customer_id || null, quote_date: today, valid_until: P.p_valid_until || null, doc_type: docType, exchange_rate: rate, subtotal_usd: this.r2(sub), discount_usd: this.r2(disc), tax_usd: tax, total_usd: total, status: 'abierta', notes: P.p_notes || null, created_at: now};
+      const qRow = {id: qid, customer_id: P.p_customer_id || null, quote_date: today, valid_until: P.p_valid_until || null, doc_type: docType, iva_percent: docType === 'factura' ? (hasExplicitIva ? Math.max(0, Number(P.p_iva_percent || 0)) : 16) : 0, exchange_rate: rate, subtotal_usd: this.r2(sub), discount_usd: this.r2(disc), tax_usd: tax, total_usd: total, status: 'abierta', notes: P.p_notes || null, created_at: now};
       const qs = (this.mem.quotes || []).filter(x => Number(x.id) !== qid); qs.unshift(qRow);
       await this.saveTable('quotes', qs);
       await this.saveTable('quote_items', [...(this.mem.quote_items || []).filter(x => Number(x.quote_id) !== qid), ...qItems], false);
