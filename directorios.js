@@ -53,7 +53,7 @@ const DIR_GROUPS = [
 ];
 
 function allowedDirKeys() {
-  const ok = {vendedor: ['terceros', 'plantillas'], almacen: ['terceros', 'unidades', 'categorias'], contador: ['terceros']}[S.role];
+  const ok = {vendedor: ['terceros', 'categorias', 'unidades', 'listas', 'plantillas'], almacen: ['terceros', 'unidades', 'categorias'], contador: ['terceros']}[S.role];
   return Object.keys(DIRS).filter(k => !ok || ok.includes(k));
 }
 

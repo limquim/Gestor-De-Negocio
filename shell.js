@@ -45,11 +45,21 @@ const MODS = [
 ];
 views.mas = async () => {
   if (S.role === 'vendedor') {
-    $('#view').innerHTML = `<h1 class="pt">Modo Empleado</h1>
-      <div class="card stack" style="margin-top:.8rem">
-        <p class="mut" style="margin:0">Estás operando en <b>Modo Empleado</b>. Para ver reportes, cuentas, compras, costos o configuración, desbloquea con el PIN del dueño.</p>
+    const items = MODS.filter(([k, , , mk]) => (!mk || hasMod(mk)) && canSee(k));
+    $('#view').innerHTML = `<h1 class="pt">Más módulos</h1>
+      ${items.length ? `<div class="menu" id="masMenu" style="margin-top:.8rem">
+        ${items.map(([k, t, d]) => `<button data-go="${k}"><b>${t}</b><small>${d}</small></button>`).join('')}
+      </div>` : ''}
+      <div class="card stack" style="margin-top:.9rem">
+        <p class="mut" style="margin:0">Estás en <b>Modo Empleado</b>. Para acceder a configuración o funciones restringidas, ingresa el PIN del dueño.</p>
         <button type="button" class="btn" id="mStaffUnlock">Desbloquear Modo Dueño (PIN)</button>
       </div>`;
+    if ($('#masMenu')) {
+      $('#masMenu').addEventListener('click', (e) => {
+        const b = e.target.closest('[data-go]');
+        if (b && b.dataset.go === 'directorios') { SUB.dir = 'menu'; if (typeof DIR_STATE !== 'undefined') DIR_STATE.hubQ = ''; }
+      }, true);
+    }
     $('#mStaffUnlock').onclick = () => promptUnlockOwner();
     return;
   }
@@ -76,7 +86,7 @@ views.mas = async () => {
 };
 
 views.inventario = page('Inventario', async () => {
-  if (S.role === 'vendedor') {
+  if (S.role === 'vendedor' && !staffCan('inventario_full')) {
     await viewConsultaPrecios();
     return;
   }
@@ -96,7 +106,7 @@ views.ventas = page('Ventas', async () => {
   const subs = {nueva: 'Nueva venta', cotizaciones: 'Cotizaciones', historial: 'Historial', devoluciones: 'Devoluciones', cobrar: 'Por cobrar'};
   const fns = {nueva: viewVenta, cotizaciones: viewCotizaciones, historial: viewHistVentas, devoluciones: viewDevoluciones, cobrar: viewDeudas};
   if (!hasMod('quotes')) delete subs.cotizaciones;
-  if (S.role === 'vendedor') delete subs.devoluciones;
+  if (S.role === 'vendedor' && !staffCan('anular_corregir')) delete subs.devoluciones;
   await withSubs('ven', subs, fns)();
 }, false);
 
@@ -109,7 +119,16 @@ views.produccion = page('Producciones', async () => {
 
 views.marketing = page('Marketing', viewMarketing);
 views.nomina = page('Nómina', withSubs('nom', {pagar: 'Pagar nómina', empleados: 'Empleados', adelantos: 'Adelantos', historial: 'Historial'}, {pagar: viewNomina, empleados: () => viewDir('empleados'), adelantos: viewAdelantos, historial: viewNominaHist}));
-views.finanzas = page('Finanzas', withSubs('fin', {cuentas: 'Cuentas', cierre: 'Cierre de caja', gastos: 'Gastos'}, {cuentas: viewCuentas, cierre: viewCierreCaja, gastos: viewGastos}));
+views.finanzas = page('Finanzas', async () => {
+  const subs = {};
+  const fns = {};
+  if (staffCan('finanzas_cuentas')) { subs.cuentas = 'Cuentas'; fns.cuentas = viewCuentas; }
+  if (staffCan('finanzas_gastos') || staffCan('finanzas_cuentas')) {
+    subs.cierre = 'Cierre de caja'; fns.cierre = viewCierreCaja;
+    subs.gastos = 'Gastos'; fns.gastos = viewGastos;
+  }
+  await withSubs('fin', subs, fns)();
+});
 views.contabilidad = page('Reportes', viewReportes);
 views.directorios = viewDirectorios;
 views.configuracion = viewConfiguracion;

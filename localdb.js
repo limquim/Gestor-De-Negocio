@@ -1734,7 +1734,7 @@ const LDB = {
 
     if (isStaff) {
       bar.className = 'netbar off';
-      bar.innerHTML = `<span><b>Modo Empleado activo</b> · Ganancias y costos ocultos</span><button type="button" class="netbar-btn" id="nbUnlock">Desbloquear Dueño</button>`;
+      bar.innerHTML = `<span><b>Modo Empleado activo</b> · Configuración protegida</span><button type="button" class="netbar-btn" id="nbUnlock">Desbloquear Dueño</button>`;
       const u = document.querySelector('#nbUnlock');
       if (u && typeof promptUnlockOwner === 'function') u.onclick = () => promptUnlockOwner();
       return;

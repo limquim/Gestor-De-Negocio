@@ -8,6 +8,7 @@ async function viewInicio() {
       q(db.from('settings').select('business_name').eq('id', 1).single()).catch(() => ({})),
       q(db.from('sales').select('id').eq('sale_date', hoy).neq('status', 'anulada'))
     ]);
+    const invFull = staffCan('inventario_full');
     $('#view').innerHTML = `
       <div class="card stack" style="border-left:5px solid var(--pri)">
         <div class="title-row">
@@ -15,18 +16,23 @@ async function viewInicio() {
             <h1 class="pt">${esc(set.business_name || 'Mi negocio')}</h1>
             <small class="mut">Modo Empleado · ${dmy(hoy)}</small>
           </div>
-          <span class="badge low">Mostrador</span>
+          <span class="badge low">Operación</span>
         </div>
         <div class="rl" style="border:0;padding:.2rem 0"><span>Ventas registradas hoy</span><b>${todaySales.length}</b></div>
       </div>
       <div class="tiles">
         <button class="tile main" id="stSell">${ico('<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>')}<span>Nueva venta</span><small>Facturar al cliente</small></button>
-        <button class="tile" id="stPrices">${ico('<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>')}<span>Consultar precios</span><small>Stock y precios en USD/Bs</small></button>
+        <button class="tile" id="stPrices">${ico('<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>')}<span>${invFull ? 'Inventario' : 'Consultar precios'}</span><small>${invFull ? 'Stock, productos y catálogo' : 'Stock y precios en USD/Bs'}</small></button>
+        ${hasMod('production') && staffCan('produccion') ? `<button class="tile" data-go="produccion">${ico('<path d="M9 3h6M10 3v6L4.5 19a1.5 1.5 0 001.3 2h12.4a1.5 1.5 0 001.3-2L14 9V3"/><path d="M7.5 15h9"/>')}<span>Producción</span><small>Fabricar y fórmulas</small></button>` : ''}
+        ${hasMod('purchases') && staffCan('compras') ? `<button class="tile" data-go="compras">${ico('<path d="M6 7h12l-1 13H7z"/><path d="M9 7a3 3 0 016 0"/>')}<span>Compras</span><small>Proveedores y mercancía</small></button>` : ''}
         ${hasMod('quotes') ? `<button class="tile" id="stQuote">${ico('<path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h6"/>')}<span>Cotizaciones</span><small>Presupuestos rápidos</small></button>` : ''}
         <button class="tile" id="stCobrar">${ico('<path d="M2 7h20v12H2z"/><path d="M2 11h20"/>')}<span>Por cobrar</span><small>Registrar abonos</small></button>
+        ${(staffCan('finanzas_gastos') || staffCan('finanzas_cuentas')) ? `<button class="tile" data-go="finanzas">${ico('<path d="M3 6h18v12H3z"/><path d="M3 10h18"/>')}<span>${staffCan('finanzas_cuentas') ? 'Finanzas' : 'Caja y Gastos'}</span><small>${staffCan('finanzas_cuentas') ? 'Cuentas, cierre y gastos' : 'Cierre diario y gastos'}</small></button>` : ''}
+        ${hasMod('marketing') && staffCan('marketing') ? `<button class="tile" data-go="marketing">${ico('<path d="M4 4h16v12H5.17L4 17.17z"/>')}<span>Marketing</span><small>Clientes y WhatsApp</small></button>` : ''}
+        ${staffCan('reportes') ? `<button class="tile" data-go="contabilidad">${ico('<path d="M4 19V5M4 19h16M8 15v-4M13 15V8M18 15v-6"/>')}<span>Reportes</span><small>Resultados y ventas</small></button>` : ''}
       </div>
       <div class="card stack" style="margin-top:1rem">
-        <p class="mut" style="margin:0">Las ganancias, costos, reportes y configuración están protegidos con el PIN del dueño.</p>
+        <p class="mut" style="margin:0">Configuración y funciones de administrador están protegidas con el PIN del dueño.</p>
         <button type="button" class="btn ghost" id="stUnlock">Desbloquear Modo Dueño (PIN)</button>
       </div>`;
     $('#stSell').onclick = () => { SUB.ven = 'nueva'; go('ventas'); };

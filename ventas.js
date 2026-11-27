@@ -403,18 +403,19 @@ async function viewHistVentas() {
 
 async function saleSheet(id) {
   const d = await saleDetail(id), s = d.s, paid = covered(d), bal = s.total_usd - paid, anul = s.status === 'anulada';
-  const isStaff = S.role === 'vendedor';
+  const canProfit = typeof staffCan === 'function' ? staffCan('ver_ganancias') : S.role !== 'vendedor';
+  const canEdit = typeof staffCan === 'function' ? staffCan('anular_corregir') : S.role !== 'vendedor';
   const showBs = S.bimoneda !== false && Number(s.exchange_rate || S.rate || 0) > 0;
   openSheet('Venta ' + (Number(id) < 0 ? 'LOC-' + Math.abs(id) + ' (Sin subir)' : '#' + id), `<p>${esc(s.parties?.name || 'Cliente general')} | ${dmy(s.sale_date)} | ${(s.doc_type === 'factura' || Number(s.tax_usd || 0) > 0) ? 'Con IVA' : 'Sin IVA'}${anul ? ' | <b class="warn">ANULADA</b>' : ''}</p>
     <div class="scroll"><table><thead><tr><th>Producto</th><th class="n">Cant.</th><th class="n">Precio</th><th class="n">Total</th></tr></thead><tbody>${d.items.map(i => `<tr><td>${esc(i.name)}</td><td class="n">${qty(i.quantity)}</td><td class="n">${fmt(i.unit_price_usd)}</td><td class="n">${fmt(i.quantity * i.unit_price_usd)}</td></tr>`).join('')}</tbody></table></div>
     <p>Subtotal ${fmt(s.subtotal_usd)} | Desc. ${fmt(s.discount_usd)} | IVA ${fmt(s.tax_usd)}<br><b>Total ${fmt(s.total_usd)} USD</b>${showBs ? ` (${fmt(s.total_usd * s.exchange_rate)} Bs)` : ''}<br>Pagado ${fmt(paid)} USD${!anul && bal > 0.01 ? ` | <span class="warn">Debe ${fmt(bal)} USD${showBs ? ' (' + fmt(bal * (S.rate || s.exchange_rate)) + ' Bs a la tasa de hoy)' : ''}</span>` : ''}</p>
     ${d.pays.length ? `<p class="mut">${d.pays.map(p => `${METHODS[p.method] || p.method} (${esc(p.accounts?.name || '')}): ${fmt(p.amount)} ${p.currency}`).join('<br>')}</p>` : ''}
-    ${isStaff ? '' : profitHtml(d)}
+    ${canProfit ? profitHtml(d) : ''}
     <div class="row">
       <button class="btn" id="sT">Ticket</button>
       ${!anul && bal > 0.01 ? '<button class="btn" id="sC">Registrar cobro</button>' : ''}
       ${d.items.length ? '<button class="btn ghost" id="sDup">Duplicar</button>' : ''}
-      ${!anul && !isStaff ? '<button class="btn ghost" id="sE">Corregir</button><button class="btn ghost" id="sR">Devolución</button><button class="btn ghost" id="sA" style="color:var(--bad)">Anular</button>' : ''}
+      ${!anul && canEdit ? '<button class="btn ghost" id="sE">Corregir</button><button class="btn ghost" id="sR">Devolución</button><button class="btn ghost" id="sA" style="color:var(--bad)">Anular</button>' : ''}
     </div>`);
   $('#sT').onclick = () => run(() => showTicket(id));
   if ($('#sDup')) {
