@@ -64,6 +64,7 @@ th.n{text-align:right}
 <div id="toast" class="hidden" role="status"></div>
 
 <section id="onboarding" class="ob-wrap hidden"></section>
+<section id="licenseGate" class="lic-gate hidden"></section>
 
 <div id="app" class="hidden">
   <header>
@@ -85,6 +86,7 @@ th.n{text-align:right}
 <script src="config.js"></script>
 <script src="localdb.js"></script>
 <script src="drive_sync.js"></script>
+<script src="licencias.js"></script>
 <script>
 const $ = (s) => document.querySelector(s);
 const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -215,6 +217,7 @@ async function enter() {
   await loadRole();
   applyRoleUI();
   applyModsUI();
+  if (typeof LIC !== "undefined") await LIC.checkOnBoot();
   LDB.paintBar();
   render();
 }

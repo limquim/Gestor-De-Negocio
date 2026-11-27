@@ -197,7 +197,10 @@ async function viewAcercaDe() {
       <div class="rl"><span>Espacio en teléfono</span><b>${esc(storageTxt)}</b></div>
       <div class="rl"><span>Productos / Ventas / Contactos</span><b>${nProds} / ${nSales} / ${nParties}</b></div>
       <div class="rl"><span>Revisión local</span><b>#${rev}</b></div>
-      ${supPhone ? `<div class="row"><button class="btn" id="acSup">Soporte por WhatsApp</button></div>` : ''}
+      <div class="row">
+        ${supPhone ? '<button class="btn" id="acSup">Soporte por WhatsApp</button>' : ''}
+        <a class="btn ghost" href="./privacidad.html" target="_blank" rel="noopener" style="text-align:center;text-decoration:none">Política de Privacidad</a>
+      </div>
     </div>
 
     <div class="card stack">
@@ -223,6 +226,7 @@ const CFG_MAP = {
   importar: {title: 'Importar datos (Excel / CSV)', fn: () => viewImportar()},
   respaldo: {title: 'Respaldo y Google Drive', fn: () => viewRespaldo()},
   bitacora: {title: 'Bitácora de cambios', fn: () => viewBitacora()},
+  suscripcion: {title: 'Mi Suscripción y Plan', fn: () => viewSuscripcion()},
   acerca: {title: 'App, espacio y soporte', fn: () => viewAcercaDe()},
   reinicio: {title: 'Comenzar desde 0', fn: () => viewReinicio()}
 };
@@ -320,8 +324,14 @@ async function viewConfiguracion() {
       ]
     },
     {
-      title: 'Control y Sistema',
+      title: 'Suscripción, Control y Sistema',
       items: [
+        {
+          k: 'suscripcion', name: 'Mi Suscripción y Plan',
+          desc: 'Estado de tu plan mensual, días restantes, ID de dispositivo y activación',
+          pill: (typeof LIC !== 'undefined') ? LIC.getStatus().label : 'Activo',
+          pillCls: (typeof LIC !== 'undefined') ? (!LIC.getStatus().active ? 'out' : LIC.getStatus().warn ? 'low' : 'ok') : 'ok'
+        },
         {
           k: 'bitacora', name: 'Bitácora de cambios',
           desc: 'Historial de modificaciones importantes en ventas, productos y cuentas',

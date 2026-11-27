@@ -1,13 +1,26 @@
-// Configuración comercial de Gestor Emprendedor (Local-First + Google Drive)
-// Edita estos datos una sola vez con tu marca antes de publicar en GitHub / Cloudflare Pages.
+// Configuración comercial de Gestor Emprendedor — Edición Emprendedores v3 (Local + Drive + Licencias)
+// Edita estos datos una sola vez con tu marca antes de publicar.
 const APP_CONFIG = {
   brandName: 'Gestor Emprendedor',
-  edition: 'Emprendedores v2 (Local + Drive)',
-  // Tu número de WhatsApp para soporte y renovaciones (con código de país, sin +, ej: '584141234567')
-  supportWhatsApp: '',
-  // Fase 2: Pega aquí tu ID de cliente OAuth de Google Cloud (termina en .apps.googleusercontent.com)
-  // Consulta GUIA_GOOGLE_DRIVE.md para obtenerlo gratis en 5 minutos.
-  googleDriveClientId: '298894656305-r6n1bjjm2qsmov9fsju32cetv3a9s0i2.apps.googleusercontent.com',
-  // Fase 3: URL de tu validador ligero de licencias ($10/mes)
+  edition: 'Emprendedores v3 (Local + Drive + Licencias)',
+
+  // Datos de contacto y soporte (aparecen en la Política de Privacidad, Acerca de y botones de renovación)
+  supportWhatsApp: '',   // con código de país, sin +, ej: '584141234567'
+  supportEmail: '',      // ej: 'soporte@tudominio.com'
+  privacyUrl: './privacidad.html',
+
+  // Fase 2: ID de cliente OAuth de Google Cloud (termina en .apps.googleusercontent.com)
+  googleDriveClientId: '',
+
+  // Fase 3: Sistema de Licencias ($10/mes)
+  // Cambia licenseEnabled a true cuando ya hayas pegado tu licensePublicKey (generada en admin.html)
+  // o tu licenseApiUrl (Cloudflare Worker). Mientras sea false, la app funciona en modo libre sin bloqueo.
+  licenseEnabled: false,
+  trialDays: 14,          // Días de prueba gratis automáticos para nuevos usuarios
+  monthlyPriceUsd: 10,    // Precio mensual mostrado en pantalla de suscripción
+  // Llave pública ECDSA P-256 (JWK en JSON o Base64url) generada con 1 clic en admin.html. Es seguro publicarla aquí.
+  licensePublicKey: '',
+  // Opcional (recomendado para renovación/suspensión remota): URL de tu worker_licencias.js en Cloudflare Workers
+  // Ejemplo: 'https://licencias-gestor.tuusuario.workers.dev' (sin barra al final)
   licenseApiUrl: ''
 };

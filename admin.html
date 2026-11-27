@@ -1,0 +1,492 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Panel Dueño SaaS — Licencias ($10/mes)</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f1f6f7;--card:#fff;--ink:#12303a;--mut:#5b747e;--line:#d8e4e8;--pri:#0b7285;--pri-ink:#fff;--tag:#f4c430;--tag-ink:#3a2e00;--bad:#b4381a;--ok:#1b7f4b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.5 Manrope,system-ui,-apple-system,"Segoe UI",sans-serif}
+header{background:#12303a;color:#fff;padding:1.1rem 1.2rem}
+header .in{max-width:980px;margin:auto;display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap}
+header h1{margin:0;font-size:1.25rem;font-weight:800}
+header small{opacity:.82;display:block}
+main{max-width:980px;margin:1rem auto 3rem;padding:0 1rem}
+.tabs{display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem}
+.tabs button{padding:.55rem 1rem;border-radius:99px;border:1px solid var(--line);background:var(--card);color:var(--mut);font:inherit;font-weight:700;cursor:pointer}
+.tabs button.on{background:var(--pri);border-color:var(--pri);color:#fff}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:1.15rem;margin-bottom:1rem;box-shadow:0 4px 14px rgba(18,48,58,.05)}
+.stack{display:grid;gap:.8rem}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(190px,1fr));gap:.8rem;align-items:end}
+.row{display:flex;gap:.6rem;flex-wrap:wrap;align-items:center}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:.75rem;margin-bottom:1rem}
+.stat{background:var(--card);border:1px solid var(--line);border-left:4px solid var(--pri);border-radius:12px;padding:.8rem 1rem}
+.stat span{font-size:.8rem;color:var(--mut);display:block}
+.stat b{font-size:1.5rem;font-weight:800}
+.stat.ok{border-left-color:var(--ok)}.stat.warn{border-left-color:var(--tag)}.stat.bad{border-left-color:var(--bad)}
+h2{margin:0 0 .4rem;font-size:1.08rem;font-weight:800}
+label{display:block;font-size:.84rem;font-weight:700;color:var(--mut)}
+input,select,textarea{width:100%;margin-top:.25rem;padding:.55rem .7rem;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit}
+textarea{font-family:ui-monospace,Menlo,monospace;font-size:.84rem}
+.btn{padding:.6rem 1rem;border:0;border-radius:10px;background:var(--pri);color:#fff;font:inherit;font-weight:700;cursor:pointer}
+.btn.ghost{background:transparent;color:var(--ink);border:1px solid var(--line)}
+.btn.bad{background:var(--bad);color:#fff}
+.btn.sm{padding:.38rem .7rem;font-size:.82rem;border-radius:8px}
+.mut{color:var(--mut);font-size:.88rem}
+.badge{padding:.15rem .55rem;border-radius:99px;font-size:.76rem;font-weight:800;background:var(--line)}
+.badge.ok{background:#e3f5ea;color:var(--ok)}.badge.low{background:#fff2cc;color:#7a4f00}.badge.out{background:#fde8e3;color:var(--bad)}
+.codebox{background:#0e2229;color:#dff6fb;padding:.85rem;border-radius:12px;font:12.5px/1.45 ui-monospace,Menlo,monospace;word-break:break-all;white-space:pre-wrap}
+.item{display:flex;justify-content:space-between;align-items:center;gap:.8rem;flex-wrap:wrap;padding:.85rem;border:1px solid var(--line);border-radius:12px;background:var(--bg)}
+.hidden{display:none!important}
+#toast{position:fixed;left:50%;bottom:1.2rem;transform:translateX(-50%);background:#12303a;color:#fff;padding:.65rem 1.1rem;border-radius:10px;font-weight:700;z-index:90}
+#toast.err{background:var(--bad)}
+</style>
+</head>
+<body>
+<div id="toast" class="hidden"></div>
+
+<header>
+  <div class="in">
+    <div>
+      <h1>Panel Privado del Dueño SaaS</h1>
+      <small>Control de suscripciones ($10/mes) · Firmado ECDSA P-256 + Cloudflare Workers KV</small>
+    </div>
+    <span class="badge ok">Costo en servidores: $0/mes</span>
+  </div>
+</header>
+
+<main>
+  <div class="tabs" id="navTabs">
+    <button type="button" data-t="cloud" class="on">1. Clientes en la Nube (Worker)</button>
+    <button type="button" data-t="offline">2. Generador Offline + Llaves</button>
+    <button type="button" data-t="verify">3. Verificar Código</button>
+  </div>
+
+  <!-- ================= TAB 1: CLOUDFLARE WORKER ================= -->
+  <section id="tab_cloud" class="stack">
+    <div class="card stack">
+      <h2>Conexión con tu Worker de Licencias</h2>
+      <p class="mut" style="margin:0">Conecta tu <code>worker_licencias.js</code> (gratis en Cloudflare Workers) para gestionar todos tus clientes, ver tus ingresos mensuales (MRR), renovar con +30 días en 1 clic y suspender accesos remotamente.</p>
+      <div class="grid">
+        <label>URL de tu Worker<input id="cUrl" placeholder="https://licencias-gestor.tuusuario.workers.dev"></label>
+        <label>Clave Maestra (ADMIN_KEY)<input id="cKey" type="password" placeholder="Tu contraseña secreta de Cloudflare"></label>
+      </div>
+      <div class="row">
+        <button type="button" class="btn" id="cLoad">Conectar y cargar clientes</button>
+        <button type="button" class="btn ghost" id="cNewBtn">+ Nuevo cliente</button>
+      </div>
+    </div>
+
+    <div class="stats" id="cStats"></div>
+
+    <div class="card stack hidden" id="cFormCard">
+      <h2 id="cFormTitle">Nuevo cliente / licencia</h2>
+      <form id="cForm" class="stack">
+        <div class="grid">
+          <label>Nombre del cliente<input name="customerName" required placeholder="Ej: Ana Morales"></label>
+          <label>Nombre del negocio<input name="businessName" required placeholder="Ej: Repostería Dulce Sol"></label>
+          <label>WhatsApp (con código país)<input name="phone" placeholder="Ej: 584141234567"></label>
+          <label>Correo (opcional)<input name="email" type="email" placeholder="cliente@gmail.com"></label>
+        </div>
+        <div class="grid">
+          <label>Código (vacío = generar automático)<input name="code" placeholder="Ej: PRO-AB12-CD34"></label>
+          <label>Plan<input name="plan" value="Plan Emprendedor"></label>
+          <label>Precio mensual (USD)<input name="priceUsd" type="number" step="0.01" value="10"></label>
+          <label>Dispositivos permitidos<input name="maxDevices" type="number" min="1" max="10" value="1"></label>
+          <label>Días iniciales<input name="days" type="number" min="1" value="30"></label>
+        </div>
+        <label>Nota interna<input name="notes" placeholder="Ej: Pagó por Pago Móvil Ref 4589"></label>
+        <div class="row">
+          <button type="submit" class="btn">Guardar y generar licencia</button>
+          <button type="button" class="btn ghost" id="cFormClose">Cancelar</button>
+        </div>
+      </form>
+    </div>
+
+    <div class="card stack">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">Clientes registrados</h2>
+        <input id="cQ" type="search" placeholder="Buscar negocio, cliente, código o teléfono..." style="max-width:300px;margin:0">
+      </div>
+      <div class="stack" id="cList"><p class="mut">Conecta tu Worker arriba para ver tus clientes.</p></div>
+    </div>
+  </section>
+
+  <!-- ================= TAB 2: OFFLINE GENERATOR + KEYPAIR ================= -->
+  <section id="tab_offline" class="stack hidden">
+    <div class="card stack" style="border-left:5px solid var(--pri)">
+      <h2>Paso A · Tus Llaves Criptográficas (ECDSA P-256)</h2>
+      <p class="mut" style="margin:0">Genera tu par de llaves <b>una sola vez</b>. La <b>Llave Pública</b> va en <code>config.js</code> (todos pueden verla). La <b>Llave Privada</b> la guardas SOLO tú (y/o la pegas como secreto <code>PRIVATE_KEY_JWK</code> en Cloudflare Worker). Sin tu llave privada, nadie puede falsificar una licencia.</p>
+      <div class="row">
+        <button type="button" class="btn" id="kGen">Generar nuevo par de llaves</button>
+        <button type="button" class="btn ghost" id="kCopyPub">Copiar Llave Pública (para config.js)</button>
+        <button type="button" class="btn ghost" id="kCopyPriv">Copiar Llave Privada (secreta)</button>
+      </div>
+      <div class="grid">
+        <label>Llave Pública (va en config.js -> licensePublicKey)<textarea id="kPub" rows="3" placeholder="Pulsa Generar o pega tu llave pública aquí..."></textarea></label>
+        <label>Llave Privada (SECRETA — guárdala en lugar seguro)<textarea id="kPriv" rows="3" placeholder="Pega aquí tu llave privada para firmar códigos offline..."></textarea></label>
+      </div>
+    </div>
+
+    <div class="card stack">
+      <h2>Paso B · Emitir Código de Licencia Firmado (100% Offline, sin servidor)</h2>
+      <p class="mut" style="margin:0">Ideal para empezar a cobrar hoy mismo sin configurar backend. El cliente pega el código <code>GE1...</code> en su app y queda activo hasta la fecha indicada, incluso sin internet.</p>
+      <form id="oForm" class="stack">
+        <div class="grid">
+          <label>Nombre del negocio / cliente<input name="name" required placeholder="Ej: Bodega La Esquina"></label>
+          <label>WhatsApp del cliente (para enviarle el código)<input name="phone" placeholder="Ej: 584140000000"></label>
+          <label>ID de dispositivo (o * para cualquiera)<input name="dev" value="*" placeholder="Ej: DEV-8A4F91C2 o *"></label>
+        </div>
+        <div class="grid">
+          <label>Plan<input name="plan" value="Plan Emprendedor ($10/mes)"></label>
+          <label>Duración rápida
+            <select name="preset">
+              <option value="30">+30 días (1 mes — $10)</option>
+              <option value="90">+90 días (3 meses)</option>
+              <option value="180">+180 días (6 meses)</option>
+              <option value="365">+365 días (1 año)</option>
+              <option value="custom">Elegir fecha exacta</option>
+            </select>
+          </label>
+          <label>Fecha de vencimiento<input name="exp" type="date" required></label>
+        </div>
+        <div class="row">
+          <button type="submit" class="btn">Firmar y generar código GE1</button>
+        </div>
+      </form>
+
+      <div id="oOut" class="stack hidden">
+        <h2 style="color:var(--ok)">Código generado y firmado</h2>
+        <div class="codebox" id="oCodeBox"></div>
+        <div class="row">
+          <button type="button" class="btn" id="oCopy">Copiar código</button>
+          <button type="button" class="btn ghost" id="oWa">Enviar al cliente por WhatsApp</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card stack">
+      <div class="row" style="justify-content:space-between">
+        <h2 style="margin:0">Historial local de licencias emitidas</h2>
+        <button type="button" class="btn ghost sm" id="oExportHist">Exportar historial (.json)</button>
+      </div>
+      <div class="stack" id="oHist"></div>
+    </div>
+  </section>
+
+  <!-- ================= TAB 3: VERIFICAR CODIGO ================= -->
+  <section id="tab_verify" class="stack hidden">
+    <div class="card stack">
+      <h2>Inspeccionar y verificar cualquier código GE1</h2>
+      <p class="mut" style="margin:0">Comprueba si un código es auténtico usando tu Llave Pública (de la pestaña 2) y revisa su fecha de vencimiento y dispositivo.</p>
+      <label>Pega el código GE1 aquí<textarea id="vCode" rows="3" placeholder="GE1.eyJpZCI..."></textarea></label>
+      <div class="row"><button type="button" class="btn" id="vBtn">Verificar firma</button></div>
+      <div id="vOut"></div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let toastT;
+function toast(msg, err) {
+  const t = $('#toast'); t.textContent = msg; t.className = err ? 'err' : '';
+  clearTimeout(toastT); toastT = setTimeout(() => t.classList.add('hidden'), 3800);
+}
+function b64uEnc(bytes) {
+  let bin = ''; for (let i = 0; i < bytes.length; i++) bin += String.fromCharCode(bytes[i]);
+  return btoa(bin).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+}
+function b64uDec(str) {
+  const s = String(str || '').replace(/-/g, '+').replace(/_/g, '/');
+  const pad = s.length % 4 ? '='.repeat(4 - (s.length % 4)) : '';
+  const bin = atob(s + pad); const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+function addDaysIso(days) {
+  const d = new Date(); d.setDate(d.getDate() + (parseInt(days, 10) || 30));
+  return d.toISOString().slice(0, 10);
+}
+function dmy(iso) { return iso ? String(iso).slice(0, 10).split('-').reverse().join('/') : '-'; }
+async function copyTxt(txt, msg = 'Copiado') {
+  try { await navigator.clipboard.writeText(txt); toast(msg); }
+  catch (e) { prompt('Copia manualmente:', txt); }
+}
+
+// Tabs
+$('#navTabs').onclick = (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  document.querySelectorAll('#navTabs button').forEach(x => x.classList.toggle('on', x === b));
+  ['cloud', 'offline', 'verify'].forEach(k => $('#tab_' + k).classList.toggle('hidden', k !== b.dataset.t));
+};
+
+// ---------------- KEYS & OFFLINE SIGNER ----------------
+const LS_ADMIN = 'gdn_saas_admin_v3';
+let AST = {url: '', key: '', pub: '', priv: '', hist: []};
+try { AST = {...AST, ...(JSON.parse(localStorage.getItem(LS_ADMIN) || 'null') || {})}; } catch (e) {}
+const saveAST = () => { try { localStorage.setItem(LS_ADMIN, JSON.stringify(AST)); } catch (e) {} };
+
+$('#cUrl').value = AST.url || '';
+$('#cKey').value = AST.key || '';
+$('#kPub').value = AST.pub || '';
+$('#kPriv').value = AST.priv || '';
+$('#oForm').elements.exp.value = addDaysIso(30);
+
+$('#kPub').oninput = (e) => { AST.pub = e.target.value.trim(); saveAST(); };
+$('#kPriv').oninput = (e) => { AST.priv = e.target.value.trim(); saveAST(); };
+
+$('#kGen').onclick = async () => {
+  if (AST.priv && !confirm('Ya tienes una llave privada cargada. Si generas una nueva tendrás que actualizar config.js y Cloudflare. ¿Continuar?')) return;
+  const kp = await crypto.subtle.generateKey({name: 'ECDSA', namedCurve: 'P-256'}, true, ['sign', 'verify']);
+  const pubJwk = await crypto.subtle.exportKey('jwk', kp.publicKey);
+  const privJwk = await crypto.subtle.exportKey('jwk', kp.privateKey);
+  // Limpiar campos innecesarios para mantener la llave compacta
+  const cleanPub = {kty: pubJwk.kty, crv: pubJwk.crv, x: pubJwk.x, y: pubJwk.y};
+  const cleanPriv = {kty: privJwk.kty, crv: privJwk.crv, x: privJwk.x, y: privJwk.y, d: privJwk.d};
+  AST.pub = JSON.stringify(cleanPub);
+  AST.priv = JSON.stringify(cleanPriv);
+  $('#kPub').value = AST.pub;
+  $('#kPriv').value = AST.priv;
+  saveAST();
+  toast('Par de llaves ECDSA P-256 generado. ¡Guarda tu llave privada en un lugar seguro!');
+};
+$('#kCopyPub').onclick = () => AST.pub ? copyTxt(AST.pub, 'Llave Pública copiada (pégala en config.js)') : toast('Primero genera las llaves', true);
+$('#kCopyPriv').onclick = () => AST.priv ? copyTxt(AST.priv, 'Llave Privada copiada (NO la compartas)') : toast('Primero genera las llaves', true);
+
+$('#oForm').elements.preset.onchange = (e) => {
+  if (e.target.value !== 'custom') $('#oForm').elements.exp.value = addDaysIso(e.target.value);
+};
+
+async function signOffline(payload) {
+  if (!AST.priv) throw new Error('Pega o genera tu Llave Privada primero arriba.');
+  const jwk = JSON.parse(AST.priv);
+  const key = await crypto.subtle.importKey('jwk', jwk, {name: 'ECDSA', namedCurve: 'P-256'}, false, ['sign']);
+  const pB64 = b64uEnc(new TextEncoder().encode(JSON.stringify(payload)));
+  const unsigned = 'GE1.' + pB64;
+  const sig = await crypto.subtle.sign({name: 'ECDSA', hash: 'SHA-256'}, key, new TextEncoder().encode(unsigned));
+  return unsigned + '.' + b64uEnc(new Uint8Array(sig));
+}
+
+let lastOffline = null;
+function paintOfflineHist() {
+  const list = AST.hist || [];
+  $('#oHist').innerHTML = list.map((h, i) => `
+    <div class="item">
+      <div>
+        <b>${esc(h.name)}</b> · <span class="badge ok">Vence ${dmy(h.exp)}</span>
+        <div class="mut">ID: ${esc(h.id)} · Dispositivo: ${esc(h.dev)} · Emitida: ${dmy(h.at)}</div>
+      </div>
+      <div class="row">
+        <button type="button" class="btn ghost sm" data-oc="${i}">Copiar</button>
+        ${h.phone ? `<button type="button" class="btn sm" data-ow="${i}">WhatsApp</button>` : ''}
+      </div>
+    </div>`).join('') || '<p class="mut">Aún no has emitido códigos offline.</p>';
+}
+paintOfflineHist();
+
+const waLicMsg = (name, code, exp) =>
+  `¡Hola ${name}! Tu suscripción mensual ya está activa hasta el *${dmy(exp)}*.\n\nCopia este código y pégalo en *Configuración > Mi Suscripción* dentro de la app:\n\n${code}\n\nUna vez activado funciona 100% sin internet. ¡Gracias por tu confianza!`;
+
+$('#oHist').onclick = (e) => {
+  const c = e.target.closest('[data-oc]'), w = e.target.closest('[data-ow]');
+  if (c) { const h = AST.hist[+c.dataset.oc]; copyTxt(h.token, 'Código copiado'); }
+  if (w) { const h = AST.hist[+w.dataset.ow]; window.open(`https://wa.me/${h.phone.replace(/\D/g, '')}?text=${encodeURIComponent(waLicMsg(h.name, h.token, h.exp))}`, '_blank'); }
+};
+
+$('#oExportHist').onclick = () => {
+  const b = new Blob([JSON.stringify(AST.hist || [], null, 2)], {type: 'application/json'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(b); a.download = 'historial_licencias_emitidas.json'; a.click();
+};
+
+$('#oForm').onsubmit = async (e) => {
+  e.preventDefault();
+  try {
+    const el = e.target.elements;
+    const id = 'LIC-' + Math.random().toString(36).slice(2, 8).toUpperCase();
+    const payload = {
+      id,
+      name: el.name.value.trim(),
+      plan: el.plan.value.trim() || 'Plan Emprendedor',
+      exp: el.exp.value,
+      dev: (el.dev.value.trim() || '*').toUpperCase()
+    };
+    const token = await signOffline(payload);
+    lastOffline = {...payload, phone: el.phone.value.trim(), token, at: new Date().toISOString()};
+    AST.hist = [lastOffline, ...(AST.hist || [])].slice(0, 200);
+    saveAST();
+    paintOfflineHist();
+    $('#oCodeBox').textContent = token;
+    $('#oOut').classList.remove('hidden');
+    toast('Licencia firmada correctamente');
+  } catch (err) { toast(err.message, true); }
+};
+
+$('#oCopy').onclick = () => lastOffline && copyTxt(lastOffline.token, 'Código GE1 copiado');
+$('#oWa').onclick = () => {
+  if (!lastOffline) return;
+  const ph = (lastOffline.phone || '').replace(/\D/g, '');
+  window.open(`https://wa.me/${ph}?text=${encodeURIComponent(waLicMsg(lastOffline.name, lastOffline.token, lastOffline.exp))}`, '_blank');
+};
+
+// ---------------- VERIFY CODE ----------------
+$('#vBtn').onclick = async () => {
+  try {
+    const clean = $('#vCode').value.trim().replace(/\s+/g, '');
+    const parts = clean.split('.');
+    if (parts.length !== 3 || parts[0] !== 'GE1') throw new Error('Formato inválido');
+    if (!AST.pub) throw new Error('Pega tu Llave Pública en la pestaña 2 primero');
+    const pubKey = await crypto.subtle.importKey('jwk', JSON.parse(AST.pub), {name: 'ECDSA', namedCurve: 'P-256'}, false, ['verify']);
+    const ok = await crypto.subtle.verify({name: 'ECDSA', hash: 'SHA-256'}, pubKey, b64uDec(parts[2]), new TextEncoder().encode(parts[0] + '.' + parts[1]));
+    const payload = JSON.parse(new TextDecoder().decode(b64uDec(parts[1])));
+    $('#vOut').innerHTML = `<div class="card" style="background:var(--bg);margin:0">
+      <span class="badge ${ok ? 'ok' : 'out'}">${ok ? 'FIRMA AUTÉNTICA' : 'FIRMA INVÁLIDA / ALTERADA'}</span>
+      <pre style="margin:.6rem 0 0;font-size:.86rem">${esc(JSON.stringify(payload, null, 2))}</pre>
+    </div>`;
+  } catch (err) {
+    $('#vOut').innerHTML = `<p style="color:var(--bad);font-weight:700">${esc(err.message)}</p>`;
+  }
+};
+
+// ---------------- CLOUDFLARE WORKER ADMIN ----------------
+let cloudList = [];
+async function apiAdmin(path, method = 'GET', body = null) {
+  const url = $('#cUrl').value.trim().replace(/\/+$/, '');
+  const key = $('#cKey').value.trim();
+  if (!url || !key) throw new Error('Completa la URL del Worker y la Clave Maestra (ADMIN_KEY)');
+  AST.url = url; AST.key = key; saveAST();
+  const res = await fetch(url + path, {
+    method,
+    headers: {'Content-Type': 'application/json', 'X-Admin-Key': key},
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const j = await res.json().catch(() => ({}));
+  if (!res.ok || !j.ok) throw new Error(j.error || `Error HTTP ${res.status}`);
+  return j;
+}
+
+function paintCloud() {
+  const today = new Date().toISOString().slice(0, 10);
+  const soonIso = addDaysIso(5);
+  const active = cloudList.filter(x => x.status !== 'suspended' && x.expiresAt >= today);
+  const soon = active.filter(x => x.expiresAt <= soonIso);
+  const expired = cloudList.filter(x => x.status === 'suspended' || x.expiresAt < today);
+  const mrr = active.reduce((s, x) => s + Number(x.priceUsd || 10), 0);
+
+  $('#cStats').innerHTML = `
+    <div class="stat ok"><span>Clientes activos</span><b>${active.length}</b></div>
+    <div class="stat"><span>Ingreso mensual (MRR)</span><b>$${mrr.toFixed(0)} USD</b></div>
+    <div class="stat warn"><span>Vencen en 5 días</span><b>${soon.length}</b></div>
+    <div class="stat bad"><span>Vencidos / Pausados</span><b>${expired.length}</b></div>`;
+
+  const t = ($('#cQ').value || '').trim().toLowerCase();
+  const vis = cloudList.filter(x => !t || (x.businessName + ' ' + x.customerName + ' ' + x.code + ' ' + (x.phone || '') + ' ' + (x.email || '')).toLowerCase().includes(t));
+
+  $('#cList').innerHTML = vis.map(x => {
+    const isSusp = x.status === 'suspended';
+    const isExp = !isSusp && x.expiresAt < today;
+    const isSoon = !isSusp && !isExp && x.expiresAt <= soonIso;
+    const cls = isSusp || isExp ? 'out' : isSoon ? 'low' : 'ok';
+    const lbl = isSusp ? 'Suspendido' : isExp ? 'Vencido' : isSoon ? 'Por vencer' : 'Activo';
+    const devs = Array.isArray(x.devices) ? x.devices.length : 0;
+    return `<div class="item">
+      <div style="flex:1;min-width:220px">
+        <b>${esc(x.businessName || x.customerName)}</b> <span class="badge ${cls}">${lbl}</span>
+        <div class="mut">${esc(x.customerName)} · Clave: <b>${esc(x.code)}</b> · Vence: <b>${dmy(x.expiresAt)}</b> · $${x.priceUsd || 10}/mes · Equipos: ${devs}/${x.maxDevices || 1}</div>
+        ${x.notes ? `<div class="mut">${esc(x.notes)}</div>` : ''}
+      </div>
+      <div class="row">
+        <button type="button" class="btn sm" data-ren="${esc(x.code)}">+30 días ($${x.priceUsd || 10})</button>
+        <button type="button" class="btn ghost sm" data-cpy="${esc(x.code)}">Clave</button>
+        ${x.phone ? `<button type="button" class="btn ghost sm" data-wa="${esc(x.code)}">WhatsApp</button>` : ''}
+        <button type="button" class="btn ghost sm" data-rst="${esc(x.code)}">Reset equipo</button>
+        <button type="button" class="btn ${isSusp ? 'ghost' : 'bad'} sm" data-st="${esc(x.code)}" data-cur="${isSusp ? 'suspended' : 'active'}">${isSusp ? 'Reactivar' : 'Suspender'}</button>
+      </div>
+    </div>`;
+  }).join('') || '<p class="mut">No hay clientes que coincidan.</p>';
+}
+
+async function loadCloud() {
+  try {
+    const res = await apiAdmin('/api/admin/licenses');
+    cloudList = res.licenses || [];
+    paintCloud();
+    toast(`${cloudList.length} licencias cargadas`);
+  } catch (err) { toast(err.message, true); }
+}
+
+$('#cLoad').onclick = loadCloud;
+$('#cQ').oninput = paintCloud;
+$('#cNewBtn').onclick = () => $('#cFormCard').classList.toggle('hidden');
+$('#cFormClose').onclick = () => $('#cFormCard').classList.add('hidden');
+
+$('#cForm').onsubmit = async (e) => {
+  e.preventDefault();
+  try {
+    const el = e.target.elements;
+    const res = await apiAdmin('/api/admin/licenses', 'POST', {
+      customerName: el.customerName.value.trim(),
+      businessName: el.businessName.value.trim(),
+      phone: el.phone.value.trim(),
+      email: el.email.value.trim(),
+      code: el.code.value.trim() || undefined,
+      plan: el.plan.value.trim(),
+      priceUsd: Number(el.priceUsd.value || 10),
+      maxDevices: Number(el.maxDevices.value || 1),
+      days: Number(el.days.value || 30),
+      initialPaymentUsd: Number(el.priceUsd.value || 10),
+      notes: el.notes.value.trim()
+    });
+    e.target.reset();
+    $('#cFormCard').classList.add('hidden');
+    toast(`Cliente creado · Clave: ${res.license.code}`);
+    await loadCloud();
+  } catch (err) { toast(err.message, true); }
+};
+
+$('#cList').onclick = async (e) => {
+  const ren = e.target.closest('[data-ren]');
+  const cpy = e.target.closest('[data-cpy]');
+  const wa = e.target.closest('[data-wa]');
+  const rst = e.target.closest('[data-rst]');
+  const st = e.target.closest('[data-st]');
+  try {
+    if (ren) {
+      const code = ren.dataset.ren;
+      const item = cloudList.find(x => x.code === code);
+      if (!confirm(`¿Registrar pago de $${item?.priceUsd || 10} USD y extender +30 días a "${item?.businessName || code}"?`)) return;
+      await apiAdmin('/api/admin/renew', 'POST', {code, days: 30, amountUsd: item?.priceUsd || 10});
+      toast('Renovado +30 días');
+      await loadCloud();
+    } else if (cpy) {
+      copyTxt(cpy.dataset.cpy, 'Clave copiada: ' + cpy.dataset.cpy);
+    } else if (wa) {
+      const x = cloudList.find(i => i.code === wa.dataset.wa);
+      const today = new Date().toISOString().slice(0, 10);
+      const expired = x.expiresAt < today;
+      const txt = expired
+        ? `Hola ${x.customerName || x.businessName}, tu suscripción ($${x.priceUsd || 10}/mes) venció el ${dmy(x.expiresAt)}. Avísanos al realizar tu pago para renovarte 30 días al instante. Clave: ${x.code}`
+        : `Hola ${x.customerName || x.businessName}, tu suscripción está activa hasta el ${dmy(x.expiresAt)}. Tu clave de acceso es: *${x.code}*`;
+      window.open(`https://wa.me/${x.phone.replace(/\D/g, '')}?text=${encodeURIComponent(txt)}`, '_blank');
+    } else if (rst) {
+      if (!confirm('¿Liberar el dispositivo vinculado para que el cliente pueda activar en un teléfono nuevo?')) return;
+      await apiAdmin('/api/admin/reset-device', 'POST', {code: rst.dataset.rst});
+      toast('Dispositivo liberado');
+      await loadCloud();
+    } else if (st) {
+      const next = st.dataset.cur === 'suspended' ? 'active' : 'suspended';
+      const reason = next === 'suspended' ? (prompt('Motivo de suspensión (opcional):', 'Suscripción pendiente de pago') || '') : '';
+      await apiAdmin('/api/admin/status', 'POST', {code: st.dataset.st, status: next, reason});
+      toast(next === 'suspended' ? 'Cliente suspendido' : 'Cliente reactivado');
+      await loadCloud();
+    }
+  } catch (err) { toast(err.message, true); }
+};
+</script>
+</body>
+</html>

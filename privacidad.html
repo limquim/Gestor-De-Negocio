@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Política de Privacidad y Términos — Gestor Emprendedor</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;800&display=swap" rel="stylesheet">
+<style>
+:root{--bg:#f3f6f7;--card:#fff;--ink:#12303a;--mut:#556f79;--line:#d9e5e8;--pri:#0b7285;--ok:#1b7f4b}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);font:15px/1.65 Manrope,system-ui,-apple-system,"Segoe UI",sans-serif}
+header{background:var(--pri);color:#fff;padding:1.6rem 1.2rem}
+header .in{max-width:820px;margin:auto;display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap}
+header h1{margin:0;font-size:1.45rem;font-weight:800}
+header p{margin:.2rem 0 0;opacity:.9;font-size:.92rem}
+header a{color:#fff;text-decoration:none;border:1px solid rgba(255,255,255,.5);padding:.45rem .9rem;border-radius:10px;font-weight:700;font-size:.88rem}
+main{max-width:820px;margin:1.5rem auto 3rem;padding:0 1rem}
+.card{background:var(--card);border:1px solid var(--line);border-radius:16px;padding:1.4rem;margin-bottom:1.1rem;box-shadow:0 4px 16px rgba(18,48,58,.05)}
+h2{margin:0 0 .65rem;font-size:1.12rem;color:var(--pri);font-weight:800}
+p{margin:.5rem 0}
+ul{margin:.4rem 0 .6rem 1.2rem;padding:0}
+li{margin:.35rem 0}
+.pill{display:inline-block;background:#e3f5ea;color:var(--ok);padding:.2rem .65rem;border-radius:99px;font-size:.8rem;font-weight:800;margin-bottom:.6rem}
+.mut{color:var(--mut);font-size:.88rem}
+footer{text-align:center;color:var(--mut);font-size:.85rem;padding:1rem}
+</style>
+</head>
+<body>
+<header>
+  <div class="in">
+    <div>
+      <h1>Política de Privacidad</h1>
+      <p><span data-brand>Gestor Emprendedor</span> · Última actualización: Noviembre 2026</p>
+    </div>
+    <a href="./">&lsaquo; Volver a la aplicación</a>
+  </div>
+</header>
+
+<main>
+  <div class="card">
+    <span class="pill">Arquitectura 100% Privada (Local-First)</span>
+    <h2>1. Quiénes somos y cómo protegemos tu información</h2>
+    <p><strong data-brand>Gestor Emprendedor</strong> es una herramienta de gestión comercial (ventas, inventario, caja, clientes, catálogo y reportes) diseñada bajo el principio <strong>Local-First</strong>. Esto significa que la información de tu negocio te pertenece exclusivamente a ti y se almacena directamente en la memoria local de tu propio dispositivo (IndexedDB).</p>
+    <p><strong>No almacenamos, no leemos ni comercializamos</strong> tus ventas, precios, clientes, proveedores, recetas, fotos de productos ni saldos bancarios en servidores propios ni de terceros.</p>
+  </div>
+
+  <div class="card">
+    <h2>2. Uso de Google Drive y Política de Datos de Usuario de Google</h2>
+    <p>De forma completamente opcional, puedes vincular tu cuenta personal de Google para crear respaldos automáticos de tu base de datos local en tu propio Google Drive y restaurarlos si cambias de teléfono.</p>
+    <ul>
+      <li><strong>Permiso mínimo solicitado:</strong> La aplicación solicita únicamente el permiso restringido <code>https://www.googleapis.com/auth/drive.file</code>.</li>
+      <li><strong>Qué puede ver la aplicación:</strong> Exclusivamente la carpeta de respaldos y los archivos JSON que la propia aplicación crea (<code>respaldo_actual.json</code> y copias diarias). La aplicación <strong>no puede ver, leer, modificar ni eliminar</strong> ningún otro archivo, foto ni documento de tu Google Drive.</li>
+      <li><strong>Transferencia directa:</strong> El respaldo viaja cifrado (HTTPS) directamente desde tu navegador hacia tu propio Google Drive, sin pasar por servidores intermediarios.</li>
+      <li><strong>Cumplimiento de Uso Limitado (Google API Services User Data Policy):</strong> El uso y transferencia de información recibida desde las APIs de Google se adhiere estrictamente a la <em>Google API Services User Data Policy</em>, incluidos los requisitos de <em>Uso Limitado (Limited Use)</em>. Nunca utilizamos datos de Google para publicidad, perfilado comercial, venta a terceros ni entrenamiento de modelos de inteligencia artificial.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>3. Datos de suscripción y licencias</h2>
+    <p>Si activas una suscripción o licencia de uso comercial, podemos procesar únicamente los datos mínimos necesarios para verificar la vigencia de tu plan:</p>
+    <ul>
+      <li>Código de licencia o correo electrónico asociado a tu suscripción.</li>
+      <li>Un identificador técnico anónimo del dispositivo para validar el límite de dispositivos del plan.</li>
+      <li>Estado del plan y fecha de vencimiento.</li>
+    </ul>
+    <p>En caso de vencimiento de la suscripción, <strong>tus datos nunca son eliminados</strong>; siempre podrás descargar tu respaldo completo en formato <code>.json</code> o guardarlo en tu Google Drive.</p>
+  </div>
+
+  <div class="card">
+    <h2>4. Servicios externos opcionales</h2>
+    <ul>
+      <li><strong>Tasa de cambio referencial (BCV):</strong> Si tienes activo el modo bimoneda automático, la aplicación consulta un servicio público de tasa cambiaria para actualizar el tipo de cambio del día. No se envía ningún dato personal ni del negocio en esa consulta.</li>
+      <li><strong>Cámara del dispositivo (Escáner de códigos):</strong> El permiso de cámara se utiliza únicamente de forma local en tu dispositivo para leer códigos de barras y QR. No se graban ni transmiten imágenes ni video.</li>
+      <li><strong>WhatsApp:</strong> Los botones de compartir abren tu propia aplicación de WhatsApp con el mensaje o recibo preparado para que tú decidas si enviarlo.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>5. Control, exportación y eliminación de tus datos</h2>
+    <p>Tienes control total sobre tu información en todo momento:</p>
+    <ul>
+      <li><strong>Exportar:</strong> Puedes descargar una copia completa de tu negocio en <em>Configuración &gt; Respaldo y Google Drive</em>.</li>
+      <li><strong>Eliminar datos locales:</strong> Puedes borrar todos los datos desde <em>Configuración &gt; Comenzar desde 0</em> o borrando los datos del sitio en tu navegador.</li>
+      <li><strong>Revocar acceso a Google Drive:</strong> Puedes desvincular Google Drive dentro de la aplicación o en cualquier momento desde <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener">myaccount.google.com/permissions</a>.</li>
+    </ul>
+  </div>
+
+  <div class="card">
+    <h2>6. Términos básicos de uso y contacto</h2>
+    <p>La herramienta se proporciona como software de apoyo administrativo para emprendedores. Es responsabilidad de cada usuario mantener copias de respaldo actualizadas (mediante Google Drive o archivo local) y verificar sus registros fiscales o contables conforme a la normativa de su país.</p>
+    <p id="contactBox">Si tienes dudas sobre privacidad, soporte técnico o tu suscripción, contáctanos a través de nuestros canales oficiales de soporte.</p>
+  </div>
+</main>
+
+<footer>
+  <span data-brand>Gestor Emprendedor</span> · Todos los derechos reservados.
+</footer>
+
+<script src="config.js"></script>
+<script>
+try {
+  if (typeof APP_CONFIG !== 'undefined') {
+    if (APP_CONFIG.brandName) {
+      document.title = 'Política de Privacidad — ' + APP_CONFIG.brandName;
+      document.querySelectorAll('[data-brand]').forEach(el => { el.textContent = APP_CONFIG.brandName; });
+    }
+    const parts = [];
+    if (APP_CONFIG.supportEmail) parts.push('Correo: <b>' + APP_CONFIG.supportEmail + '</b>');
+    if (APP_CONFIG.supportWhatsApp) {
+      const d = String(APP_CONFIG.supportWhatsApp).replace(/\D/g, '');
+      parts.push('WhatsApp: <a href="https://wa.me/' + d + '" target="_blank" rel="noopener"><b>+' + d + '</b></a>');
+    }
+    if (parts.length) {
+      document.getElementById('contactBox').innerHTML = 'Para consultas sobre privacidad, eliminación de licencias o soporte técnico, escríbenos por: ' + parts.join(' · ') + '.';
+    }
+  }
+} catch (e) {}
+</script>
+</body>
+</html>

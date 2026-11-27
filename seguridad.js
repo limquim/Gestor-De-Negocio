@@ -1,5 +1,5 @@
 // Seguridad y bitácora local (Edición Emprendedores)
-const APP_VERSION = 'E2.0';
+const APP_VERSION = 'E3.0';
 const ROLE_NAMES = {admin: 'Dueño / Administrador'};
 
 const canSee = (m) => {

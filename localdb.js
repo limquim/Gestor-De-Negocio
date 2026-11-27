@@ -1693,6 +1693,14 @@ const LDB = {
       if (b) b.onclick = () => run(async () => { await gd.syncNow({manual: true}); render(); });
       return;
     }
+    const licSt = typeof LIC !== 'undefined' ? LIC.getStatus() : null;
+    if (licSt && licSt.active && licSt.warn && licSt.mode !== 'free') {
+      bar.className = 'netbar off';
+      bar.innerHTML = `<span><b>${licSt.mode === 'trial' ? 'Prueba gratis' : 'Tu plan'}:</b> quedan ${licSt.daysLeft} ${licSt.daysLeft === 1 ? 'día' : 'días'}</span><button type="button" class="netbar-btn" id="nbLic">Activar / Renovar</button>`;
+      const b = document.querySelector('#nbLic');
+      if (b) b.onclick = () => { SUB.cfg = 'suscripcion'; go('configuracion'); };
+      return;
+    }
     if (!gd?.state?.connected && dirty >= 25) {
       bar.className = 'netbar pend';
       bar.innerHTML = `<span><b>${dirty} cambios</b> desde tu último respaldo</span><button type="button" class="netbar-btn" id="nbBk">Respaldar</button>`;

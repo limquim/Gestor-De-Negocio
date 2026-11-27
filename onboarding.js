@@ -184,6 +184,7 @@ function showOnboarding() {
           ${typeof GDRIVE !== 'undefined' && GDRIVE.getClientId() ? '<button type="button" class="btn ghost" id="obDriveRestore">Restaurar negocio desde mi Google Drive</button>' : ''}
           <button type="button" class="lnk" id="obRestoreBtn" style="font-size:.86rem">¿Tienes un archivo de respaldo (.json)? Restaurar aquí</button>
           <input type="file" id="obRestoreFile" accept=".json,application/json" class="hidden">
+          <a href="./privacidad.html" target="_blank" rel="noopener" class="mut" style="font-size:.78rem;text-decoration:underline;margin-top:.2rem">Política de Privacidad y Términos de Uso</a>
         </div>`;
     } else if (ST.step === 2) {
       body = `

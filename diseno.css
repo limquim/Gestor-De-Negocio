@@ -154,3 +154,7 @@ input[type=color]{padding:.2rem;cursor:pointer}
 .ob-pick small{color:var(--mut);font-size:.82rem;line-height:1.35}
 .ob-pick.on{border-color:var(--pri);background:color-mix(in srgb,var(--pri) 9%,var(--card))}
 .ob-pick.on b{color:var(--pri)}
+
+/* Pantalla de suscripción vencida (permite respaldo y renovación sin perder datos) */
+.lic-gate{position:fixed;inset:0;z-index:75;display:grid;place-items:center;padding:1rem;background:color-mix(in srgb,var(--bg) 94%,rgba(0,0,0,.45));backdrop-filter:blur(4px);overflow:auto}
+.lic-card{width:100%;max-width:460px;padding:1.35rem;margin:auto;box-shadow:0 16px 42px rgba(0,0,0,.22)}
