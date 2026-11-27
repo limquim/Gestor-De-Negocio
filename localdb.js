@@ -1571,30 +1571,70 @@ const LDB = {
       return {data: {capital_inicial_usd: cap, caja_usd: this.r2(cajaUsd), inv_usd: this.r2(invUsd), cxc_usd: this.r2(cxcUsd), cxp_usd: this.r2(cxpUsd)}, error: null};
     }
 
+    // ---- BORRAR SOLO DATOS DE EJEMPLO ----
+    if (fnName === 'borrar_ejemplos') {
+      const isDemoName = (n) => /\(ejemplo\)/i.test(String(n || ''));
+      const demoPids = new Set((this.mem.products || []).filter(p => isDemoName(p.name)).map(p => Number(p.id)));
+      const demoPartyIds = new Set((this.mem.parties || []).filter(p => isDemoName(p.name)).map(p => Number(p.id)));
+      const removedProds = demoPids.size;
+      const removedParties = demoPartyIds.size;
+
+      if (demoPids.size) {
+        this.mem.products = (this.mem.products || []).filter(p => !demoPids.has(Number(p.id)));
+        this.mem.inventory_movements = (this.mem.inventory_movements || []).filter(m => !demoPids.has(Number(m.product_id)));
+        await this.saveTable('products', this.mem.products, false);
+        await this.saveTable('inventory_movements', this.mem.inventory_movements, false);
+      }
+      if (demoPartyIds.size) {
+        this.mem.parties = (this.mem.parties || []).filter(p => !demoPartyIds.has(Number(p.id)));
+        await this.saveTable('parties', this.mem.parties, false);
+      }
+      if (removedProds || removedParties) {
+        await this.saveTable('settings', this.mem.settings || []);
+      }
+      return {data: {productos: removedProds, contactos: removedParties}, error: null};
+    }
+
     // ---- REINICIAR SISTEMA ----
     if (fnName === 'reiniciar_sistema') {
       if (String(P.p_frase || '').trim() !== 'BORRAR TODO') return {data: null, error: new Error('Frase de confirmación incorrecta')};
+
+      if (P.p_nivel === 'todo') {
+        // Borrado total de fábrica: elimina TODAS las tablas, ejemplos, configuraciones y PIN local (conserva tu licencia)
+        for (const t of LDB_BASE_TABLES) {
+          this.mem[t] = [];
+          this.seqs[t] = 0;
+          await this.idbPut('tables', [], t);
+        }
+        this.meta.rev = 0;
+        this.meta.updatedAt = now;
+        this.meta.dirtySinceBackup = 0;
+        await this.idbPut('kv', this.seqs, 'seqs');
+        await this.idbPut('kv', this.meta, 'meta');
+        try {
+          ['gdn_owner_pin_v1', 'gdn_owner_pin_rec_v1', 'gdn_staff_mode_v1', 'gdn_staff_perms_v1', 'gdn_rules_v25', 'gdn_last_backup_at'].forEach(k => localStorage.removeItem(k));
+        } catch (e) {}
+        return {data: true, error: null};
+      }
+
       const movTables = ['sales', 'sale_items', 'sale_returns', 'sale_return_items', 'purchases', 'purchase_items', 'payments', 'expenses', 'account_movements', 'inventory_movements', 'inventory_adjustments', 'production_orders', 'production_items', 'quotes', 'quote_items', 'employee_advances', 'payroll_runs', 'payroll_items', 'cash_closings', 'audit_log'];
       for (const t of movTables) { this.mem[t] = []; this.seqs[t] = 0; await this.idbPut('tables', [], t); }
       (this.mem.accounts || []).forEach(a => { a.opening_balance = 0; });
-      (this.mem.products || []).forEach(p => { p.auto_cost_usd = null; p.avg_cost_usd = Number(p.manual_cost_usd || 0); });
+
+      // También limpiar cualquier producto o contacto de ejemplo cargado al inicio
+      const isDemoName = (n) => /\(ejemplo\)/i.test(String(n || ''));
+      this.mem.products = (this.mem.products || []).filter(p => !isDemoName(p.name));
+      this.mem.parties = (this.mem.parties || []).filter(p => !isDemoName(p.name));
+      this.mem.products.forEach(p => { p.auto_cost_usd = null; p.avg_cost_usd = Number(p.manual_cost_usd || 0); });
       (this.mem.recurring_expenses || []).forEach(r => { r.last_paid_ym = null; r.last_paid_at = null; });
 
-      if (P.p_nivel === 'todo') {
-        for (const t of ['products', 'recipes', 'recipe_items', 'parties', 'employees', 'catalog_presets', 'recurring_expenses']) {
-          this.mem[t] = []; this.seqs[t] = 0; await this.idbPut('tables', [], t);
-        }
-        if (this.mem.settings?.[0]) {
-          this.mem.settings[0].onboarding_done = false;
-          this.mem.settings[0].apertura_completada = false;
-          this.mem.settings[0].capital_inicial_usd = 0;
-        }
-      } else if (this.mem.settings?.[0]) {
+      if (this.mem.settings?.[0]) {
         this.mem.settings[0].apertura_completada = false;
         this.mem.settings[0].capital_inicial_usd = 0;
       }
       await this.saveTable('accounts', this.mem.accounts || [], false);
       await this.saveTable('products', this.mem.products || [], false);
+      await this.saveTable('parties', this.mem.parties || [], false);
       await this.saveTable('recurring_expenses', this.mem.recurring_expenses || [], false);
       await this.saveTable('settings', this.mem.settings || []);
       return {data: true, error: null};

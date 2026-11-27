@@ -121,7 +121,10 @@ const GDRIVE = {
           settled = true;
           clearTimeout(timer);
           if (resp.error) {
-            reject(new Error(interactive ? ('Google rechazó el acceso: ' + (resp.error_description || resp.error)) : 'SILENT_TOKEN_EXPIRED'));
+            if (interactive && (resp.error === 'access_denied' || /denied|access|verif|test/i.test(String(resp.error_description || resp.error)))) {
+              this.openAccessHelpSheet(resp.error_description || resp.error);
+            }
+            reject(new Error(interactive ? ('Google bloqueó o canceló el acceso (' + (resp.error_description || resp.error) + ')') : 'SILENT_TOKEN_EXPIRED'));
             return;
           }
           this.saveToken(resp.access_token, resp.expires_in);
@@ -131,7 +134,10 @@ const GDRIVE = {
           if (settled) return;
           settled = true;
           clearTimeout(timer);
-          reject(new Error(interactive ? (err?.type === 'popup_closed' ? 'Cerraste la ventana de Google antes de autorizar' : 'No se pudo abrir la ventana de Google (revisa si el navegador bloqueó ventanas emergentes)') : 'SILENT_TOKEN_EXPIRED'));
+          if (interactive && err?.type === 'popup_closed') {
+            this.openAccessHelpSheet('popup_closed');
+          }
+          reject(new Error(interactive ? (err?.type === 'popup_closed' ? 'Se cerró la ventana de Google antes de completar la conexión' : 'No se pudo abrir la ventana de Google (revisa si el navegador bloqueó ventanas emergentes)') : 'SILENT_TOKEN_EXPIRED'));
         }
       });
 
@@ -488,6 +494,38 @@ const GDRIVE = {
       if (interactive) toast(err.message || 'No se pudo consultar Google Drive', true);
       return null;
     }
+  },
+
+  // ---------- Ayuda amigable si Google bloquea o muestra aviso al conectar Drive ----------
+  openAccessHelpSheet(errCode = '') {
+    if (typeof openSheet !== 'function') return;
+    const cfg = typeof APP_CONFIG !== 'undefined' ? APP_CONFIG : {};
+    const brand = cfg.brandName || 'Gestor Emprendedor';
+    const wa = String(cfg.supportWhatsApp || '').replace(/\D/g, '');
+    const biz = (typeof LDB !== 'undefined' && LDB.mem?.settings?.[0]?.business_name) || 'Mi negocio';
+    const waMsg = `Hola, intenté conectar mi Google Drive en *${brand}* (${biz}) y Google me pidió comunicarme con el desarrollador. Mi correo Gmail es: `;
+    const waUrl = `https://wa.me/${wa}?text=${encodeURIComponent(waMsg)}`;
+
+    openSheet('¿Problemas al conectar Google Drive?', `
+      <div class="stack">
+        <p class="mut" style="margin:0">Tu aplicación sigue funcionando <b>100% normal sin Google Drive</b>. Si Google mostró un aviso al intentar conectar:</p>
+        <div class="card stack" style="background:var(--bg);margin:0;padding:.85rem">
+          <b>1. Si viste "Esta app no está verificada"</b>
+          <small class="mut">Toca <b>Configuración avanzada</b> (abajo a la izquierda) &rarr; <b>Ir a ${esc(brand)}</b> y luego <b>Continuar</b>. Solo ocurre la primera vez.</small>
+        </div>
+        <div class="card stack" style="background:var(--bg);margin:0;padding:.85rem">
+          <b>2. Si viste "Acceso bloqueado / comunícate con el desarrollador"</b>
+          <small class="mut">Envíanos tu correo Gmail por WhatsApp para habilitar tu respaldo en Drive en 1 minuto.</small>
+          ${wa ? `<a class="btn" href="${waUrl}" target="_blank" rel="noopener" style="text-align:center;text-decoration:none">Solicitar activación de Drive por WhatsApp</a>` : ''}
+        </div>
+        <div class="row" style="margin:0">
+          <button type="button" class="btn ghost" id="gdHelpRetry">Intentar conectar otra vez</button>
+          <button type="button" class="btn ghost" id="gdHelpJson">Guardar respaldo en archivo (.json)</button>
+        </div>
+      </div>`);
+
+    if ($('#gdHelpRetry')) $('#gdHelpRetry').onclick = () => { closeSheet(); run(async () => { await this.connect(); render(); }); };
+    if ($('#gdHelpJson')) $('#gdHelpJson').onclick = () => { closeSheet(); if (typeof descargarRespaldo === 'function') run(descargarRespaldo); };
   },
 
   disconnect() {

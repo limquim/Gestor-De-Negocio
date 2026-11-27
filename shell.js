@@ -1,10 +1,16 @@
 // Estructura móvil: navegación, pantalla de inicio y módulos activables (Edición Emprendedores)
 const MAIN = ['inicio', 'ventas', 'inventario', 'produccion', 'mas'];
+const MAS_CHILDREN = ['compras', 'marketing', 'nomina', 'finanzas', 'contabilidad', 'directorios', 'configuracion', 'apertura'];
 const SUB = {};
+const NAV_HIST = [];
 
-function go(t) {
+function go(t, opts = {}) {
   if (typeof closeScanner === 'function') closeScanner();
   if (!canSee(t)) { toast('Esta sección está desactivada. Puedes activarla en Configuración > Módulos.', true); t = 'inicio'; }
+  if (!opts.fromBack && tab && tab !== t) {
+    if (NAV_HIST[NAV_HIST.length - 1] !== tab) NAV_HIST.push(tab);
+    if (NAV_HIST.length > 25) NAV_HIST.shift();
+  }
   tab = t;
   document.querySelectorAll('#tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === (MAIN.includes(t) ? t : 'mas')));
   window.scrollTo(0, 0); render();
@@ -150,3 +156,93 @@ document.addEventListener('click', (e) => {
   const t = Date.now(); if (b._t && t - b._t < 2000) { e.stopImmediatePropagation(); e.preventDefault(); return; }
   b._t = t;
 }, true);
+
+// ---------- Botón "Atrás" del teléfono / navegador (evita cerrar la app por accidente) ----------
+(function initBackNavigation() {
+  if (typeof window === 'undefined' || !window.history || !history.pushState) return;
+  let lastExitTap = 0;
+  let allowingExit = false;
+
+  const armGuard = () => {
+    try { history.pushState({gdnGuard: 1}, ''); } catch (e) {}
+  };
+
+  try {
+    history.replaceState({gdnBase: 1}, '');
+    armGuard();
+  } catch (e) {}
+
+  window.addEventListener('popstate', () => {
+    if (allowingExit) return;
+
+    // 1. Si el escáner de cámara está abierto, cerrarlo primero
+    const scanM = document.querySelector('#scanModal');
+    if (scanM && !scanM.classList.contains('hidden')) {
+      if (typeof closeScanner === 'function') closeScanner();
+      armGuard();
+      return;
+    }
+
+    // 2. Si hay una hoja deslizable / modal abierta, cerrarla
+    const sh = document.querySelector('#sheet');
+    if (sh && !sh.classList.contains('hidden')) {
+      closeSheet();
+      armGuard();
+      return;
+    }
+
+    // 3. Si estamos en el asistente de bienvenida, volver al paso anterior
+    const ob = document.querySelector('#onboarding');
+    if (ob && !ob.classList.contains('hidden')) {
+      const prevBtn = ob.querySelector('#obPrev');
+      if (prevBtn) { prevBtn.click(); armGuard(); return; }
+      armGuard();
+      return;
+    }
+
+    // 4. Si estamos dentro de una subsección de Configuración o Directorios, volver a su menú
+    if (tab === 'configuracion' && SUB.cfg && SUB.cfg !== 'menu') {
+      SUB.cfg = 'menu';
+      armGuard();
+      render();
+      return;
+    }
+    if (tab === 'directorios' && SUB.dir && SUB.dir !== 'menu') {
+      SUB.dir = 'menu';
+      if (typeof DIR_STATE !== 'undefined') DIR_STATE.q = '';
+      armGuard();
+      render();
+      return;
+    }
+
+    // 5. Si estamos en un submódulo de "Más", volver a "Más"
+    if (MAS_CHILDREN.includes(tab)) {
+      armGuard();
+      go('mas', {fromBack: true});
+      return;
+    }
+
+    // 6. Si no estamos en Inicio, regresar a la pestaña anterior o a Inicio
+    if (tab !== 'inicio') {
+      let prev = 'inicio';
+      while (NAV_HIST.length) {
+        const cand = NAV_HIST.pop();
+        if (cand && cand !== tab && canSee(cand)) { prev = cand; break; }
+      }
+      armGuard();
+      go(prev, {fromBack: true});
+      return;
+    }
+
+    // 7. Ya estamos en Inicio: pedir doble toque para salir de la app
+    const now = Date.now();
+    if (now - lastExitTap < 2200) {
+      allowingExit = true;
+      history.back();
+      return;
+    }
+    lastExitTap = now;
+    armGuard();
+    if (typeof toast === 'function') toast('Toca Atrás nuevamente para salir');
+  });
+})();

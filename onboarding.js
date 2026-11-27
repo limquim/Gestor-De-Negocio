@@ -157,7 +157,7 @@ function showOnboarding() {
     mods: {...BIZ_PROFILES.tienda.mods},
     bimoneda: true,
     rate: '',
-    loadDemo: true
+    loadDemo: false
   };
 
   const brand = (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.brandName) ? APP_CONFIG.brandName : 'Gestor Emprendedor';
@@ -226,7 +226,7 @@ function showOnboarding() {
         </label>` : ''}
         <label class="chk">
           <input type="checkbox" id="obDemo" ${ST.loadDemo ? 'checked' : ''}>
-          <span><b>Cargar 3 productos y 1 cliente de ejemplo</b><br><small class="mut">Útil para probar tu primera venta y ver el ticket en 10 segundos (puedes borrarlos luego).</small></span>
+          <span><b>Cargar 3 productos y 1 cliente de ejemplo (opcional)</b><br><small class="mut">Déjalo desmarcado si quieres arrancar completamente limpio con tus propios datos.</small></span>
         </label>
         <div class="row">
           <button type="button" class="btn ghost" id="obPrev">&lsaquo; Atrás</button>

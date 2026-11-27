@@ -579,17 +579,35 @@ async function viewRespaldo() {
 
 // ---------- Comenzar desde 0 (100% local con confirmaciones de seguridad) ----------
 async function viewReinicio() {
+  const demoProds = (LDB.mem.products || []).filter(p => /\(ejemplo\)/i.test(String(p.name || ''))).length;
+  const demoParties = (LDB.mem.parties || []).filter(p => /\(ejemplo\)/i.test(String(p.name || ''))).length;
+  const hasDemo = (demoProds + demoParties) > 0;
+
   const DESC = {
-    movimientos: '<b>Borra:</b> ventas, cotizaciones, devoluciones, compras, producciones, gastos, nómina, adelantos y movimientos de inventario/cuentas. Los saldos quedan en 0.<br><b>Conserva:</b> productos, fórmulas, clientes, proveedores, empleados, cuentas y configuración.',
-    todo: '<b>Borra todo lo anterior y además:</b> productos, fórmulas, clientes, proveedores, empleados y plantillas de catálogo. Al finalizar volverás al asistente de bienvenida.'
+    movimientos: '<b>Borra:</b> ventas, cotizaciones, devoluciones, compras, producciones, gastos, nómina, adelantos, movimientos de inventario/cuentas y cualquier dato de ejemplo. Los saldos quedan en 0.<br><b>Conserva:</b> tus productos reales, fórmulas, clientes, proveedores, empleados, cuentas y configuración.',
+    todo: '<b>Borra TODO de fábrica:</b> ventas, compras, productos (incluidos ejemplos), clientes, cuentas, categorías, PIN y ajustes. Tu licencia sigue activa. Al finalizar volverás al asistente inicial en limpio.'
   };
-  $('#view').innerHTML = `<div class="card stack" id="rsBox"><h2 class="warn">Comenzar desde 0</h2><p>Esta opción borra datos locales para empezar de nuevo. <b>No se puede deshacer.</b></p>
-    <label>¿Qué quieres borrar?<select id="rsN"><option value="movimientos">Solo los movimientos</option><option value="todo">Todo (volver al asistente inicial)</option></select></label><p class="mut" id="rsD">${DESC.movimientos}</p>
+  $('#view').innerHTML = `${hasDemo ? `<div class="card stack" style="border-left:5px solid var(--pri)">
+      <h2>Eliminar solo datos de ejemplo</h2>
+      <p class="mut" style="margin:0">Detectamos <b>${demoProds} productos</b> y <b>${demoParties} contactos</b> de ejemplo. Puedes borrarlos en 1 toque sin afectar el resto de tu negocio.</p>
+      <button type="button" class="btn ghost" id="rsDemoBtn">Borrar productos y contactos de ejemplo</button>
+    </div>` : ''}
+    <div class="card stack" id="rsBox"><h2 class="warn">Comenzar desde 0</h2><p>Esta opción borra datos locales para empezar de nuevo. <b>No se puede deshacer.</b></p>
+    <label>¿Qué quieres borrar?<select id="rsN"><option value="movimientos">Solo los movimientos (y datos de ejemplo)</option><option value="todo">Todo de fábrica (volver al asistente inicial)</option></select></label><p class="mut" id="rsD">${DESC.movimientos}</p>
     <button class="btn ghost" id="rsBk" type="button">Descargar un respaldo primero</button>
     <label class="chk"><input type="checkbox" id="rsC1"> Entiendo que se borrará de forma permanente</label>
     <label class="chk"><input type="checkbox" id="rsC2"> Ya descargué un respaldo</label>
     <label>Escribe BORRAR TODO para confirmar<input id="rsT" autocomplete="off"></label>
     <button class="btn" id="rsGo" style="background:var(--bad);color:#fff" disabled>Borrar y comenzar desde 0</button></div>`;
+
+  if (hasDemo && $('#rsDemoBtn')) {
+    $('#rsDemoBtn').onclick = () => run(async () => {
+      if (!confirm('¿Eliminar todos los productos y contactos marcados como "(Ejemplo)"?')) return;
+      const r = await q(db.rpc('borrar_ejemplos'));
+      toast(`Ejemplos borrados (${r.productos} productos, ${r.contactos} contactos)`);
+      render();
+    });
+  }
   const chk = () => { $('#rsGo').disabled = !($('#rsC1').checked && $('#rsC2').checked && $('#rsT').value.trim() === 'BORRAR TODO'); };
   $('#rsBox').addEventListener('input', chk); $('#rsBox').addEventListener('change', chk);
   $('#rsN').onchange = (e) => { $('#rsD').innerHTML = DESC[e.target.value]; };
@@ -597,7 +615,7 @@ async function viewReinicio() {
   $('#rsGo').onclick = () => run(async () => {
     if (!confirm('ÚLTIMA ADVERTENCIA: se borrarán los datos seleccionados de forma permanente. ¿Continuar?')) return;
     await q(db.rpc('reiniciar_sistema', {p_nivel: $('#rsN').value, p_frase: $('#rsT').value.trim()}));
-    toast('Listo: el sistema quedó en cero');
+    toast('Listo: el sistema quedó completamente en cero');
     setTimeout(() => location.reload(), 900);
   });
 }

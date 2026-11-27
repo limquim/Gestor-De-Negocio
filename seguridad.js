@@ -1,5 +1,5 @@
 // Seguridad, Modo Empleado configurable, Recuperación de PIN (2 capas) y bitácora local
-const APP_VERSION = 'E3.4';
+const APP_VERSION = 'E3.6';
 const ROLE_NAMES = {admin: 'Dueño / Administrador', vendedor: 'Modo Empleado'};
 const PIN_LS = 'gdn_owner_pin_v1';
 const PIN_REC_LS = 'gdn_owner_pin_rec_v1';
