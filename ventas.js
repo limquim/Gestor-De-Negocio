@@ -1,7 +1,7 @@
 // Ventas: nueva venta o corrección, historial, cobros y ticket
 const METHODS = {efectivo: 'Efectivo', pago_movil: 'Pago móvil', transferencia: 'Transferencia', zelle: 'Zelle', punto: 'Punto de venta', otro: 'Otro'};
 const DOCS = {nota_entrega: 'Nota de entrega (sin IVA)', factura: 'Factura (con IVA)'};
-const V = {cart: [], pays: [], edit: null}, VH = {f: 'all', q: '', from: '', to: ''};
+const V = {cart: [], pays: [], edit: null, dup: null}, VH = {f: 'all', q: '', from: '', to: ''};
 const waDigits = (t) => String(t || '').replace(/\D/g, '').replace(/^0/, '58');
 const optList = (obj, sel) => Object.entries(obj).map(([k, v]) => `<option value="${k}" ${k === sel ? 'selected' : ''}>${v}</option>`).join('');
 
@@ -13,7 +13,7 @@ function priceWithList(basePrice, listObj) {
 }
 
 async function vData() {
-  const [products, stock, custs, accs, lists, taxes] = await Promise.all([
+  const [products, stock, custs, accs, lists, taxes, recentItems] = await Promise.all([
     db.from('products').select('id,name,sku,unit,sale_price_usd,is_service,track_inventory,taxes(percent)').eq('active', true).order('name')
       .then(r => r.error ? q(db.from('products').select('id,name,sku,unit,sale_price_usd,is_service,taxes(percent)').eq('active', true).order('name')) : r.data),
     q(db.from('stock_actual').select('product_id,stock')),
@@ -21,10 +21,17 @@ async function vData() {
       .then(r => r.error ? q(db.from('parties').select('id,name,phone').eq('is_customer', true).eq('active', true).order('name')) : r.data),
     db.from('accounts').select('id,name,currency,methods,is_default').eq('active', true).order('is_default', {ascending: false}).order('id').then(r => r.error ? q(db.from('accounts').select('id,name,currency,methods').eq('active', true).order('id')) : r.data),
     db.from('price_lists').select('id,name,adjust_percent').eq('active', true).order('name').then(r => r.error ? [] : (r.data || [])),
-    db.from('taxes').select('percent').eq('active', true).then(r => r.error ? [] : (r.data || []))
+    db.from('taxes').select('percent').eq('active', true).then(r => r.error ? [] : (r.data || [])),
+    db.from('sale_items').select('product_id,quantity').order('id', {ascending: false}).limit(300).then(r => r.error ? [] : (r.data || []))
   ]);
   const defIva = Number((taxes || []).find(t => Number(t.percent) > 0)?.percent || 16);
-  return {products, st: Object.fromEntries(stock.map(s => [s.product_id, Number(s.stock)])), custs, accs, lists, defIva};
+  const freq = {};
+  (recentItems || []).forEach(i => { freq[i.product_id] = (freq[i.product_id] || 0) + Number(i.quantity || 1); });
+  const sellable = products.filter(p => Number(p.sale_price_usd || 0) > 0 || p.is_service);
+  const topProds = [...sellable]
+    .sort((a, b) => (freq[b.id] || 0) - (freq[a.id] || 0) || a.name.localeCompare(b.name, 'es'))
+    .slice(0, 8);
+  return {products, st: Object.fromEntries(stock.map(s => [s.product_id, Number(s.stock)])), custs, accs, lists, defIva, topProds};
 }
 async function saleDetail(id) {
   const [s, items, pays, ret, rit] = await Promise.all([
@@ -68,6 +75,7 @@ async function showTicket(id) {
 // ---------- Nueva venta / corrección ----------
 async function viewVenta() {
   const fq = V.fromQ; V.fromQ = null;
+  const dup = V.dup; V.dup = null;
   const D = await vData(), old = V.edit ? await saleDetail(V.edit) : null, qd = fq ? await quoteDetail(fq) : null;
   if (old) old.items.forEach(i => { D.st[i.product_id] = (D.st[i.product_id] || 0) + +i.quantity; });   // el stock vuelve a contar lo ya vendido
   const pm = Object.fromEntries(D.products.map(p => [p.id, p]));
@@ -76,7 +84,8 @@ async function viewVenta() {
     const p = pm[pid], base = +p?.sale_price_usd || 0, adj = priceWithList(base, curPriceList());
     return {pid, name: p?.name, unit: p?.unit, qty: qv, price: pr ?? adj, price0: base, svc: !!p?.is_service, untr: p?.track_inventory === false, pct: Number(p?.taxes?.percent || 0)};
   };
-  V.cart = (old || qd) ? (old || qd).items.map(i => line(i.product_id, +i.quantity, +i.unit_price_usd)) : [];
+  const srcOrder = old || qd || dup;
+  V.cart = srcOrder ? srcOrder.items.filter(i => pm[i.product_id]).map(i => line(i.product_id, +i.quantity, dup ? null : +i.unit_price_usd)) : [];
   V.pays = old ? old.pays.map(p => ({acc: p.account_id, method: p.method, amount: +p.amount, ref: p.reference || ''})) : [];
 
   $('#view').innerHTML = `${V.edit ? `<div class="card title-row"><b>Corrigiendo la venta #${V.edit}</b><button class="lnk" id="vCancel">Cancelar</button></div>` : ''}
@@ -91,10 +100,13 @@ async function viewVenta() {
       </label>
     </div>
     <div class="grid">
+      <label>Fecha de la venta<input id="vDate" type="date" value="${esc(old ? old.s.sale_date : caracasDate())}"></label>
       <label class="${S.bimoneda === false ? 'hidden' : ''}">Tasa (Bs por USD)<input id="vRate" type="number" step="0.0001" min="0.0001"></label>
       <label>Descuento (USD)<input id="vDisc" type="number" step="0.01" min="0" value="0"></label>
     </div></div>
-  <div class="card"><h2>Productos</h2><div class="scan-row"><input id="vSearch" type="search" placeholder="Buscar producto o escanear código"><button type="button" class="icon-btn scan-btn" id="vScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div><div class="list" id="vRes" style="margin:.5rem 0"></div><div id="vCart"></div></div>
+  <div class="card"><h2>Productos</h2>
+    ${D.topProds.length ? `<div class="stack" style="gap:.35rem;margin-bottom:.65rem"><small class="mut">Productos rápidos (toca para agregar):</small><div class="chips" id="vFastProds">${D.topProds.map(p => `<button type="button" data-fadd="${p.id}">${esc(p.name)} · <b>$${fmt(p.sale_price_usd)}</b></button>`).join('')}</div></div>` : ''}
+    <div class="scan-row"><input id="vSearch" type="search" placeholder="Buscar producto o escanear código"><button type="button" class="icon-btn scan-btn" id="vScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div><div class="list" id="vRes" style="margin:.5rem 0"></div><div id="vCart"></div></div>
   <div class="card"><h2>Total</h2><div id="vTot"></div></div>
   <div class="card"><h2>Pagos</h2>
     ${D.accs.length ? `<div class="stack" style="gap:.35rem;margin-bottom:.65rem"><small class="mut">Cobro rápido (pago completo en 1 toque):</small><div class="chips" id="vQuickPay">${D.accs.slice(0, 5).map(a => `<button type="button" data-qacc="${a.id}">${esc(a.name)} (${a.currency})</button>`).join('')}</div></div>` : ''}
@@ -111,7 +123,7 @@ async function viewVenta() {
     if (base > 0 && Number(rec?.tax_usd || 0) > 0) return Math.round((Number(rec.tax_usd) / base) * 1000) / 10;
     return D.defIva;
   };
-  if (!old && !qd) { $('#vIva').checked = rules.default_doc_type === 'factura'; }
+  if (!old && !qd && !dup) { $('#vIva').checked = rules.default_doc_type === 'factura'; }
   if (old) {
     $('#vCust').value = old.s.customer_id || '';
     $('#vIva').checked = old.s.doc_type === 'factura' || Number(old.s.tax_usd || 0) > 0;
@@ -120,11 +132,13 @@ async function viewVenta() {
     $('#vDue').value = old.s.due_date || '';
     $('#vNotes').value = old.s.notes || '';
   }
-  if (qd) {
-    $('#vCust').value = qd.s.customer_id || '';
-    $('#vIva').checked = qd.s.doc_type === 'factura' || Number(qd.s.tax_usd || 0) > 0;
-    $('#vIvaPct').value = inferIvaPct(qd.s);
-    $('#vDisc').value = qd.s.discount_usd;
+  if (qd || dup) {
+    const src = qd || dup;
+    $('#vCust').value = src.s.customer_id || '';
+    $('#vIva').checked = src.s.doc_type === 'factura' || Number(src.s.tax_usd || 0) > 0;
+    $('#vIvaPct').value = inferIvaPct(src.s);
+    $('#vDisc').value = src.s.discount_usd || 0;
+    if (dup && src.s.notes) $('#vNotes').value = src.s.notes;
   }
   const syncIvaUI = () => { $('#vIvaPctW').classList.toggle('hidden', !$('#vIva').checked); };
   syncIvaUI();
@@ -225,6 +239,16 @@ async function viewVenta() {
     }
     return false;
   });
+  if ($('#vFastProds')) {
+    $('#vFastProds').onclick = (e) => {
+      const b = e.target.closest('[data-fadd]'); if (!b) return;
+      const id = +b.dataset.fadd, ex = V.cart.find(c => c.pid === id);
+      if (ex) ex.qty = Math.round((ex.qty + 1) * 1000) / 1000;
+      else V.cart.push(line(id, 1));
+      drawCart();
+      if (navigator.vibrate) try { navigator.vibrate(25); } catch (err) {}
+    };
+  }
   $('#vRes').onclick = (e) => {
     const b = e.target.closest('[data-add]'); if (!b) return;
     const id = +b.dataset.add, ex = V.cart.find(c => c.pid === id); ex ? ex.qty++ : V.cart.push(line(id, 1));
@@ -293,7 +317,7 @@ async function viewVenta() {
       }
       if (!confirm('Hay productos con inventario insuficiente. ¿Registrar la venta de todos modos?')) return;
     }
-    const id = await q(db.rpc('registrar_venta', {p_id: V.edit, p_customer_id: +$('#vCust').value || null, p_doc_type: t.ivaOn ? 'factura' : 'nota_entrega', p_iva_percent: t.ivaOn ? t.ivaPct : 0, p_rate: t.rate, p_discount_usd: t.disc,
+    const id = await q(db.rpc('registrar_venta', {p_id: V.edit, p_sale_date: $('#vDate').value || caracasDate(), p_customer_id: +$('#vCust').value || null, p_doc_type: t.ivaOn ? 'factura' : 'nota_entrega', p_iva_percent: t.ivaOn ? t.ivaPct : 0, p_rate: t.rate, p_discount_usd: t.disc,
       p_due_date: $('#vDue').value || null, p_notes: $('#vNotes').value.trim() || null,
       p_items: V.cart.map(c => ({product_id: c.pid, quantity: c.qty, unit_price_usd: c.price})),
       p_payments: pays.map(p => ({account_id: +p.acc, method: p.method, amount: p.amount, reference: p.ref}))}));
@@ -379,24 +403,51 @@ async function viewHistVentas() {
 
 async function saleSheet(id) {
   const d = await saleDetail(id), s = d.s, paid = covered(d), bal = s.total_usd - paid, anul = s.status === 'anulada';
-  openSheet('Venta ' + (Number(id) < 0 ? 'LOC-' + Math.abs(id) + ' (Sin subir)' : '#' + id), `<p>${esc(s.parties?.name || 'Cliente general')} | ${s.sale_date} | ${(s.doc_type === 'factura' || Number(s.tax_usd || 0) > 0) ? 'Con IVA' : 'Sin IVA'}${anul ? ' | <b class="warn">ANULADA</b>' : ''}</p>
+  const isStaff = S.role === 'vendedor';
+  const showBs = S.bimoneda !== false && Number(s.exchange_rate || S.rate || 0) > 0;
+  openSheet('Venta ' + (Number(id) < 0 ? 'LOC-' + Math.abs(id) + ' (Sin subir)' : '#' + id), `<p>${esc(s.parties?.name || 'Cliente general')} | ${dmy(s.sale_date)} | ${(s.doc_type === 'factura' || Number(s.tax_usd || 0) > 0) ? 'Con IVA' : 'Sin IVA'}${anul ? ' | <b class="warn">ANULADA</b>' : ''}</p>
     <div class="scroll"><table><thead><tr><th>Producto</th><th class="n">Cant.</th><th class="n">Precio</th><th class="n">Total</th></tr></thead><tbody>${d.items.map(i => `<tr><td>${esc(i.name)}</td><td class="n">${qty(i.quantity)}</td><td class="n">${fmt(i.unit_price_usd)}</td><td class="n">${fmt(i.quantity * i.unit_price_usd)}</td></tr>`).join('')}</tbody></table></div>
-    <p>Subtotal ${fmt(s.subtotal_usd)} | Desc. ${fmt(s.discount_usd)} | IVA ${fmt(s.tax_usd)}<br><b>Total ${fmt(s.total_usd)} USD</b> (${fmt(s.total_usd * s.exchange_rate)} Bs)<br>Pagado ${fmt(paid)} USD${!anul && bal > 0.01 ? ` | <span class="warn">Debe ${fmt(bal)} USD (${fmt(bal * (S.rate || s.exchange_rate))} Bs a la tasa de hoy)</span>` : ''}</p>
+    <p>Subtotal ${fmt(s.subtotal_usd)} | Desc. ${fmt(s.discount_usd)} | IVA ${fmt(s.tax_usd)}<br><b>Total ${fmt(s.total_usd)} USD</b>${showBs ? ` (${fmt(s.total_usd * s.exchange_rate)} Bs)` : ''}<br>Pagado ${fmt(paid)} USD${!anul && bal > 0.01 ? ` | <span class="warn">Debe ${fmt(bal)} USD${showBs ? ' (' + fmt(bal * (S.rate || s.exchange_rate)) + ' Bs a la tasa de hoy)' : ''}</span>` : ''}</p>
     ${d.pays.length ? `<p class="mut">${d.pays.map(p => `${METHODS[p.method] || p.method} (${esc(p.accounts?.name || '')}): ${fmt(p.amount)} ${p.currency}`).join('<br>')}</p>` : ''}
-    ${profitHtml(d)}<div class="row"><button class="btn" id="sT">Ticket</button>${anul ? '' : '<button class="btn ghost" id="sE">Corregir</button><button class="btn ghost" id="sA">Anular</button><button class="btn ghost" id="sR">Devolución</button>'}${!anul && bal > 0.01 ? '<button class="btn" id="sC">Registrar cobro</button>' : ''}</div>`);
+    ${isStaff ? '' : profitHtml(d)}
+    <div class="row">
+      <button class="btn" id="sT">Ticket</button>
+      ${!anul && bal > 0.01 ? '<button class="btn" id="sC">Registrar cobro</button>' : ''}
+      ${d.items.length ? '<button class="btn ghost" id="sDup">Duplicar</button>' : ''}
+      ${!anul && !isStaff ? '<button class="btn ghost" id="sE">Corregir</button><button class="btn ghost" id="sR">Devolución</button><button class="btn ghost" id="sA" style="color:var(--bad)">Anular</button>' : ''}
+    </div>`);
   $('#sT').onclick = () => run(() => showTicket(id));
+  if ($('#sDup')) {
+    $('#sDup').onclick = () => {
+      V.edit = null;
+      V.dup = d;
+      SUB.ven = 'nueva';
+      closeSheet();
+      go('ventas');
+      toast('Pedido cargado en una nueva venta');
+    };
+  }
   if (anul) return;
-  $('#sR').onclick = () => run(() => returnForm(id));
-  $('#sE').onclick = () => { V.edit = id; SUB.ven = 'nueva'; closeSheet(); go('ventas'); };
-  $('#sA').onclick = () => run(async () => {
+  if ($('#sR')) $('#sR').onclick = () => run(() => returnForm(id));
+  if ($('#sE')) $('#sE').onclick = () => { V.edit = id; SUB.ven = 'nueva'; closeSheet(); go('ventas'); };
+  if ($('#sA')) $('#sA').onclick = () => run(async () => {
     if (!confirm('¿Anular esta venta? Se devuelve el inventario y se revierten los cobros.')) return;
     await q(db.rpc('anular_venta', {p_id: id})); closeSheet(); toast('Venta anulada'); render();
   });
-  if (bal > 0.01) $('#sC').onclick = () => run(() => cobroForm(id, bal));
+  if (bal > 0.01 && $('#sC')) $('#sC').onclick = () => run(() => cobroForm(id, bal, s.parties?.name || 'Cliente general', s.parties?.phone || ''));
 }
 
-async function cobroForm(id, bal) {
-  return debtForm({title: 'Registrar cobro', label: 'Debe el cliente', rpc: 'registrar_cobro', args: {p_sale_id: id}, bal});
+async function cobroForm(id, bal, customer = 'Cliente general', phone = '') {
+  return debtForm({
+    title: 'Registrar cobro',
+    label: 'Debe el cliente',
+    rpc: 'registrar_cobro',
+    args: {p_sale_id: id},
+    bal,
+    customer,
+    phone,
+    concept: 'Abono a Venta #' + id
+  });
 }
 
 

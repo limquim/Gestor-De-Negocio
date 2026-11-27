@@ -70,6 +70,7 @@ th.n{text-align:right}
   <header>
     <strong>Gestor Emprendedor</strong>
     <div id="rateChip"></div>
+    <button class="icon-btn" id="roleBtn" aria-label="Modo Empleado / PIN del dueño"></button>
     <button class="icon-btn" id="themeBtn" aria-label="Cambiar entre fondo claro y oscuro"></button>
   </header>
   <div id="netBar" class="hidden" role="status"></div>
@@ -218,6 +219,9 @@ async function enter() {
   applyRoleUI();
   applyModsUI();
   if (typeof LIC !== "undefined") await LIC.checkOnBoot();
+  if (typeof GDRIVE !== "undefined" && GDRIVE.state.connected && GDRIVE.hasValidToken()) {
+    setTimeout(() => GDRIVE.checkRemoteUpdate({interactive: false}), 2000);
+  }
   LDB.paintBar();
   render();
 }

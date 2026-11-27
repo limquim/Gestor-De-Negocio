@@ -27,6 +27,8 @@ const GDRIVE = {
   tokenClient: null,
   gisPromise: null,
   syncing: false,
+  remoteNewer: null,
+  lastRemoteCheckAt: 0,
   debounceTimer: null,
   intervalTimer: null,
 
@@ -345,6 +347,7 @@ const GDRIVE = {
         await this.pruneOldDailies(files);
       }
 
+      this.remoteNewer = null;
       LDB.meta.lastDriveSyncAt = snapshot.fecha;
       LDB.meta.dirtySinceBackup = 0;
       await LDB.idbPut('kv', LDB.meta, 'meta');
@@ -372,6 +375,7 @@ const GDRIVE = {
     const data = await this.downloadFileJson(fileId);
     await LDB.importFullJson(data);
     const nowIso = new Date().toISOString();
+    this.remoteNewer = null;
     this.state.lastSyncAt = data.fecha || nowIso;
     this.state.lastSyncRev = Number(LDB.meta.rev || 1);
     this.saveState();
@@ -449,8 +453,46 @@ const GDRIVE = {
     };
   },
 
+  // ---------- Relevo entre 2 dispositivos: revisa si otro equipo subió copia más reciente ----------
+  async checkRemoteUpdate({interactive = false} = {}) {
+    if (!this.state.connected || !navigator.onLine || this.syncing) return null;
+    if (!interactive && !this.hasValidToken()) return null;
+    if (!interactive && (Date.now() - Number(this.lastRemoteCheckAt || 0)) < 120000) return this.remoteNewer;
+    try {
+      this.lastRemoteCheckAt = Date.now();
+      const {files, latest} = await this.listBackups(interactive);
+      if (!latest) {
+        this.remoteNewer = null;
+        if (interactive) toast('No hay copias guardadas todavía en Google Drive');
+        LDB.paintBar();
+        return null;
+      }
+      const remDev = latest.appProperties?.deviceId || '';
+      const remAt = latest.appProperties?.updatedAt || latest.modifiedTime || '';
+      const remRev = Number(latest.appProperties?.rev || 0);
+      const localSync = this.state.lastSyncAt || '';
+      const isOtherDevice = remDev && remDev !== LDB.meta?.deviceId;
+      const isNewer = isOtherDevice && (remAt > localSync || remRev > Number(LDB.meta?.rev || 0));
+
+      if (isNewer) {
+        this.remoteNewer = latest;
+        LDB.paintBar();
+        if (interactive) this.openConflictSheet(latest, files);
+        return latest;
+      }
+      this.remoteNewer = null;
+      LDB.paintBar();
+      if (interactive) toast('Ya tienes la versión más reciente de Google Drive');
+      return null;
+    } catch (err) {
+      if (interactive) toast(err.message || 'No se pudo consultar Google Drive', true);
+      return null;
+    }
+  },
+
   disconnect() {
     this.clearToken();
+    this.remoteNewer = null;
     this.state.connected = false;
     this.state.email = '';
     this.state.name = '';
@@ -488,10 +530,12 @@ const GDRIVE = {
       }
     });
 
-    // Al pasar la app a segundo plano, intentar respaldar si hay cambios y token activo
+    // Al pasar la app a segundo plano respalda; al volver al frente revisa si otro equipo subió copia nueva
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'hidden' && this.state.connected && this.state.autoSync && this.hasValidToken() && navigator.onLine && Number(LDB.meta?.dirtySinceBackup || 0) > 0) {
         this.syncNow({manual: false});
+      } else if (document.visibilityState === 'visible' && this.state.connected && this.hasValidToken() && navigator.onLine) {
+        setTimeout(() => this.checkRemoteUpdate({interactive: false}), 1500);
       }
     });
 

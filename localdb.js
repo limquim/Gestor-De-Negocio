@@ -966,7 +966,7 @@ const LDB = {
       const status = paidUsd >= total - 0.01 ? 'pagada' : 'pendiente';
       const oldSale = isEdit ? (this.mem.sales || []).find(s => Number(s.id) === saleId) : null;
       const saleRow = {
-        id: saleId, customer_id: P.p_customer_id || null, sale_date: oldSale?.sale_date || today, doc_type: docType,
+        id: saleId, customer_id: P.p_customer_id || null, sale_date: P.p_sale_date || oldSale?.sale_date || today, doc_type: docType,
         iva_percent: docType === 'factura' ? (hasExplicitIva ? Math.max(0, Number(P.p_iva_percent || 0)) : 16) : 0,
         exchange_rate: rate, subtotal_usd: this.r2(sub), discount_usd: this.r2(disc), tax_usd: tax, total_usd: total,
         status, due_date: P.p_due_date || null, notes: P.p_notes || null, created_at: oldSale?.created_at || now
@@ -1710,16 +1710,46 @@ const LDB = {
     return {from: buildQuery, rpc: (fn, p) => self.ensureReady().then(() => self.execRpc(fn, p)), storage, auth};
   },
 
+  async triggerInstall() {
+    if (!this.installPrompt) return false;
+    try {
+      this.installPrompt.prompt();
+      const choice = await this.installPrompt.userChoice;
+      if (choice?.outcome === 'accepted') {
+        this.installPrompt = null;
+        if (typeof toast === 'function') toast('Instalando la aplicación en tu dispositivo...');
+      }
+    } catch (e) {}
+    this.paintBar();
+    return true;
+  },
+
   paintBar() {
     const bar = document.querySelector('#netBar');
     if (!bar) return;
     const online = typeof navigator === 'undefined' || navigator.onLine !== false;
     const dirty = Number(this.meta?.dirtySinceBackup || 0);
     const gd = typeof GDRIVE !== 'undefined' ? GDRIVE : null;
+    const isStaff = typeof S !== 'undefined' && S.role === 'vendedor';
 
+    if (isStaff) {
+      bar.className = 'netbar off';
+      bar.innerHTML = `<span><b>Modo Empleado activo</b> · Ganancias y costos ocultos</span><button type="button" class="netbar-btn" id="nbUnlock">Desbloquear Dueño</button>`;
+      const u = document.querySelector('#nbUnlock');
+      if (u && typeof promptUnlockOwner === 'function') u.onclick = () => promptUnlockOwner();
+      return;
+    }
     if (gd?.syncing) {
       bar.className = 'netbar sync';
       bar.innerHTML = '<span>Guardando respaldo en tu Google Drive...</span>';
+      return;
+    }
+    if (gd?.remoteNewer && online) {
+      bar.className = 'netbar pend';
+      bar.innerHTML = `<span><b>Hay una copia más reciente en Drive</b> (de otro equipo)</span><span class="row0" style="gap:.35rem"><button type="button" class="netbar-btn" id="nbGdPull">Actualizar ahora</button><button type="button" class="netbar-btn" id="nbGdIgn" style="padding:.28rem .5rem">&times;</button></span>`;
+      const pull = document.querySelector('#nbGdPull'), ign = document.querySelector('#nbGdIgn');
+      if (pull) pull.onclick = () => run(() => gd.openConflictSheet(gd.remoteNewer));
+      if (ign) ign.onclick = () => { gd.remoteNewer = null; this.paintBar(); };
       return;
     }
     if (!online) {
@@ -1749,6 +1779,14 @@ const LDB = {
       if (b) b.onclick = () => { SUB.cfg = 'respaldo'; go('configuracion'); };
       return;
     }
+    if (this.installPrompt && !this.installDismissed) {
+      bar.className = 'netbar sync';
+      bar.innerHTML = `<span>Instala la app en tu teléfono para abrirla en 1 toque</span><span class="row0" style="gap:.35rem"><button type="button" class="netbar-btn" id="nbInst">Instalar</button><button type="button" class="netbar-btn" id="nbInstX" style="padding:.28rem .5rem">&times;</button></span>`;
+      const bi = document.querySelector('#nbInst'), bx = document.querySelector('#nbInstX');
+      if (bi) bi.onclick = () => this.triggerInstall();
+      if (bx) bx.onclick = () => { this.installDismissed = true; this.paintBar(); };
+      return;
+    }
     bar.className = 'hidden';
     bar.innerHTML = '';
   },
@@ -1759,6 +1797,16 @@ const LDB = {
         navigator.serviceWorker.register('./sw.js').catch(() => {});
       });
     }
+    window.addEventListener('beforeinstallprompt', (e) => {
+      e.preventDefault();
+      this.installPrompt = e;
+      this.paintBar();
+    });
+    window.addEventListener('appinstalled', () => {
+      this.installPrompt = null;
+      this.paintBar();
+      if (typeof toast === 'function') toast('¡Aplicación instalada en tu dispositivo!');
+    });
     window.addEventListener('online', () => this.paintBar());
     window.addEventListener('offline', () => {
       this.paintBar();

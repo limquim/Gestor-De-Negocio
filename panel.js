@@ -2,6 +2,40 @@
 const ico = (d) => `<svg class="ic" viewBox="0 0 24 24">${d}</svg>`;
 async function viewInicio() {
   if (typeof OFF !== 'undefined' && OFF.isOffline() && !(OFF.mem.settings && OFF.mem.settings.length)) return OFF.renderOfflineHome();
+  if (S.role === 'vendedor') {
+    const hoy = caracasDate();
+    const [set, todaySales] = await Promise.all([
+      q(db.from('settings').select('business_name').eq('id', 1).single()).catch(() => ({})),
+      q(db.from('sales').select('id').eq('sale_date', hoy).neq('status', 'anulada'))
+    ]);
+    $('#view').innerHTML = `
+      <div class="card stack" style="border-left:5px solid var(--pri)">
+        <div class="title-row">
+          <div>
+            <h1 class="pt">${esc(set.business_name || 'Mi negocio')}</h1>
+            <small class="mut">Modo Empleado · ${dmy(hoy)}</small>
+          </div>
+          <span class="badge low">Mostrador</span>
+        </div>
+        <div class="rl" style="border:0;padding:.2rem 0"><span>Ventas registradas hoy</span><b>${todaySales.length}</b></div>
+      </div>
+      <div class="tiles">
+        <button class="tile main" id="stSell">${ico('<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>')}<span>Nueva venta</span><small>Facturar al cliente</small></button>
+        <button class="tile" id="stPrices">${ico('<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>')}<span>Consultar precios</span><small>Stock y precios en USD/Bs</small></button>
+        ${hasMod('quotes') ? `<button class="tile" id="stQuote">${ico('<path d="M4 4h16v16H4z"/><path d="M8 9h8M8 13h6"/>')}<span>Cotizaciones</span><small>Presupuestos rápidos</small></button>` : ''}
+        <button class="tile" id="stCobrar">${ico('<path d="M2 7h20v12H2z"/><path d="M2 11h20"/>')}<span>Por cobrar</span><small>Registrar abonos</small></button>
+      </div>
+      <div class="card stack" style="margin-top:1rem">
+        <p class="mut" style="margin:0">Las ganancias, costos, reportes y configuración están protegidos con el PIN del dueño.</p>
+        <button type="button" class="btn ghost" id="stUnlock">Desbloquear Modo Dueño (PIN)</button>
+      </div>`;
+    $('#stSell').onclick = () => { SUB.ven = 'nueva'; go('ventas'); };
+    $('#stPrices').onclick = () => go('inventario');
+    if ($('#stQuote')) $('#stQuote').onclick = () => { SUB.ven = 'cotizaciones'; go('ventas'); };
+    $('#stCobrar').onclick = () => { SUB.ven = 'cobrar'; go('ventas'); };
+    $('#stUnlock').onclick = () => promptUnlockOwner();
+    return;
+  }
   try {
   const hoy = caracasDate(), t = new Date(hoy + 'T12:00:00'), y = t.getFullYear(), m = t.getMonth(), dd = t.getDate();
   const m0 = dstr(new Date(y, m, 1)), p0 = dstr(new Date(y, m - 1, 1)), p1 = dstr(new Date(y, m - 1, Math.min(dd, new Date(y, m, 0).getDate())));

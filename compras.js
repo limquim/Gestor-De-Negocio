@@ -543,31 +543,55 @@ async function supplierDebtSheet(sup) {
 
 // ---------- Cobro o pago de una deuda individual: queda en USD y se convierte con la tasa del día ----------
 async function debtForm(cfg) {
-  const accs = await loadActiveAccounts(), bal = cfg.bal, isOut = cfg.rpc === 'registrar_pago_compra';
-  openSheet(cfg.title, `<form id="dF" class="stack"><p>${cfg.label}: <b>${fmt(bal)} USD</b> (${fmt(bal * (S.rate || 0))} Bs a la tasa de hoy)<br>
-    <span class="mut">El precio en dólares no cambia. Lo que se paga en Bs depende de la tasa del día del pago; puedes modificarla.</span></p>
+  const accs = await loadActiveAccounts(), bal = cfg.bal, isOut = cfg.rpc === 'registrar_pago_compra', bi = S.bimoneda !== false;
+  openSheet(cfg.title, `<form id="dF" class="stack"><p>${cfg.label}: <b>${fmt(bal)} USD</b>${bi && S.rate ? ` (${fmt(bal * S.rate)} Bs a la tasa de hoy)` : ''}<br>
+    ${bi ? '<span class="mut">El precio en dólares no cambia. Lo que se paga en Bs depende de la tasa del día del pago; puedes modificarla.</span>' : ''}</p>
     <label>Cuenta<select name="acc">${acctOpts(accs)}</select></label>
     <small id="dAccBal" style="display:block;margin-top:-.45rem"></small>
-    <label>Tasa de cambio (Bs por USD)<input name="rate" type="number" step="0.0001" min="0.0001" value="${S.rate || ''}"></label>
+    <label class="${bi ? '' : 'hidden'}">Tasa de cambio (Bs por USD)<input name="rate" type="number" step="0.0001" min="0.0001" value="${bi ? (S.rate || '') : 1}"></label>
     <label>Método<select name="method"></select></label>
     <label>Monto<input name="amount" type="number" step="0.01" min="0.01" required></label><p class="mut" id="dEq"></p>
     <label>Referencia<input name="ref"></label><button class="btn" type="submit">${cfg.title}</button></form>`);
   const el = $('#dF').elements, curAcc = () => accs.find(a => String(a.id) === el.acc.value), cur = () => curAcc().currency;
   const eq = () => {
-    const r = +el.rate.value || 0, a = num(el.amount.value) || 0, usd = cur() === 'USD' ? a : (r ? a / r : 0);
+    const r = bi ? (+el.rate.value || 0) : 1, a = num(el.amount.value) || 0, usd = cur() === 'USD' ? a : (r ? a / r : 0);
     $('#dEq').textContent = `Equivale a ${fmt(usd)} USD | quedaría debiendo ${fmt(Math.max(bal - usd, 0))} USD`;
     $('#dAccBal').innerHTML = accBalanceLine(curAcc(), a, isOut);
   };
-  const full = () => { el.amount.value = (bal * (cur() === 'USD' ? 1 : (+el.rate.value || 0))).toFixed(2); eq(); };
+  const full = () => { el.amount.value = (bal * (cur() === 'USD' ? 1 : (bi ? (+el.rate.value || 0) : 1))).toFixed(2); eq(); };
   const fillM = () => { el.method.innerHTML = optList(accMethods(curAcc())); };
-  fillM(); full(); let pf = cur() === 'USD' ? 1 : (+el.rate.value || 0);
-  const conv = () => { const nf = cur() === 'USD' ? 1 : (+el.rate.value || 0), usd = pf ? (num(el.amount.value) || 0) / pf : bal; pf = nf; el.amount.value = (usd * nf).toFixed(2); eq(); };
+  fillM(); full(); let pf = cur() === 'USD' ? 1 : (bi ? (+el.rate.value || 0) : 1);
+  const conv = () => { const nf = cur() === 'USD' ? 1 : (bi ? (+el.rate.value || 0) : 1), usd = pf ? (num(el.amount.value) || 0) / pf : bal; pf = nf; el.amount.value = (usd * nf).toFixed(2); eq(); };
   el.acc.onchange = () => { fillM(); conv(); }; el.rate.oninput = conv; el.amount.oninput = eq;
   $('#dF').onsubmit = (e) => {
     e.preventDefault();
     run(async () => {
-      await q(db.rpc(cfg.rpc, {...cfg.args, p_account_id: +el.acc.value, p_method: el.method.value, p_amount: num(el.amount.value), p_reference: el.ref.value.trim() || null, p_rate: +el.rate.value || null}));
-      closeSheet(); toast('Registrado'); render();
+      const a = curAcc(), amtOrig = num(el.amount.value), rt = bi ? (+el.rate.value || S.rate || 1) : 1;
+      const paidUsd = a.currency === 'USD' ? amtOrig : (rt ? amtOrig / rt : 0);
+      const refVal = el.ref.value.trim() || null;
+      await q(db.rpc(cfg.rpc, {...cfg.args, p_account_id: +el.acc.value, p_method: el.method.value, p_amount: amtOrig, p_reference: refVal, p_rate: rt}));
+      toast('Pago registrado');
+      render();
+      if (cfg.rpc === 'registrar_cobro' && typeof showPaymentReceipt === 'function') {
+        await showPaymentReceipt({
+          customer: cfg.customer || 'Cliente general',
+          phone: cfg.phone || '',
+          date: caracasDate(),
+          created_at: new Date().toISOString(),
+          concept: cfg.concept || ('Abono a Venta #' + cfg.args?.p_sale_id),
+          prevBalanceUsd: bal,
+          paidUsd: Math.round(paidUsd * 100) / 100,
+          paidOrig: amtOrig,
+          paidCur: a.currency,
+          methodLabel: METHODS[el.method.value] || el.method.value,
+          accountName: a.name,
+          reference: refVal,
+          remainingUsd: Math.max(0, Math.round((bal - paidUsd) * 100) / 100),
+          rate: rt
+        });
+      } else {
+        closeSheet();
+      }
     });
   };
 }

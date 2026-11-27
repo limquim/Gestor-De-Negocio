@@ -554,3 +554,182 @@ async function prodOrderBlob(doc, set, showCosts = false) {
   g = c.getContext('2d'); g.scale(sc, sc); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); dry = false; paint();
   return new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('No se pudo crear la hoja de producción')), 'image/png'));
 }
+
+// ---------- Comprobante de Pago / Abono en foto y texto térmico ----------
+function paymentReceiptText(doc, set) {
+  const w = set?.ticket_paper === '80mm' ? 42 : 32, ln = '-'.repeat(w);
+  const two = (a, b) => {
+    const sa = String(a), sb = String(b);
+    return sa + ' '.repeat(Math.max(1, w - sa.length - sb.length)) + sb;
+  };
+  const showBs = (typeof S === 'undefined' || S.bimoneda !== false) && Number(doc.rate || 0) > 0;
+  const fullPaid = Number(doc.remainingUsd || 0) <= 0.01;
+  const info = set?.ticket_show_info === false
+    ? []
+    : [set?.business_rif && 'RIF: ' + set.business_rif, set?.business_phone, set?.business_address];
+  const o = [
+    (set?.business_name || 'Mi negocio').toUpperCase(),
+    ...info,
+    ln,
+    `COMPROBANTE DE PAGO [${fullPaid ? 'SALDADO' : 'ABONO'}]`,
+    'Fecha: ' + (doc.created_at ? fdate(doc.created_at) : dmy(doc.date)),
+    'Cliente: ' + (doc.customer || 'Cliente general'),
+    doc.phone ? 'Tlf: ' + doc.phone : '',
+    ln,
+    doc.concept || 'Abono a cuenta pendiente',
+    ln,
+    two('Saldo anterior', fmt(doc.prevBalanceUsd) + ' USD'),
+    two('Monto abonado', fmt(doc.paidUsd) + ' USD'),
+    doc.paidCur === 'VES' ? two('Recibido en Bs', fmt(doc.paidOrig) + ' Bs') : '',
+    doc.methodLabel ? two('Método', doc.methodLabel) : '',
+    doc.reference ? 'Ref: ' + doc.reference : '',
+    ln,
+    two(fullPaid ? 'SALDO PENDIENTE' : 'RESTA POR PAGAR', fmt(Math.max(0, doc.remainingUsd)) + ' USD'),
+    !fullPaid && showBs ? two('Equiv. en Bs', fmt(Math.max(0, doc.remainingUsd) * doc.rate) + ' Bs') : '',
+    fullPaid ? '¡Cuenta pagada en su totalidad!' : '',
+    set?.ticket_footer ? ln : '',
+    set?.ticket_footer || ''
+  ].filter(Boolean);
+  return o.join('\n');
+}
+
+async function paymentReceiptBlob(doc, set) {
+  const W = 720, P = 40, sc = 2, F = 'system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif';
+  const acc = /^#[0-9a-f]{6}$/i.test(set?.ticket_color || '') ? set.ticket_color : '#0b7285';
+  const ink = '#14262d', mut = '#6b7f88', line = '#e3eaed';
+  const showBs = (typeof S === 'undefined' || S.bimoneda !== false) && Number(doc.rate || 0) > 0;
+  const fullPaid = Number(doc.remainingUsd || 0) <= 0.01;
+  const logo = set?.ticket_show_logo && set?.logo_data
+    ? await new Promise(r => { const im = new Image(); im.onload = () => r(im); im.onerror = () => r(null); im.src = set.logo_data; })
+    : null;
+
+  const m = document.createElement('canvas').getContext('2d');
+  let g, dry = true, y = 0;
+  const fnt = (sz, w = 400) => `${w} ${sz}px ${F}`;
+  const wrap = (t, mw, sz, w) => {
+    m.font = fnt(sz, w); const out = [];
+    String(t || '').split('\n').forEach(par => {
+      let ln = '';
+      par.split(' ').forEach(wd => {
+        const tt = ln ? ln + ' ' + wd : wd;
+        if (ln && m.measureText(tt).width > mw) { out.push(ln); ln = wd; } else ln = tt;
+      });
+      out.push(ln);
+    });
+    return out;
+  };
+  const tw = (t, sz, w) => { m.font = fnt(sz, w); return m.measureText(String(t ?? '')).width; };
+  const T = (t, x, yy, sz, w, col, al = 'left') => { if (dry) return; g.font = fnt(sz, w); g.fillStyle = col; g.textAlign = al; g.textBaseline = 'alphabetic'; g.fillText(String(t ?? ''), x, yy); };
+  const R = (x, yy, w, h, r, col) => { if (dry) return; g.beginPath(); (g.roundRect || g.rect).call(g, x, yy, w, h, r); g.fillStyle = col; g.fill(); };
+  const B = (x, yy, w, h, r, col, lw = 1.6) => { if (dry) return; g.beginPath(); (g.roundRect || g.rect).call(g, x, yy, w, h, r); g.strokeStyle = col; g.lineWidth = lw; g.stroke(); };
+
+  const paint = () => {
+    const tx = logo ? P + 96 : P, tmax = W - tx - P;
+    const info = set?.ticket_show_info === false ? [] : [set?.business_rif && 'RIF: ' + set.business_rif, set?.business_phone].filter(Boolean);
+    const nameL = wrap(set?.business_name || 'Mi negocio', tmax, 28, 800);
+    const hh = P + Math.max(nameL.length * 34 + (info.length ? 22 : 0), logo ? 78 : 0) + P - 10;
+    R(0, 0, W, hh, 0, acc);
+    if (logo) {
+      R(P, P - 4, 78, 78, 16, '#fff');
+      if (!dry) {
+        const k = Math.min(64 / logo.width, 64 / logo.height), lw = logo.width * k, lh = logo.height * k;
+        g.drawImage(logo, P + 39 - lw / 2, P + 35 - lh / 2, lw, lh);
+      }
+    }
+    let ty = P + 26;
+    nameL.forEach(t => { T(t, tx, ty, 28, 800, '#fff'); ty += 34; });
+    if (info.length) T(info.join('  ·  '), tx, ty - 6, 14, 500, 'rgba(255,255,255,.88)');
+
+    y = hh + 48;
+    T('COMPROBANTE DE PAGO', P, y, 22, 800, acc);
+    const badgeTxt = fullPaid ? 'SALDADO' : 'ABONO PARCIAL';
+    const badgeCol = fullPaid ? ['#1b7f4b', '#e3f5ea'] : ['#8a5a00', '#fff2cc'];
+    const bw = tw(badgeTxt, 13, 800) + 28;
+    R(W - P - bw, y - 24, bw, 34, 17, badgeCol[1]);
+    T(badgeTxt, W - P - bw / 2, y - 2, 13, 800, badgeCol[0], 'center');
+
+    y += 28;
+    T('Fecha: ' + (doc.created_at ? fdate(doc.created_at) : dmy(doc.date)), P, y, 15, 400, mut);
+
+    y += 38;
+    T('RECIBIDO DE', P, y, 12, 700, mut);
+    y += 26;
+    T(doc.customer || 'Cliente general', P, y, 22, 800, ink);
+    if (doc.phone) { y += 22; T(doc.phone, P, y, 15, 400, mut); }
+
+    // Concepto
+    y += 26;
+    const cLines = wrap(doc.concept || 'Abono a cuenta pendiente', W - P * 2 - 28, 16, 600);
+    const ch = 36 + cLines.length * 22;
+    R(P - 10, y, W - P * 2 + 20, ch, 14, '#f3f6f7');
+    T('CONCEPTO', P + 6, y + 22, 11, 800, mut);
+    cLines.forEach((l, k) => T(l, P + 6, y + 44 + k * 22, 16, 600, ink));
+    y += ch;
+
+    // Caja destacada del monto abonado
+    y += 22;
+    const paidBs = showBs ? (doc.paidCur === 'VES' ? fmt(doc.paidOrig) + ' Bs' : fmt(doc.paidUsd * doc.rate) + ' Bs') : '';
+    const bh = paidBs ? 104 : 76;
+    R(P - 10, y, W - P * 2 + 20, bh, 18, acc);
+    T('MONTO ABONADO', P + 10, y + 36, 14, 700, 'rgba(255,255,255,.86)');
+    T(fmt(doc.paidUsd) + ' USD', W - P - 10, y + 48, 36, 800, '#fff', 'right');
+    if (paidBs) T(paidBs + (doc.rate > 0 ? `  (Tasa: ${fmt(doc.rate, 2)})` : ''), W - P - 10, y + 82, 18, 600, 'rgba(255,255,255,.92)', 'right');
+    y += bh;
+
+    // Desglose de saldos y método
+    const row = (l, v, col = ink, bold = 600) => {
+      y += 32;
+      T(l, P, y, 16, 500, mut);
+      T(v, W - P, y, 16, bold, col, 'right');
+      y += 12;
+      if (!dry) { g.fillStyle = line; g.fillRect(P, y, W - P * 2, 1); }
+    };
+    y += 10;
+    row('Saldo anterior', fmt(doc.prevBalanceUsd) + ' USD');
+    row('Monto abonado', '-' + fmt(doc.paidUsd) + ' USD', '#1b7f4b', 700);
+    if (doc.methodLabel) row('Método de pago', doc.methodLabel + (doc.accountName ? ' (' + doc.accountName + ')' : ''));
+    if (doc.reference) row('Referencia', doc.reference);
+
+    y += 24;
+    const rem = Math.max(0, Number(doc.remainingUsd || 0));
+    const remBoxH = (!fullPaid && showBs) ? 74 : 56;
+    R(P - 10, y, W - P * 2 + 20, remBoxH, 14, fullPaid ? '#e3f5ea' : '#fff2cc');
+    B(P - 10, y, W - P * 2 + 20, remBoxH, 14, fullPaid ? '#1b7f4b' : '#c48a00', 1.5);
+    T(fullPaid ? 'CUENTA SALDADA' : 'SALDO RESTANTE', P + 8, y + 35, 15, 800, fullPaid ? '#1b7f4b' : '#8a5a00');
+    T(fmt(rem) + ' USD', W - P - 8, y + 37, 24, 800, fullPaid ? '#1b7f4b' : '#8a5a00', 'right');
+    if (!fullPaid && showBs) T(`≈ ${fmt(rem * doc.rate)} Bs a la tasa de hoy`, W - P - 8, y + 60, 14, 600, '#8a5a00', 'right');
+    y += remBoxH;
+
+    if (set?.ticket_footer) {
+      y += 30;
+      wrap(set.ticket_footer, W - P * 2, 15, 600).forEach(l => { y += 22; T(l, W / 2, y, 15, 600, mut, 'center'); });
+    }
+    y += P;
+  };
+  paint();
+  const H = y, c = document.createElement('canvas'); c.width = W * sc; c.height = H * sc;
+  g = c.getContext('2d'); g.scale(sc, sc); g.fillStyle = '#fff'; g.fillRect(0, 0, W, H); dry = false; paint();
+  return new Promise((res, rej) => c.toBlob(b => b ? res(b) : rej(new Error('No se pudo crear el comprobante')), 'image/png'));
+}
+
+async function showPaymentReceipt(doc) {
+  const set = await q(db.from('settings').select('*').eq('id', 1).single()).catch(() => ({}));
+  const text = paymentReceiptText(doc, set);
+  const blobP = paymentReceiptBlob(doc, set).catch(() => null);
+  openSheet('Comprobante de pago', `
+    <div id="tPrev"><pre class="ticket">${esc(text)}</pre></div>
+    <div class="row">
+      <button class="btn" id="prShare">Enviar por WhatsApp</button>
+      <button class="btn ghost" id="prDown">Descargar foto</button>
+    </div>
+    <div class="row">
+      <button class="btn ghost" id="prPrint">Imprimir</button>
+      <button class="btn ghost" id="prTxt">Enviar como texto</button>
+    </div>`);
+  showPrev(blobP, set);
+  const fname = 'comprobante-pago-' + caracasDate();
+  $('#prShare').onclick = () => run(async () => shareImage(await blobP, doc.phone, fname));
+  $('#prDown').onclick = () => run(async () => { const b = await blobP; if (!b) throw new Error('No se pudo crear la imagen'); downloadBlob(b, fname + '.png'); });
+  $('#prPrint').onclick = () => printTicket(text, set.ticket_paper);
+  $('#prTxt').onclick = () => window.open(`https://wa.me/${waDigits(doc.phone)}?text=${encodeURIComponent(text)}`, '_blank');
+}

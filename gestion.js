@@ -494,8 +494,9 @@ async function viewRespaldo() {
         </label>
 
         <div class="row">
-          <button type="button" class="btn" id="gdSyncBtn">Respaldar en Drive ahora</button>
-          <button type="button" class="btn ghost" id="gdRestBtn">Ver copias / Restaurar</button>
+          <button type="button" class="btn" id="gdSyncBtn">Subir a Drive ahora</button>
+          <button type="button" class="btn ghost" id="gdCheckNewBtn">Buscar copia de otro equipo</button>
+          <button type="button" class="btn ghost" id="gdRestBtn">Ver historial (7 días)</button>
         </div>
         <div class="row" style="margin-top:0">
           <button type="button" class="lnk bad" id="gdDiscBtn" style="padding:0">Desvincular cuenta Google</button>
@@ -531,6 +532,7 @@ async function viewRespaldo() {
 
   if ($('#gdConnBtn')) $('#gdConnBtn').onclick = () => run(async () => { await gd.connect(); render(); });
   if ($('#gdSyncBtn')) $('#gdSyncBtn').onclick = () => run(async () => { await gd.syncNow({manual: true}); render(); });
+  if ($('#gdCheckNewBtn')) $('#gdCheckNewBtn').onclick = () => run(async () => { await gd.checkRemoteUpdate({interactive: true}); render(); });
   if ($('#gdRestBtn')) $('#gdRestBtn').onclick = () => run(() => gd.openRestorePicker(false));
   if ($('#gdDiscBtn')) $('#gdDiscBtn').onclick = () => {
     if (!confirm('¿Desvincular tu cuenta de Google Drive de este dispositivo? Tus respaldos en Drive no se borran.')) return;
@@ -644,8 +646,35 @@ async function debtSheet(c) {
     e.preventDefault();
     run(async () => {
       const ids = sales.filter(chosen).map(s => s.id); if (!ids.length) throw new Error('Marca al menos una venta');
-      const res = await q(db.rpc('cobrar_ventas', {p_sale_ids: ids, p_account_id: +el.acc.value, p_method: el.method.value, p_amount: num(el.amount.value), p_reference: el.ref.value.trim() || null, p_rate: +el.rate.value || null}));
-      closeSheet(); toast(`Cobro registrado: ${res.pagadas} ${res.pagadas === 1 ? 'venta pagada completa' : 'ventas pagadas completas'}${res.abonadas ? ' y 1 con abono (queda abierta)' : ''}. Pendiente: ${fmt(res.pendiente_usd)} USD`); render();
+      const a = accs.find(x => String(x.id) === el.acc.value);
+      const amtOrig = num(el.amount.value), rt = S.bimoneda === false ? 1 : (+el.rate.value || S.rate || 1);
+      const paidUsd = a?.currency === 'USD' ? amtOrig : (rt ? amtOrig / rt : 0);
+      const prevDebt = selDebt();
+      const refVal = el.ref.value.trim() || null;
+      const res = await q(db.rpc('cobrar_ventas', {p_sale_ids: ids, p_account_id: +el.acc.value, p_method: el.method.value, p_amount: amtOrig, p_reference: refVal, p_rate: rt}));
+      toast(`Cobro registrado: ${res.pagadas} ${res.pagadas === 1 ? 'venta pagada completa' : 'ventas pagadas completas'}${res.abonadas ? ' y 1 con abono' : ''}`);
+      render();
+      if (typeof showPaymentReceipt === 'function') {
+        const listLbl = ids.length === 1 ? `Venta #${ids[0]}` : `${ids.length} ventas (${ids.map(x => '#' + x).join(', ')})`;
+        await showPaymentReceipt({
+          customer: c.customer || 'Cliente general',
+          phone: c.phone || '',
+          date: caracasDate(),
+          created_at: new Date().toISOString(),
+          concept: 'Abono a ' + listLbl,
+          prevBalanceUsd: prevDebt,
+          paidUsd: Math.round(paidUsd * 100) / 100,
+          paidOrig: amtOrig,
+          paidCur: a?.currency || 'USD',
+          methodLabel: METHODS[el.method.value] || el.method.value,
+          accountName: a?.name || '',
+          reference: refVal,
+          remainingUsd: Math.max(0, Number(res.pendiente_usd ?? (prevDebt - paidUsd))),
+          rate: rt
+        });
+      } else {
+        closeSheet();
+      }
     });
   };
   if (c.phone) $('#dcWa').onclick = () => window.open(waLink(c, `Hola ${(c.customer || '').split(' ')[0]}, te recordamos que tienes un saldo pendiente de ${fmt(total)} USD${S.rate ? ' (' + fmt(total * S.rate) + ' Bs a la tasa de hoy)' : ''}.${payTxt ? '\n\n' + payTxt : ''}\n\nGracias por tu atención.`), '_blank');

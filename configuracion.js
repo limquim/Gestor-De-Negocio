@@ -207,9 +207,12 @@ async function viewAcercaDe() {
       <h2>Instalar como aplicación (PWA)</h2>
       ${isStandalone
         ? '<p class="pos" style="margin:0"><b>Ya estás usando la app instalada en tu dispositivo.</b></p>'
-        : '<p class="mut" style="margin:0"><b>En Android (Chrome):</b> menú (⋮) &rarr; <i>Instalar aplicación</i>.<br><b>En iPhone (Safari):</b> Compartir &rarr; <i>Agregar a pantalla de inicio</i>.</p>'}
+        : LDB.installPrompt
+          ? '<p class="mut" style="margin:0">Instala la app directo en tu pantalla de inicio para abrirla en 1 toque, incluso sin internet.</p><button type="button" class="btn" id="acInstBtn">Instalar aplicación ahora</button>'
+          : '<p class="mut" style="margin:0"><b>En Android (Chrome):</b> menú (⋮) &rarr; <i>Instalar aplicación</i>.<br><b>En iPhone (Safari):</b> Compartir &rarr; <i>Agregar a pantalla de inicio</i>.</p>'}
     </div>`;
 
+  if ($('#acInstBtn')) $('#acInstBtn').onclick = () => LDB.triggerInstall();
   if (supPhone && $('#acSup')) {
     $('#acSup').onclick = () => window.open(`https://wa.me/${waDigits(supPhone)}?text=${encodeURIComponent('Hola, necesito soporte con ' + (APP_CONFIG.brandName || 'la app'))}`, '_blank');
   }
@@ -225,6 +228,7 @@ const CFG_MAP = {
   apertura: {title: 'Saldos iniciales (Apertura)', fn: () => viewApertura()},
   importar: {title: 'Importar datos (Excel / CSV)', fn: () => viewImportar()},
   respaldo: {title: 'Respaldo y Google Drive', fn: () => viewRespaldo()},
+  empleado: {title: 'Modo Empleado y PIN', fn: () => viewModoEmpleado()},
   bitacora: {title: 'Bitácora de cambios', fn: () => viewBitacora()},
   suscripcion: {title: 'Mi Suscripción y Plan', fn: () => viewSuscripcion()},
   acerca: {title: 'App, espacio y soporte', fn: () => viewAcercaDe()},
@@ -331,6 +335,12 @@ async function viewConfiguracion() {
           desc: 'Estado de tu plan mensual, días restantes, ID de dispositivo y activación',
           pill: (typeof LIC !== 'undefined') ? LIC.getStatus().label : 'Activo',
           pillCls: (typeof LIC !== 'undefined') ? (!LIC.getStatus().active ? 'out' : LIC.getStatus().warn ? 'low' : 'ok') : 'ok'
+        },
+        {
+          k: 'empleado', name: 'Modo Empleado y PIN del dueño',
+          desc: 'Protege ganancias, costos y caja con PIN de 4 dígitos cuando atiende un vendedor',
+          pill: (typeof getOwnerPin === 'function' && getOwnerPin()) ? 'PIN activo' : 'Configurar',
+          pillCls: (typeof getOwnerPin === 'function' && getOwnerPin()) ? 'ok' : ''
         },
         {
           k: 'bitacora', name: 'Bitácora de cambios',

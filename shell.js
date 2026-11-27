@@ -44,6 +44,15 @@ const MODS = [
   ['configuracion', 'Configuración', 'Módulos, tasa, negocio, respaldo y metas', null]
 ];
 views.mas = async () => {
+  if (S.role === 'vendedor') {
+    $('#view').innerHTML = `<h1 class="pt">Modo Empleado</h1>
+      <div class="card stack" style="margin-top:.8rem">
+        <p class="mut" style="margin:0">Estás operando en <b>Modo Empleado</b>. Para ver reportes, cuentas, compras, costos o configuración, desbloquea con el PIN del dueño.</p>
+        <button type="button" class="btn" id="mStaffUnlock">Desbloquear Modo Dueño (PIN)</button>
+      </div>`;
+    $('#mStaffUnlock').onclick = () => promptUnlockOwner();
+    return;
+  }
   const items = MODS.filter(([k, , , mk]) => (!mk || hasMod(mk)) && canSee(k));
   const extraProd = !hasMod('inventory') ? `<button id="mSrvProds"><b>Productos / Servicios</b><small>Catálogo de servicios y precios</small></button>` : '';
   $('#view').innerHTML = `<h1 class="pt">Más módulos</h1>
@@ -67,6 +76,10 @@ views.mas = async () => {
 };
 
 views.inventario = page('Inventario', async () => {
+  if (S.role === 'vendedor') {
+    await viewConsultaPrecios();
+    return;
+  }
   if (!hasMod('inventory')) {
     await viewProductos2();
     return;
@@ -83,6 +96,7 @@ views.ventas = page('Ventas', async () => {
   const subs = {nueva: 'Nueva venta', cotizaciones: 'Cotizaciones', historial: 'Historial', devoluciones: 'Devoluciones', cobrar: 'Por cobrar'};
   const fns = {nueva: viewVenta, cotizaciones: viewCotizaciones, historial: viewHistVentas, devoluciones: viewDevoluciones, cobrar: viewDeudas};
   if (!hasMod('quotes')) delete subs.cotizaciones;
+  if (S.role === 'vendedor') delete subs.devoluciones;
   await withSubs('ven', subs, fns)();
 }, false);
 
