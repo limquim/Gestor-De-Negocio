@@ -129,13 +129,19 @@ async function loadRate() {
 }
 
 async function fetchBCV() {
-  const res = await fetch('https://ve.dolarapi.com/v1/dolares/oficial');
-  if (!res.ok) throw new Error('La fuente de la tasa BCV no respondió');
-  const j = await res.json();
-  const rate = Number(j.promedio ?? j.venta);
-  if (!(rate > 0)) throw new Error('La fuente devolvió una tasa inválida');
-  await q(db.from('exchange_rates').insert({currency: 'USD', rate, rate_date: caracasDate(), source: 'bcv_auto'}));
-  return rate;
+  const ac = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const tm = ac ? setTimeout(() => ac.abort(), 5000) : null;
+  try {
+    const res = await fetch('https://ve.dolarapi.com/v1/dolares/oficial', ac ? {signal: ac.signal} : {});
+    if (!res.ok) throw new Error('La fuente de la tasa BCV no respondió');
+    const j = await res.json();
+    const rate = Number(j.promedio ?? j.venta);
+    if (!(rate > 0)) throw new Error('La fuente devolvió una tasa inválida');
+    await q(db.from('exchange_rates').insert({currency: 'USD', rate, rate_date: caracasDate(), source: 'bcv_auto'}));
+    return rate;
+  } finally {
+    if (tm) clearTimeout(tm);
+  }
 }
 
 async function autoRate() {
@@ -212,7 +218,6 @@ async function enter() {
   $('#app').classList.remove('hidden');
   await loadModulesConfig();
   await loadRate();
-  await autoRate();
   await loadMethods();
   if (typeof loadBusinessRules === 'function') await loadBusinessRules();
   await loadRole();
@@ -224,6 +229,7 @@ async function enter() {
   }
   LDB.paintBar();
   render();
+  autoRate().then(() => { if (tab === 'inicio') render(); }).catch(() => {});
 }
 
 run(async () => {

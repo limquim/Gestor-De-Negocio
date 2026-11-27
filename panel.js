@@ -1,7 +1,7 @@
 // Panel del dueño: cómo va el negocio de un vistazo + asistente de apertura
 const ico = (d) => `<svg class="ic" viewBox="0 0 24 24">${d}</svg>`;
 async function viewInicio() {
-  if (typeof OFF !== 'undefined' && OFF.isOffline() && !(OFF.mem.settings && OFF.mem.settings.length)) return OFF.renderOfflineHome();
+  await LDB.ensureReady();
   if (S.role === 'vendedor') {
     const hoy = caracasDate();
     const [set, todaySales] = await Promise.all([
@@ -172,7 +172,8 @@ async function viewInicio() {
   });
 
   } catch (e) {
-    if (typeof OFF !== 'undefined' && OFF.isNetError(e)) return OFF.renderOfflineHome();
-    throw e;
+    console.error(e);
+    $('#view').innerHTML = `<div class="card stack"><h2>No se pudo cargar el inicio</h2><p class="mut">${esc(e?.message || 'Error inesperado')}</p><button class="btn" id="iniRetry">Reintentar</button></div>`;
+    if ($('#iniRetry')) $('#iniRetry').onclick = () => render();
   }
 }

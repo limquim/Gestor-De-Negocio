@@ -1818,7 +1818,7 @@ const LDB = {
 // Fachada compatible OFF para módulos que consulten OFF.*
 const OFF = {
   ops: [],
-  mem: LDB.mem,
+  get mem() { return LDB.mem; },
   isOffline: () => typeof navigator !== 'undefined' && navigator.onLine === false,
   isNetError: () => false,
   withTimeout: (p) => p,

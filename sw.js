@@ -1,5 +1,5 @@
-// Service Worker — Gestor Emprendedor v7 (100% Local-First)
-const CACHE_NAME = 'gestor-emprendedor-v7';
+// Service Worker — Gestor Emprendedor v8 (100% Local-First)
+const CACHE_NAME = 'gestor-emprendedor-v8';
 const CORE_ASSETS = [
   './',
   './index.html',
@@ -82,7 +82,12 @@ self.addEventListener('fetch', (event) => {
       const cached = await cache.match(req);
       try {
         const netPromise = fetch(req).then(res => { if (res && res.ok) cache.put(req, res.clone()); return res; });
-        if (cached) return await Promise.race([netPromise, new Promise(res => setTimeout(() => res(cached), 2000))]);
+        if (cached) {
+          return await Promise.race([
+            netPromise.catch(() => cached),
+            new Promise(res => setTimeout(() => res(cached), 1500))
+          ]);
+        }
         return await netPromise;
       } catch (e) {
         return cached || (req.mode === 'navigate' ? await cache.match('./index.html') : null) || new Response('Sin conexión', {status: 503});
