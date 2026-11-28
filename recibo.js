@@ -734,3 +734,261 @@ async function showPaymentReceipt(doc) {
   $('#prPrint').onclick = () => printTicket(text, set.ticket_paper);
   $('#prTxt').onclick = () => window.open(`https://wa.me/${waDigits(doc.phone)}?text=${encodeURIComponent(text)}`, '_blank');
 }
+
+
+// ---------- Impresión térmica en 1 toque para Android (RawBT / Bluetooth ESC/POS) ----------
+function thermalSanitize(s) {
+  return String(s ?? '')
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+    .replace(/ñ/g, 'n').replace(/Ñ/g, 'N')
+    .replace(/[¿]/g, '?').replace(/[¡]/g, '!')
+    .replace(/[×]/g, 'x').replace(/[·•]/g, '-').replace(/[—–]/g, '-')
+    .replace(/[→⇒]/g, '->').replace(/[°ºª]/g, 'o').replace(/[“”]/g, '"').replace(/[‘’]/g, "'")
+    .replace(/[^\x20-\x7E\n]/g, '');
+}
+
+function bytesToBase64(bytes) {
+  let bin = '';
+  const chunk = 0x8000;
+  for (let i = 0; i < bytes.length; i += chunk) {
+    bin += String.fromCharCode.apply(null, bytes.subarray(i, i + chunk));
+  }
+  return btoa(bin);
+}
+
+function buildEscPosTicket(doc, set) {
+  const cfg = ticketCfg(set || {});
+  const w = set?.ticket_paper === '80mm' ? 42 : 32;
+  const ln = '-'.repeat(w);
+  const out = [];
+  const push = (...a) => out.push(...a);
+  const txt = (str) => {
+    const clean = thermalSanitize(str);
+    for (let i = 0; i < clean.length; i++) out.push(clean.charCodeAt(i) & 0x7f);
+  };
+  const line = (str = '') => { txt(str); out.push(0x0A); };
+  const wrapLine = (str) => {
+    const clean = thermalSanitize(str);
+    if (!clean) { out.push(0x0A); return; }
+    for (let i = 0; i < clean.length; i += w) line(clean.slice(i, i + w));
+  };
+  const two = (a, b) => {
+    const sa = thermalSanitize(a), sb = thermalSanitize(b);
+    const gap = Math.max(1, w - sa.length - sb.length);
+    if (sa.length + 1 + sb.length > w) {
+      wrapLine(sa);
+      line(' '.repeat(Math.max(0, w - sb.length)) + sb);
+    } else {
+      line(sa + ' '.repeat(gap) + sb);
+    }
+  };
+  const align = (n) => push(0x1B, 0x61, n);
+  const bold = (on) => push(0x1B, 0x45, on ? 1 : 0);
+  const size = (dbl) => push(0x1D, 0x21, dbl ? 0x11 : 0x00);
+
+  push(0x1B, 0x40);
+  align(1);
+  bold(true);
+  size(true);
+  line((set?.business_name || 'MI NEGOCIO').toUpperCase().slice(0, Math.floor(w / 2)));
+  size(false);
+  bold(false);
+  if (set?.ticket_header) wrapLine(set.ticket_header);
+  if (set?.ticket_show_info !== false) {
+    if (set?.business_rif) wrapLine('RIF: ' + set.business_rif);
+    if (set?.business_phone) wrapLine(set.business_phone);
+    if (set?.business_address) wrapLine(set.business_address);
+  }
+  if (cfg.social) wrapLine(cfg.social);
+
+  align(0);
+  line(ln);
+  bold(true);
+  wrapLine(`${doc.title} #${doc.number}` + (cfg.show_status && doc.status ? ` [${doc.status}]` : ''));
+  bold(false);
+  const dateLine = cfg.show_time && doc.created_at ? fdate(doc.created_at) : ('Fecha: ' + dmy(doc.date));
+  wrapLine(dateLine);
+  if (doc.deliveryLine) wrapLine(doc.deliveryLine);
+  if (doc.valid) wrapLine('Valida hasta: ' + dmy(doc.valid));
+  if (set?.ticket_show_customer !== false) {
+    wrapLine(`${doc.partyLabel ? doc.partyLabel + ': ' : 'Cliente: '}${doc.customer}`);
+    if (doc.phone) wrapLine('Tlf: ' + doc.phone);
+  }
+  line(ln);
+
+  const showUsd = cfg.currency_mode !== 'bs';
+  const showBs = (typeof S === 'undefined' || S.bimoneda !== false) && cfg.currency_mode !== 'usd' && set?.ticket_show_bs !== false && doc.rate > 0;
+  const priceOnlyBs = cfg.currency_mode === 'bs' && doc.rate > 0;
+
+  (doc.items || []).forEach(i => {
+    const label = (cfg.show_sku && i.sku ? `[${i.sku}] ` : '') + i.name;
+    const uPrice = priceOnlyBs ? i.price * doc.rate : i.price;
+    const tot = i.qty * uPrice;
+    const curTag = priceOnlyBs ? ' Bs' : '';
+    if (cfg.show_unit_price !== false) {
+      wrapLine(label);
+      two(`  ${qty(i.qty)} x ${fmt(uPrice)}${curTag}`, fmt(tot) + curTag);
+    } else {
+      two(`${qty(i.qty)} ${label}`.slice(0, Math.max(8, w - 11)), fmt(tot) + curTag);
+    }
+  });
+
+  line(ln);
+  const mult = priceOnlyBs ? doc.rate : 1;
+  const cLabel = priceOnlyBs ? secSym() : curLabel();
+  if (cfg.show_unit_price !== false && (doc.discount || doc.tax)) {
+    two(`Subtotal ${cLabel}`, fmt(doc.subtotal * mult));
+    if (+doc.discount) two('Descuento', '-' + fmt(doc.discount * mult));
+    if (+doc.tax) two(doc.ivaPct ? `IVA (${qty(doc.ivaPct)}%)` : 'IVA', fmt(doc.tax * mult));
+  }
+
+  bold(true);
+  if (cfg.currency_mode === 'bs_first' && showBs) {
+    two('TOTAL ' + secSym(), fmtSec(doc.total * doc.rate));
+    if (showUsd) two('TOTAL ' + curLabel(), fmtCur(doc.total));
+  } else {
+    if (showUsd) two('TOTAL ' + curLabel(), fmtCur(doc.total));
+    if (showBs) two('TOTAL ' + secSym(), fmtSec(doc.total * doc.rate));
+  }
+  bold(false);
+  if (set?.ticket_show_rate && doc.rate > 0) wrapLine('Tasa: ' + fmt(doc.rate, 4) + ' ' + secSym() + '/' + curLabel());
+
+  if (set?.ticket_show_payments !== false && ((doc.pays && doc.pays.length) || doc.balance > 0.01)) {
+    if (doc.pays && doc.pays.length) {
+      line(ln);
+      bold(true); line('PAGOS / ABONOS'); bold(false);
+      doc.pays.forEach(p => two(p.label, p.cur === 'VES' ? fmtSec(p.amount) : fmtCur(p.amount)));
+    }
+    if (doc.balance > 0.01) {
+      bold(true);
+      two('POR PAGAR', fmtCur(doc.balance));
+      if (showBs) two('POR PAGAR ' + secSym(), fmtSec(doc.balance * doc.rate));
+      bold(false);
+    }
+  }
+
+  if (cfg.show_notes !== false && doc.notes) {
+    line(ln);
+    wrapLine('Nota: ' + doc.notes);
+  }
+  if (shouldShowPayDetails(doc, cfg)) {
+    line(ln);
+    doc.payDetails.replace(/\*/g, '').trim().split('\n').forEach(l => wrapLine(l));
+  }
+  if (cfg.show_signature) {
+    line(''); line('');
+    align(1);
+    line('_'.repeat(Math.min(26, w)));
+    wrapLine(cfg.signature_label || 'Recibido conforme / Firma');
+    align(0);
+  }
+  if (set?.ticket_footer) {
+    line(ln);
+    align(1);
+    wrapLine(set.ticket_footer);
+    align(0);
+  }
+  if (doc.quote) {
+    align(1);
+    wrapLine('Precios sujetos a cambio segun tasa del dia.');
+    align(0);
+  }
+  line(''); line(''); line(''); line('');
+  push(0x1D, 0x56, 0x42, 0x00);
+  return new Uint8Array(out);
+}
+
+function canvasToEscPosRaster(srcCanvas, targetWidth = 384) {
+  const scale = targetWidth / srcCanvas.width;
+  const w = Math.ceil(targetWidth / 8) * 8;
+  const h = Math.max(1, Math.round(srcCanvas.height * scale));
+  const c = document.createElement('canvas');
+  c.width = w;
+  c.height = h;
+  const ctx = c.getContext('2d');
+  ctx.fillStyle = '#ffffff';
+  ctx.fillRect(0, 0, w, h);
+  ctx.imageSmoothingEnabled = false;
+  ctx.drawImage(srcCanvas, 0, 0, w, h);
+  const img = ctx.getImageData(0, 0, w, h).data;
+  const xBytes = w / 8;
+  const header = [
+    0x1B, 0x40,
+    0x1B, 0x61, 0x01,
+    0x1D, 0x76, 0x30, 0x00,
+    xBytes & 0xFF, (xBytes >> 8) & 0xFF,
+    h & 0xFF, (h >> 8) & 0xFF
+  ];
+  const footer = [0x0A, 0x0A, 0x0A, 0x1D, 0x56, 0x42, 0x00];
+  const out = new Uint8Array(header.length + xBytes * h + footer.length);
+  out.set(header, 0);
+  let pos = header.length;
+  for (let y = 0; y < h; y++) {
+    for (let xb = 0; xb < xBytes; xb++) {
+      let byte = 0;
+      for (let bit = 0; bit < 8; bit++) {
+        const x = xb * 8 + bit;
+        const idx = (y * w + x) * 4;
+        const lum = 0.299 * img[idx] + 0.587 * img[idx + 1] + 0.114 * img[idx + 2];
+        if (lum < 165) byte |= (0x80 >> bit);
+      }
+      out[pos++] = byte;
+    }
+  }
+  out.set(footer, pos);
+  return out;
+}
+
+function printRawBT(doc, set) {
+  const bytes = buildEscPosTicket(doc, set || {});
+  const b64 = bytesToBase64(bytes);
+  const isAndroid = /Android/i.test(navigator.userAgent || '');
+  if (!isAndroid) {
+    toast('Abriendo RawBT (diseñado para Android + impresora térmica Bluetooth). En PC usa "Imprimir".');
+  } else {
+    toast('Enviando ticket a impresora térmica (RawBT)...');
+  }
+  window.location.href = 'rawbt:base64,' + b64;
+}
+
+function printRawBTCanvas(canvas, paper = '58mm') {
+  const targetW = paper === '80mm' ? 576 : 384;
+  const bytes = canvasToEscPosRaster(canvas, targetW);
+  const b64 = bytesToBase64(bytes);
+  const isAndroid = /Android/i.test(navigator.userAgent || '');
+  if (!isAndroid) {
+    toast('Enviando etiqueta a RawBT (para Android). En PC usa "Imprimir" o "Descargar PNG".');
+  } else {
+    toast('Enviando etiqueta a impresora térmica (RawBT)...');
+  }
+  window.location.href = 'rawbt:base64,' + b64;
+}
+
+function orderDoc(order, items, set, payDetails = '') {
+  const total = Number(order.total_usd || 0);
+  const dep = Number(order.deposit_usd || 0);
+  const bal = Math.max(0, total - dep);
+  const stLabels = {pendiente: 'PENDIENTE', preparacion: 'EN PREPARACIÓN', listo: 'LISTO', entregado: 'ENTREGADO', cancelado: 'CANCELADO'};
+  return {
+    kind: 'nota',
+    title: 'PEDIDO / ENCARGO',
+    number: order.id,
+    date: order.order_date,
+    created_at: order.created_at,
+    deliveryLine: order.delivery_date ? (`Entrega: ${dmy(order.delivery_date)}${order.delivery_time ? ' ' + order.delivery_time : ''}`) : '',
+    customer: order.customer_name || order.parties?.name || 'Cliente general',
+    phone: order.customer_phone || order.parties?.phone || '',
+    items: (items || []).map(i => ({name: i.name || i.products?.name || 'Artículo', sku: i.products?.sku || '', qty: +i.quantity, price: +i.unit_price_usd})),
+    subtotal: total,
+    discount: 0,
+    tax: 0,
+    ivaPct: 0,
+    total,
+    rate: Number(order.exchange_rate || S.rate || 0),
+    pays: dep > 0.005 ? [{label: 'Abono / Anticipo', amount: dep, cur: 'USD'}] : [],
+    balance: bal,
+    status: stLabels[order.status] || String(order.status || '').toUpperCase(),
+    notes: order.notes || '',
+    payDetails
+  };
+}

@@ -180,3 +180,15 @@ input[type=color]{padding:.2rem;cursor:pointer}
 .tut-dots{display:flex;justify-content:center;gap:.45rem;padding:.15rem 0}
 .tut-dots button{width:10px;height:10px;border-radius:99px;border:0;padding:0;background:var(--line);cursor:pointer;transition:width .2s,background .2s}
 .tut-dots button.on{width:26px;background:var(--pri)}
+
+/* Etiquetas de precio y código de barras */
+.etq-prev{max-width:340px;margin:0 auto;background:#fff;border:1px solid var(--line);border-radius:12px}
+
+/* Pedidos / Encargos por entregar */
+.badge.prep{background:color-mix(in srgb,var(--pri) 16%,var(--card));color:var(--pri)}
+.badge.done{background:var(--line);color:var(--mut)}
+.ord-card.ord-late{border-left:4px solid var(--bad)}
+.ord-card.ord-today{border-left:4px solid var(--tag)}
+.ord-flow{display:grid;grid-template-columns:repeat(4,1fr);gap:.35rem}
+.ord-step{padding:.48rem .3rem;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--mut);font:inherit;font-size:.76rem;font-weight:700;cursor:pointer;text-align:center}
+.ord-step.on{background:var(--pri);border-color:var(--pri);color:var(--pri-ink)}

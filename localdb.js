@@ -8,7 +8,7 @@ const LDB_BASE_TABLES = [
   'currencies', 'price_lists', 'message_templates', 'catalog_presets',
   'products', 'parties', 'employees', 'employee_advances',
   'recipes', 'recipe_items', 'production_orders', 'production_items',
-  'quotes', 'quote_items', 'sales', 'sale_items', 'sale_returns', 'sale_return_items',
+  'quotes', 'quote_items', 'orders', 'order_items', 'sales', 'sale_items', 'sale_returns', 'sale_return_items',
   'purchases', 'purchase_items', 'payments', 'expenses', 'recurring_expenses',
   'account_movements', 'inventory_movements', 'inventory_adjustments',
   'cash_closings', 'payroll_runs', 'payroll_items', 'audit_log'
@@ -21,6 +21,8 @@ const LDB_REL = {
   purchases: {parties: ['supplier_id', 'id']},
   quote_items: {products: ['product_id', 'id'], quotes: ['quote_id', 'id']},
   quotes: {parties: ['customer_id', 'id']},
+  orders: {parties: ['customer_id', 'id']},
+  order_items: {orders: ['order_id', 'id'], products: ['product_id', 'id']},
   sale_return_items: {products: ['product_id', 'id'], sale_returns: ['return_id', 'id']},
   sale_returns: {sales: ['sale_id', 'id']},
   account_movements: {accounts: ['account_id', 'id']},
@@ -901,7 +903,7 @@ const LDB = {
       const ucost = Number(i.unit_cost_usd ?? p?.avg_cost_usd ?? 0);
       const cost = qn * ucost;
       costo_ventas += cost;
-      const pname = p?.name || ('Producto #' + i.product_id);
+      const pname = i.custom_name || p?.name || ('Producto #' + i.product_id);
       if (!byProd[pname]) byProd[pname] = {name: pname, ingreso: 0, utilidad: 0};
       byProd[pname].ingreso += rev;
       byProd[pname].utilidad += (rev - cost);
@@ -993,14 +995,24 @@ const LDB = {
       const newItems = [];
       const hasExplicitIva = P.p_iva_percent !== undefined && P.p_iva_percent !== null;
       for (const it of items) {
-        const pr = prodById(it.product_id);
+        const hasPid = it.product_id != null && Number(it.product_id) > 0;
+        const pr = hasPid ? prodById(it.product_id) : null;
         const tx = taxes.find(x => Number(x.id) === Number(pr?.tax_id));
         const pct = docType === 'factura' ? (hasExplicitIva ? Math.max(0, Number(P.p_iva_percent || 0)) : Number(tx?.percent || 0)) : 0;
         const ls = Number(it.quantity) * Number(it.unit_price_usd);
         sub += ls; rawTax += ls * pct / 100;
         const isCombo = !!(pr?.is_combo && Array.isArray(pr.combo_items) && pr.combo_items.length);
-        const ucost = isCombo ? this.getComboCost(pr) : Number(pr?.auto_cost_usd ?? pr?.avg_cost_usd ?? pr?.manual_cost_usd ?? 0);
-        const itemRow = {id: this.nextId('sale_items'), sale_id: saleId, product_id: Number(it.product_id), quantity: Number(it.quantity), unit_price_usd: Number(it.unit_price_usd), unit_cost_usd: ucost, tax_percent: pct};
+        const ucost = hasPid ? (isCombo ? this.getComboCost(pr) : Number(pr?.auto_cost_usd ?? pr?.avg_cost_usd ?? pr?.manual_cost_usd ?? 0)) : 0;
+        const itemRow = {
+          id: this.nextId('sale_items'),
+          sale_id: saleId,
+          product_id: hasPid ? Number(it.product_id) : null,
+          custom_name: it.custom_name ? String(it.custom_name) : null,
+          quantity: Number(it.quantity),
+          unit_price_usd: Number(it.unit_price_usd),
+          unit_cost_usd: ucost,
+          tax_percent: pct
+        };
         if (isCombo) {
           itemRow.combo_snapshot = pr.combo_items.map(ci => ({product_id: Number(ci.product_id), quantity: Number(ci.quantity)}));
           for (const ci of itemRow.combo_snapshot) {
@@ -1009,7 +1021,7 @@ const LDB = {
             const cQty = this.r3(Number(it.quantity) * Number(ci.quantity));
             await this.addInvMove(ci.product_id, -cQty, cCost, 'venta', 'sale', saleId, 'Combo: ' + (pr?.name || ('#' + it.product_id)));
           }
-        } else {
+        } else if (hasPid) {
           await this.addInvMove(it.product_id, -Number(it.quantity), ucost, 'venta', 'sale', saleId, null);
         }
         newItems.push(itemRow);
@@ -1063,7 +1075,7 @@ const LDB = {
               const cQty = this.r3(Number(it.quantity) * Number(ci.quantity));
               await this.addInvMove(ci.product_id, cQty, cCost, 'devolucion', 'sale', id, 'Anulación venta #' + id + ' (Combo: ' + (pr?.name || ('#' + it.product_id)) + ')');
             }
-          } else {
+          } else if (it.product_id != null && Number(it.product_id) > 0) {
             await this.addInvMove(it.product_id, Number(it.quantity), it.unit_cost_usd, 'devolucion', 'sale', id, 'Anulación venta #' + id);
           }
         }
@@ -1725,7 +1737,7 @@ const LDB = {
         return {data: true, error: null};
       }
 
-      const movTables = ['sales', 'sale_items', 'sale_returns', 'sale_return_items', 'purchases', 'purchase_items', 'payments', 'expenses', 'account_movements', 'inventory_movements', 'inventory_adjustments', 'production_orders', 'production_items', 'quotes', 'quote_items', 'employee_advances', 'payroll_runs', 'payroll_items', 'cash_closings', 'audit_log'];
+      const movTables = ['sales', 'sale_items', 'sale_returns', 'sale_return_items', 'purchases', 'purchase_items', 'payments', 'expenses', 'account_movements', 'inventory_movements', 'inventory_adjustments', 'production_orders', 'production_items', 'quotes', 'quote_items', 'orders', 'order_items', 'employee_advances', 'payroll_runs', 'payroll_items', 'cash_closings', 'audit_log'];
       for (const t of movTables) { this.mem[t] = []; this.seqs[t] = 0; await this.idbPut('tables', [], t); }
       (this.mem.accounts || []).forEach(a => { a.opening_balance = 0; });
 

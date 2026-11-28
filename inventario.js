@@ -446,7 +446,7 @@ function prodForm(p, D, preSku = '') {
     <label>Impuesto<select name="tax_id">${opt(taxes, v('tax_id', defTax), 'id', t => `${t.name} (${qty(t.percent)}%)`)}</select></label>
     ${photos ? `<label>Foto<input name="photo" type="file" accept="image/*"></label>${p?.image_url ? `<img class="thumb big" src="${esc(p.image_url)}" alt=""><label class="chk"><input type="checkbox" name="rmphoto"> Quitar la foto actual</label>` : ''}` : ''}
     <p id="pMargin" class="mut"></p>
-    <div class="row"><button class="btn" type="submit">Guardar producto</button>${p ? '<button type="button" class="btn ghost" id="pfDel">Desactivar</button>' : ''}</div></form>`);
+    <div class="row"><button class="btn" type="submit">Guardar producto</button>${p && !p.is_service && typeof hasMod === 'function' && hasMod('labels') ? '<button type="button" class="btn ghost" id="pfEtq">Etiqueta / Código</button>' : ''}${p ? '<button type="button" class="btn ghost" id="pfDel">Desactivar</button>' : ''}</div></form>`);
   const f = $('#pf'), el = f.elements;
   wireInlineCategoryCreator({
     btn: $('#pfNewCat'),
@@ -550,6 +550,7 @@ function prodForm(p, D, preSku = '') {
       closeSheet(); toast('Producto guardado'); render();
     });
   };
+  if (p && $('#pfEtq')) $('#pfEtq').onclick = () => run(() => openQuickLabelSheet(p));
   if (p) $('#pfDel').onclick = () => run(async () => {
     if (!confirm('¿Desactivar este producto?')) return;
     await q(db.from('products').update({active: false}).eq('id', p.id)); closeSheet(); toast('Producto desactivado'); render();
@@ -671,7 +672,7 @@ function comboForm(combo, D, preSku = '') {
     <label>Precio fijo de venta del combo (${esc(curLabel())})<input name="price" type="number" step="0.01" min="0" value="${v('sale_price_usd', 0)}" required></label>
     <label>Impuesto<select name="tax_id">${opt(taxes, v('tax_id', defTax), 'id', t => `${t.name} (${qty(t.percent)}%)`)}</select></label>
     ${photos ? `<label>Foto del combo<input name="photo" type="file" accept="image/*"></label>${combo?.image_url ? `<img class="thumb big" src="${esc(combo.image_url)}" alt=""><label class="chk"><input type="checkbox" name="rmphoto"> Quitar la foto actual</label>` : ''}` : ''}
-    <div class="row"><button class="btn" type="submit">Guardar combo</button>${combo ? '<button type="button" class="btn ghost" id="cbfDel">Desactivar</button>' : ''}</div>
+    <div class="row"><button class="btn" type="submit">Guardar combo</button>${combo && typeof hasMod === 'function' && hasMod('labels') ? '<button type="button" class="btn ghost" id="cbfEtq">Etiqueta / Código</button>' : ''}${combo ? '<button type="button" class="btn ghost" id="cbfDel">Desactivar</button>' : ''}</div>
   </form>`);
 
   const f = $('#cbf'), el = f.elements;
@@ -803,6 +804,7 @@ function comboForm(combo, D, preSku = '') {
       closeSheet(); toast(combo ? 'Combo actualizado' : 'Combo creado'); render();
     });
   };
+  if (combo && $('#cbfEtq')) $('#cbfEtq').onclick = () => run(() => openQuickLabelSheet(combo));
   if (combo) $('#cbfDel').onclick = () => run(async () => {
     if (!confirm('¿Desactivar este combo? Los productos individuales que lo integran no se verán afectados.')) return;
     await q(db.from('products').update({active: false}).eq('id', combo.id)); closeSheet(); toast('Combo desactivado'); render();

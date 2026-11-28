@@ -36,12 +36,12 @@ async function vData() {
 async function saleDetail(id) {
   const [s, items, pays, ret, rit] = await Promise.all([
     q(db.from('sales').select('*, parties(name,phone)').eq('id', id).single()),
-    q(db.from('sale_items').select('product_id,quantity,unit_price_usd,unit_cost_usd,tax_percent,products(name,sku)').eq('sale_id', id).order('id')),
+    q(db.from('sale_items').select('product_id,custom_name,quantity,unit_price_usd,unit_cost_usd,tax_percent,products(name,sku)').eq('sale_id', id).order('id')),
     q(db.from('payments').select('method,currency,amount,amount_usd,reference,account_id,accounts(name)').eq('sale_id', id).order('id')),
     q(db.from('sale_returns').select('total_usd,refund_usd').eq('sale_id', id).eq('status', 'activa')),
     q(db.from('sale_return_items').select('quantity,unit_price_usd,unit_cost_usd,restock,sale_returns!inner(sale_id,status)').eq('sale_returns.sale_id', id).eq('sale_returns.status', 'activa'))
   ]);
-  return {s, items: items.map(i => ({...i, name: i.products?.name, sku: i.products?.sku || ''})), pays, ret, rit};
+  return {s, items: items.map(i => ({...i, name: i.custom_name || i.products?.name || 'Artículo', sku: i.products?.sku || ''})), pays, ret, rit};
 }
 
 // ---------- Ticket ----------
@@ -63,10 +63,13 @@ async function showTicket(id) {
   const text = docText(doc, set);
   const blobP = docBlob(doc, text, set).catch(() => null);
   const dispId = Number(id) < 0 ? 'LOC-' + Math.abs(id) + ' (Sin conexión)' : '#' + id;
-  openSheet('Ticket de venta ' + dispId, `<div id="tPrev"><pre class="ticket">${esc(text)}</pre></div><div class="row"><button class="btn" id="tI">Enviar como foto</button><button class="btn ghost" id="tD">Descargar foto</button></div>
-    <div class="row"><button class="btn ghost" id="tP">Imprimir</button><button class="btn ghost" id="tW">Enviar como texto</button></div>`);
+  const rawbtOn = typeof hasMod === 'function' && hasMod('rawbt');
+  openSheet('Ticket de venta ' + dispId, `<div id="tPrev"><pre class="ticket">${esc(text)}</pre></div>
+    <div class="row"><button class="btn" id="tI">Enviar como foto</button>${rawbtOn ? '<button class="btn ghost" id="tRaw">Térmica (RawBT)</button>' : '<button class="btn ghost" id="tD">Descargar foto</button>'}</div>
+    <div class="row"><button class="btn ghost" id="tP">Imprimir</button>${rawbtOn ? '<button class="btn ghost" id="tD">Descargar foto</button>' : ''}<button class="btn ghost" id="tW">${rawbtOn ? 'WhatsApp texto' : 'Enviar como texto'}</button></div>`);
   showPrev(blobP, set);
   $('#tI').onclick = () => run(async () => shareImage(await blobP, d.s.parties?.phone, 'ticket-' + id));
+  if ($('#tRaw')) $('#tRaw').onclick = () => printRawBT(doc, set);
   $('#tD').onclick = () => run(async () => { const b = await blobP; if (!b) throw new Error('No se pudo crear la imagen'); downloadBlob(b, 'ticket-' + id + '.png'); });
   $('#tP').onclick = () => printTicket(text, set.ticket_paper);
   $('#tW').onclick = () => window.open(`https://wa.me/${waDigits(d.s.parties?.phone)}?text=${encodeURIComponent(text)}`, '_blank');
@@ -75,9 +78,11 @@ async function showTicket(id) {
 // ---------- Nueva venta / corrección ----------
 async function viewVenta() {
   const fq = V.fromQ; V.fromQ = null;
+  const ford = V.fromOrd; V.fromOrd = null;
   const dup = V.dup; V.dup = null;
   const prePid = V.prePid; V.prePid = null;
   const D = await vData(), old = V.edit ? await saleDetail(V.edit) : null, qd = fq ? await quoteDetail(fq) : null;
+  const od = (ford && typeof orderDetail === 'function') ? await orderDetail(ford) : null;
   const pm = Object.fromEntries(D.products.map(p => [p.id, p]));
   if (old) {
     old.items.forEach(i => {
@@ -108,11 +113,26 @@ async function viewVenta() {
       pct: Number(p?.taxes?.percent || 0)
     };
   };
+  const customLine = (name, qv, pr) => ({
+    pid: null, name: name || 'Artículo personalizado', unit: 'und', qty: qv, price: pr, price0: pr,
+    svc: true, untr: true, combo: false, citems: [], custom: true, expiry_date: null, pct: 0
+  });
   const srcOrder = old || qd || dup;
-  V.cart = srcOrder ? srcOrder.items.filter(i => pm[i.product_id]).map(i => line(i.product_id, +i.quantity, dup ? null : +i.unit_price_usd)) : (prePid && pm[prePid] ? [line(prePid, 1)] : []);
+  if (od) {
+    V.cart = od.items.map(i => (i.product_id && pm[i.product_id]) ? line(i.product_id, +i.quantity, +i.unit_price_usd) : customLine(i.name, +i.quantity, +i.unit_price_usd));
+  } else if (srcOrder) {
+    V.cart = srcOrder.items.map(i => (i.product_id && pm[i.product_id]) ? line(i.product_id, +i.quantity, dup ? null : +i.unit_price_usd) : (i.custom_name ? customLine(i.custom_name, +i.quantity, +i.unit_price_usd) : null)).filter(Boolean);
+  } else {
+    V.cart = (prePid && pm[prePid]) ? [line(prePid, 1)] : [];
+  }
   V.pays = old ? old.pays.map(p => ({acc: p.account_id, method: p.method, amount: +p.amount, ref: p.reference || ''})) : [];
 
-  $('#view').innerHTML = `${V.edit ? `<div class="card title-row"><b>Corrigiendo la venta #${V.edit}</b><button class="lnk" id="vCancel">Cancelar</button></div>` : ''}
+  const ordBanner = od ? `<div class="card" style="border-left:5px solid var(--pri);padding:.8rem 1rem">
+    <b>Facturando Pedido #${od.o.id} · ${esc(od.o.customer_name || od.o.parties?.name || 'Cliente')}</b>
+    <small class="mut" style="display:block">${Number(od.o.deposit_usd || 0) > 0.005 ? `Abono registrado en el pedido: <b>${fmtCur(od.o.deposit_usd)}</b> · Saldo al entregar: <b>${fmtCur(Math.max(0, Number(od.o.total_usd || 0) - Number(od.o.deposit_usd || 0)))}</b>. Registra el cobro en Pagos abajo.` : 'Al guardar, el pedido se marcará automáticamente como Entregado.'}</small>
+  </div>` : '';
+
+  $('#view').innerHTML = `${V.edit ? `<div class="card title-row"><b>Corrigiendo la venta #${V.edit}</b><button class="lnk" id="vCancel">Cancelar</button></div>` : ''}${ordBanner}
   <div class="card stack">
     <div class="row0"><label style="flex:1">Cliente<select id="vCust"><option value="">Cliente general</option>${D.custs.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('')}</select></label><button class="btn ghost" type="button" id="vNewC" aria-label="Nuevo cliente">+</button></div>
     ${D.lists.length ? `<label>Lista de precios<select id="vList"><option value="">Precio normal (0%)</option>${D.lists.map(l => `<option value="${l.id}">${esc(l.name)} (${+l.adjust_percent > 0 ? '+' : ''}${qty(l.adjust_percent)}%)</option>`).join('')}</select></label>` : ''}
@@ -164,6 +184,10 @@ async function viewVenta() {
     $('#vDisc').value = src.s.discount_usd || 0;
     if (dup && src.s.notes) $('#vNotes').value = src.s.notes;
   }
+  if (od) {
+    if (od.o.customer_id) $('#vCust').value = String(od.o.customer_id);
+    $('#vNotes').value = [`Pedido #${od.o.id}`, od.o.notes].filter(Boolean).join(' · ');
+  }
   const syncIvaUI = () => { $('#vIvaPctW').classList.toggle('hidden', !$('#vIva').checked); };
   syncIvaUI();
   let dueTouched = !!(old && old.s.due_date);
@@ -202,6 +226,8 @@ async function viewVenta() {
         const av = comboAvailLocal(pr);
         const desc = comboDescLocal(pr);
         subTxt = `<span class="badge ok" style="font-size:.7rem;padding:.05rem .35rem">Combo</span> ${av === null ? 'Sin control de stock' : 'Armables: ' + qty(av)}${desc ? ' · ' + esc(desc) : ''}`;
+      } else if (c.custom) {
+        subTxt = 'Artículo personalizado de pedido';
       } else if (c.svc) {
         subTxt = 'Servicio (sin inventario)';
       } else if (c.untr) {
@@ -383,9 +409,10 @@ async function viewVenta() {
     }
     const id = await q(db.rpc('registrar_venta', {p_id: V.edit, p_sale_date: $('#vDate').value || caracasDate(), p_customer_id: +$('#vCust').value || null, p_doc_type: t.ivaOn ? 'factura' : 'nota_entrega', p_iva_percent: t.ivaOn ? t.ivaPct : 0, p_rate: t.rate, p_discount_usd: t.disc,
       p_due_date: $('#vDue').value || null, p_notes: $('#vNotes').value.trim() || null,
-      p_items: V.cart.map(c => ({product_id: c.pid, quantity: c.qty, unit_price_usd: c.price})),
+      p_items: V.cart.map(c => ({product_id: c.pid || null, custom_name: c.custom ? c.name : null, quantity: c.qty, unit_price_usd: c.price})),
       p_payments: pays.map(p => ({account_id: +p.acc, method: p.method, amount: p.amount, reference: p.ref}))}));
     if (fq) await q(db.from('quotes').update({status: 'convertida', sale_id: id}).eq('id', fq));
+    if (ford) await q(db.from('orders').update({status: 'entregado', sale_id: id}).eq('id', ford));
     toast(V.edit ? 'Venta corregida' : 'Venta registrada'); V.edit = null; await showTicket(id); render();
   });
 }

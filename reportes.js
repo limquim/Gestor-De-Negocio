@@ -275,14 +275,16 @@ async function viewReportes() {
 // Tarjeta "Requiere atención" para la pantalla de inicio
 async function alertasHtml() {
   const hoy = caracasDate(), curYm = hoy.slice(0, 7), curDay = parseInt(hoy.slice(8, 10), 10) || 1;
-  const [venc, prods, stockRaw, rate, accs, enp, recs] = await Promise.all([
+  const ordersOn = typeof hasMod === 'function' && hasMod('orders');
+  const [venc, prods, stockRaw, rate, accs, enp, recs, ords] = await Promise.all([
     q(db.from('ventas_resumen').select('id').eq('status', 'pendiente').lt('due_date', hoy)),
     db.from('products').select('id,sale_price_usd,avg_cost_usd,track_inventory,is_combo,expiry_date').eq('active', true).eq('is_service', false).then(r => r.error ? q(db.from('products').select('id,sale_price_usd,avg_cost_usd').eq('active', true).eq('is_service', false)) : r.data),
     q(db.from('stock_actual').select('product_id,bajo_minimo')),
     q(db.from('exchange_rates').select('rate_date').eq('currency', 'USD').order('rate_date', {ascending: false}).limit(1)),
     q(db.from('cuentas_saldo').select('name,balance').eq('active', true)),
     q(db.from('production_orders').select('id').eq('status', 'en_proceso')),
-    db.from('recurring_expenses').select('id,name,due_day,last_paid_ym').eq('active', true).then(r => r.error ? [] : (r.data || []))
+    db.from('recurring_expenses').select('id,name,due_day,last_paid_ym').eq('active', true).then(r => r.error ? [] : (r.data || [])),
+    ordersOn ? db.from('orders').select('id,delivery_date,status').then(r => r.error ? [] : (r.data || [])) : Promise.resolve([])
   ]);
   const untrSet = new Set(prods.filter(p => p.track_inventory === false || p.is_combo).map(p => Number(p.id)));
   const stock = stockRaw.filter(x => !untrSet.has(Number(x.product_id)));
@@ -299,7 +301,9 @@ async function alertasHtml() {
     });
   }
   const dueRec = recs.filter(x => x.last_paid_ym !== curYm && Number(x.due_day || 1) <= curDay + 3);
-  if (venc.length) A.push(['ventas', `${venc.length} ${venc.length === 1 ? 'venta vencida' : 'ventas vencidas'} por cobrar`]);
+  const dueOrds = ordersOn ? (ords || []).filter(o => ['pendiente', 'preparacion', 'listo'].includes(o.status) && o.delivery_date && o.delivery_date <= hoy) : [];
+  if (dueOrds.length) A.push(['ventas', `${dueOrds.length} ${dueOrds.length === 1 ? 'pedido por entregar hoy o atrasado' : 'pedidos por entregar hoy o atrasados'}`, '', "SUB.ven='pedidos';ORD.f='activos'"]);
+  if (venc.length) A.push(['ventas', `${venc.length} ${venc.length === 1 ? 'venta vencida' : 'ventas vencidas'} por cobrar`, '', "SUB.ven='cobrar'"]);
   if (dueRec.length && ['admin', 'contador'].includes(S.role || 'admin')) {
     A.push(['finanzas', `${dueRec.length} ${dueRec.length === 1 ? 'gasto fijo por vencer o vencido' : 'gastos fijos por vencer o vencidos'} este mes`, '', "SUB.fin='gastos'"]);
   }

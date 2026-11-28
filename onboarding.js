@@ -6,9 +6,12 @@ const DEFAULT_MODS = {
   production: false,
   planning: false,
   quotes: true,
+  orders: false,
   marketing: true,
   payroll: false,
-  catalog: true
+  catalog: true,
+  labels: false,
+  rawbt: false
 };
 
 const MOD_CATALOG = [
@@ -16,8 +19,11 @@ const MOD_CATALOG = [
   {k: 'purchases', name: 'Compras y proveedores', desc: 'Registro de compras, reposición sugerida y cuentas por pagar'},
   {k: 'production', name: 'Producción y fórmulas', desc: 'Recetas, lotes fabricados, insumos sin inventario y hoja de lote'},
   {k: 'planning', name: 'Planificación de producción', desc: 'Calcula si te alcanza la materia prima para varios lotes a la vez'},
+  {k: 'orders', name: 'Pedidos y encargos por entregar', desc: 'Opcional: encargos con fecha de entrega, abonos, estados (Pendiente → Listo) y avisos por WhatsApp'},
   {k: 'quotes', name: 'Cotizaciones / Presupuestos', desc: 'Presupuestos profesionales en foto para convertir luego en venta'},
   {k: 'catalog', name: 'Catálogo de productos', desc: 'Genera catálogos en PDF, foto o texto WhatsApp por lista de precios'},
+  {k: 'labels', name: 'Etiquetas y códigos de barras', desc: 'Opcional: genera etiquetas de precio y códigos Code 128 para hoja A4 o rollo térmico'},
+  {k: 'rawbt', name: 'Impresión térmica Bluetooth (RawBT)', desc: 'Opcional: botón de impresión directa en 1 toque para impresoras térmicas de 58mm/80mm en Android'},
   {k: 'marketing', name: 'Marketing y seguimiento', desc: 'Clientes VIP, reactivación de inactivos y campañas por WhatsApp'},
   {k: 'payroll', name: 'Nómina y empleados', desc: 'Sueldos, adelantos y recibos de pago de tu personal'}
 ];
@@ -26,22 +32,22 @@ const BIZ_PROFILES = {
   tienda: {
     name: 'Tienda, Comercio o Bodega',
     desc: 'Compras y vendes productos terminados. Incluye inventario, catálogo, compras, escáner y caja.',
-    mods: {inventory: true, purchases: true, production: false, planning: false, quotes: true, marketing: true, payroll: false, catalog: true}
+    mods: {inventory: true, purchases: true, production: false, planning: false, quotes: true, orders: false, marketing: true, payroll: false, catalog: true, labels: false, rawbt: false}
   },
   fabricante: {
     name: 'Fabricante, Repostería o Taller',
-    desc: 'Elaboras tus propios productos con recetas o fórmulas (comida, limpieza, artesanía, textil).',
-    mods: {inventory: true, purchases: true, production: true, planning: true, quotes: true, marketing: true, payroll: false, catalog: true}
+    desc: 'Elaboras tus propios productos con recetas o fórmulas y gestionas pedidos por encargo.',
+    mods: {inventory: true, purchases: true, production: true, planning: true, quotes: true, orders: true, marketing: true, payroll: false, catalog: true, labels: false, rawbt: false}
   },
   servicios: {
     name: 'Servicios o Independiente',
     desc: 'Barbería, técnico, delivery, diseño, asesorías. Enfocado en cobros, cotizaciones, gastos y clientes.',
-    mods: {inventory: false, purchases: false, production: false, planning: false, quotes: true, marketing: true, payroll: false, catalog: false}
+    mods: {inventory: false, purchases: false, production: false, planning: false, quotes: true, orders: false, marketing: true, payroll: false, catalog: false, labels: false, rawbt: false}
   },
   personalizado: {
     name: 'Personalizado',
     desc: 'Tú eliges exactamente qué módulos activar desde el primer momento.',
-    mods: {inventory: true, purchases: true, production: true, planning: false, quotes: true, marketing: true, payroll: false, catalog: true}
+    mods: {inventory: true, purchases: true, production: true, planning: false, quotes: true, orders: false, marketing: true, payroll: false, catalog: true, labels: false, rawbt: false}
   }
 };
 
@@ -472,7 +478,8 @@ function openTutorial(startStep = 0) {
         'Toca un <b>producto rápido</b>, búscalo por nombre o usa el ícono de cámara para <b>escanear su código de barras</b>.',
         'Toca una cuenta en <b>Cobro rápido</b> para marcar el pago completo en 1 toque, o agrega pagos parciales/mixtos.',
         'Si no agregas pago, la venta queda automáticamente en <b>Por cobrar (crédito)</b>.',
-        'Al guardar, envía el ticket como <b>foto o texto por WhatsApp</b> o imprímelo.'
+        'Al guardar, envía el ticket como <b>foto o texto por WhatsApp</b> o imprímelo (si usas impresora térmica Bluetooth, activa <b>RawBT</b> en Configuración &gt; Módulos).',
+        '<b>¿Trabajas por encargo?</b> Activa <b>Pedidos y encargos</b> en Configuración &gt; Módulos para llevar abonos, fechas de entrega y estados.'
       ],
       action: {label: 'Ir a Nueva venta', fn: () => { SUB.ven = 'nueva'; go('ventas'); }}
     },
@@ -484,7 +491,7 @@ function openTutorial(startStep = 0) {
       tips: [
         '<b>Combos (Inventario &gt; Combos):</b> agrupa varios productos en un precio promocional; al venderse, el stock de cada producto se descuenta solo.',
         '<b>Precios (Inventario &gt; Precios):</b> sube precios por porcentaje o fija un margen objetivo para varios productos a la vez.',
-        '<b>Catálogo:</b> genera un catálogo visual profesional para compartir por WhatsApp.'
+        '<b>Catálogo y Etiquetas:</b> comparte catálogos profesionales por WhatsApp y, si necesitas códigos de barras propios, activa <b>Etiquetas</b> en Configuración &gt; Módulos.'
       ],
       action: {label: 'Ir a Combos', fn: () => { SUB.inv = 'combos'; go('inventario'); }}
     },

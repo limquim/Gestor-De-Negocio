@@ -100,8 +100,9 @@ views.inventario = page('Inventario', async () => {
     await viewProductos2();
     return;
   }
-  const subs = {productos: 'Productos', stock: 'Existencias', combos: 'Combos', precios: 'Precios', catalogo: 'Catálogo', ajuste: 'Ajuste masivo'};
-  const fns = {productos: viewProductos2, stock: viewInventario2, combos: viewCombos, precios: viewPreciosMasivo, catalogo: viewCatalogo, ajuste: viewAjusteMasivo};
+  const subs = {productos: 'Productos', stock: 'Existencias', combos: 'Combos', etiquetas: 'Etiquetas', precios: 'Precios', catalogo: 'Catálogo', ajuste: 'Ajuste masivo'};
+  const fns = {productos: viewProductos2, stock: viewInventario2, combos: viewCombos, etiquetas: viewEtiquetas, precios: viewPreciosMasivo, catalogo: viewCatalogo, ajuste: viewAjusteMasivo};
+  if (!hasMod('labels')) delete subs.etiquetas;
   if (!hasMod('catalog')) delete subs.catalogo;
   await withSubs('inv', subs, fns)();
 }, false);
@@ -109,8 +110,9 @@ views.inventario = page('Inventario', async () => {
 views.compras = page('Compras', withSubs('com', {nueva: 'Nueva compra', sugerida: 'Reposición sugerida', historial: 'Historial', pagar: 'Por pagar'}, {nueva: viewCompra, sugerida: viewSugerida, historial: viewHistCompras, pagar: viewDeudasProv}));
 
 views.ventas = page('Ventas', async () => {
-  const subs = {nueva: 'Nueva venta', cotizaciones: 'Cotizaciones', historial: 'Historial', devoluciones: 'Devoluciones', cobrar: 'Por cobrar'};
-  const fns = {nueva: viewVenta, cotizaciones: viewCotizaciones, historial: viewHistVentas, devoluciones: viewDevoluciones, cobrar: viewDeudas};
+  const subs = {nueva: 'Nueva venta', pedidos: 'Pedidos', cotizaciones: 'Cotizaciones', historial: 'Historial', devoluciones: 'Devoluciones', cobrar: 'Por cobrar'};
+  const fns = {nueva: viewVenta, pedidos: viewPedidos, cotizaciones: viewCotizaciones, historial: viewHistVentas, devoluciones: viewDevoluciones, cobrar: viewDeudas};
+  if (!hasMod('orders')) delete subs.pedidos;
   if (!hasMod('quotes')) delete subs.cotizaciones;
   if (S.role === 'vendedor' && !staffCan('anular_corregir')) delete subs.devoluciones;
   await withSubs('ven', subs, fns)();
