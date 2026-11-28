@@ -31,7 +31,7 @@ async function loadActiveAccounts() {
 const MOVK = {
   cobro: 'Cobro', anulacion: 'Anulación', pago: 'Pago', gasto: 'Gasto',
   transferencia: 'Transferencia', ajuste: 'Ajuste', aporte: 'Aporte de capital',
-  retiro: 'Retiro del dueño', nomina: 'Nómina', adelanto: 'Adelanto', reembolso: 'Reembolso'
+  retiro: 'Retiro del dueño', nomina: 'Nómina', adelanto: 'Adelanto', reembolso: 'Reembolso', prestamo: 'Préstamo'
 };
 const CC = {date: '', counts: {}, note: '', apply: false};
 const GF = {q: '', acc: 'all', type: 'all'};
@@ -772,9 +772,10 @@ async function viewGastos() {
   $('#gL').onclick = (e) => {
     const b = e.target.closest('[data-id]'); if (!b) return;
     const g = rows.find(x => String(x.id) === b.dataset.id);
-    openSheet('Gasto #' + g.id, `<p><b>${esc(g.description || g.expense_types?.name)}</b><br>${g.expense_date} | ${esc(g.accounts?.name || 'Sin cuenta')}<br>${money(g.amount, g.currency)} (${fmtCur(g.amount_usd)})</p>
-      ${g.status === 'anulado' ? '<p class="warn">Gasto anulado</p>' : '<div class="row"><button class="btn ghost" id="gAnu">Anular gasto</button></div>'}`);
-    if (g.status !== 'anulado') $('#gAnu').onclick = () => run(async () => {
+    const fromLoan = !!g.loan_payment_id;
+    openSheet('Gasto #' + g.id, `<p><b>${esc(g.description || g.expense_types?.name)}</b><br>${g.expense_date} | ${esc(g.accounts?.name || (fromLoan ? 'Registrado en Préstamos' : 'Sin cuenta'))}<br>${money(g.amount, g.currency)} (${fmtCur(g.amount_usd)})</p>
+      ${g.status === 'anulado' ? '<p class="warn">Gasto anulado</p>' : fromLoan ? '<p class="mut">Este gasto corresponde a intereses de una cuota de préstamo. Para revertirlo, anula la cuota en <b>Finanzas &gt; Préstamos</b>.</p>' : '<div class="row"><button class="btn ghost" id="gAnu">Anular gasto</button></div>'}`);
+    if (g.status !== 'anulado' && !fromLoan && $('#gAnu')) $('#gAnu').onclick = () => run(async () => {
       if (!confirm('¿Anular este gasto? El dinero vuelve a la cuenta.')) return;
       await q(db.rpc('anular_gasto', {p_id: g.id})); closeSheet(); toast('Gasto anulado'); render();
     });

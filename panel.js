@@ -53,7 +53,8 @@ async function viewInicio() {
   const m0 = dstr(new Date(y, m, 1)), p0 = dstr(new Date(y, m - 1, 1)), p1 = dstr(new Date(y, m - 1, Math.min(dd, new Date(y, m, 0).getDate())));
   const d14 = dstr(new Date(y, m, dd - 13)), d30 = dstr(new Date(y, m, dd - 30));
   const rp = (a, b) => q(db.rpc('reporte_resumen', {p_from: a, p_to: b}));
-  const [h, mes, ant, quin, mesBs, accs, stockRaw, untrSet, alertHtml, vm, sold, set] = await Promise.all([
+  const loansOn = hasMod('loans');
+  const [h, mes, ant, quin, mesBs, accs, stockRaw, untrSet, alertHtml, vm, sold, set, loansAct] = await Promise.all([
     rp(hoy, hoy), rp(m0, hoy), rp(p0, p1), rp(d14, hoy),
     typeof calcHistoricalBs === 'function' ? calcHistoricalBs(m0, hoy) : Promise.resolve({ok: false, netaBs: 0}),
     q(db.from('cuentas_saldo').select('balance,currency').eq('active', true)),
@@ -62,14 +63,17 @@ async function viewInicio() {
     alertasHtml(),
     q(db.from('ventas_resumen').select('customer,total_usd').gte('sale_date', m0).neq('status', 'anulada')),
     q(db.from('sale_items').select('product_id,sales!inner(sale_date,status)').gte('sales.sale_date', d30).neq('sales.status', 'anulada')),
-    q(db.from('settings').select('*').eq('id', 1).single())
+    q(db.from('settings').select('*').eq('id', 1).single()),
+    loansOn ? db.from('loans').select('kind,principal_usd,paid_principal_usd,status').eq('status', 'activo').then(r => r.error ? [] : (r.data || [])) : Promise.resolve([])
   ]);
   const stock = stockRaw.filter(x => !untrSet.has(Number(x.product_id)));
   const U = (n) => fmtCur(n), ut = (r) => r.ingresos - r.costo_ventas - r.gastos;
   const dl = (a, b) => b ? (a - b) / Math.abs(b) * 100 : null, dtxt = (a, b, l) => { const v = dl(a, b); return v === null ? '' : `${v >= 0 ? '+' : ''}${fmt(v, 0)}% ${l}`; };
   const cajaUsdReal = accs.filter(x => x.currency === 'USD').reduce((a, x) => a + Number(x.balance || 0), 0);
   const cajaVesReal = accs.filter(x => x.currency !== 'USD').reduce((a, x) => a + Number(x.balance || 0), 0);
-  const caja = cajaUsdReal + (S.rate ? cajaVesReal / S.rate : 0), inv = stock.reduce((a, x) => a + +x.valor_usd, 0), cap = caja + inv + mes.por_cobrar - mes.por_pagar;
+  const loansPay = (loansAct || []).filter(l => l.kind === 'recibido').reduce((s, l) => s + Math.max(0, Number(l.principal_usd || 0) - Number(l.paid_principal_usd || 0)), 0);
+  const loansRec = (loansAct || []).filter(l => l.kind === 'otorgado').reduce((s, l) => s + Math.max(0, Number(l.principal_usd || 0) - Number(l.paid_principal_usd || 0)), 0);
+  const caja = cajaUsdReal + (S.rate ? cajaVesReal / S.rate : 0), inv = stock.reduce((a, x) => a + +x.valor_usd, 0), cap = caja + inv + mes.por_cobrar + loansRec - mes.por_pagar - loansPay;
   const U1 = ut(mes), mg = mes.ingresos > 0 ? U1 / mes.ingresos * 100 : 0, gHoy = h.ingresos - h.costo_ventas, bajos = stock.filter(x => x.bajo_minimo).length;
   const bar = (lab, val, max, right) => `<div class="bl"><div class="rl" style="border:0;padding:.2rem 0"><span>${esc(lab)}</span><b>${right}</b></div><div class="bar w"><i style="width:${max > 0 ? Math.max(2, val / max * 100) : 0}%"></i></div></div>`;
   const byDay = Object.fromEntries(quin.por_dia.map(x => [x.dia, +x.total])), days = Array.from({length: 14}, (_, i) => dstr(new Date(y, m, dd - 13 + i))), maxD = Math.max(0, ...days.map(x => byDay[x] || 0));
@@ -151,6 +155,7 @@ async function viewInicio() {
   <div class="stats"><button class="stat" data-go="finanzas"><span>Disponible en cuentas</span><b>${U(caja)}</b><span>${S.bimoneda !== false ? `${fmtCur(cajaUsdReal)} + ${fmt(cajaVesReal)} Bs` : 'En cuentas activas'}</span></button>
     <button class="stat warn" id="pPend"><span>Te deben (por cobrar)</span><b>${U(mes.por_cobrar)}</b><span>${S.rate ? fmt(mes.por_cobrar * S.rate) + ' Bs a la tasa de hoy' : ''}</span></button>
     ${hasMod('purchases') ? `<button class="stat" id="pPag"><span>Debes (por pagar)</span><b>${U(mes.por_pagar)}</b><span>${S.rate ? fmt(mes.por_pagar * S.rate) + ' Bs a la tasa de hoy' : ''}</span></button>` : ''}
+    ${loansOn && loansPay > 0.01 ? `<button class="stat bad" data-go="finanzas" onclick="SUB.fin='prestamos'"><span>Préstamos por pagar</span><b>${U(loansPay)}</b><span>${S.bimoneda !== false && S.rate ? fmtSec(loansPay * S.rate) + ' hoy' : 'Ver cuotas en Finanzas'}</span></button>` : ''}
     <button class="stat" data-go="apertura"><span>Capital del negocio</span><b>${U(cap)}</b><span>${Number(set.capital_inicial_usd || 0) > 0 ? 'Inicial: ' + U(set.capital_inicial_usd) + ' | ' : ''}Toca para editar saldos iniciales</span></button></div>
   <div class="card"><h2>Ventas de los últimos 14 días</h2><div class="dayb" id="pDayChart">${days.map(x => `<i data-day="${x}" data-val="${byDay[x] || 0}" style="height:${Math.max(3, (byDay[x] || 0) / (maxD || 1) * 100)}%" title="${dmy(x)}: ${fmtCur(byDay[x] || 0)}"></i>`).join('')}</div>
     <p class="mut" id="pDayInfo">${dmy(days[0])} a ${dmy(days[13])} · Total: <b>${U(quin.ingresos)}</b> · <small>Toca una barra para ver ese día</small></p></div>

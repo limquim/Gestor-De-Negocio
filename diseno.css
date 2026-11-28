@@ -192,3 +192,7 @@ input[type=color]{padding:.2rem;cursor:pointer}
 .ord-flow{display:grid;grid-template-columns:repeat(4,1fr);gap:.35rem}
 .ord-step{padding:.48rem .3rem;border-radius:10px;border:1px solid var(--line);background:var(--bg);color:var(--mut);font:inherit;font-size:.76rem;font-weight:700;cursor:pointer;text-align:center}
 .ord-step.on{background:var(--pri);border-color:var(--pri);color:var(--pri-ink)}
+
+/* Préstamos bancarios y de caja */
+.loan-bar{width:100%;height:7px;border-radius:99px;background:var(--line);overflow:hidden;margin:.35rem 0}
+.loan-bar i{display:block;height:100%;background:var(--ok);border-radius:99px;transition:width .3s ease}

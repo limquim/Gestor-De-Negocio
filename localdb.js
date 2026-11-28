@@ -11,7 +11,7 @@ const LDB_BASE_TABLES = [
   'quotes', 'quote_items', 'orders', 'order_items', 'sales', 'sale_items', 'sale_returns', 'sale_return_items',
   'purchases', 'purchase_items', 'payments', 'expenses', 'recurring_expenses',
   'account_movements', 'inventory_movements', 'inventory_adjustments',
-  'cash_closings', 'payroll_runs', 'payroll_items', 'audit_log'
+  'cash_closings', 'payroll_runs', 'payroll_items', 'loans', 'loan_payments', 'audit_log'
 ];
 
 const LDB_REL = {
@@ -36,7 +36,9 @@ const LDB_REL = {
   production_items: {products: ['product_id', 'id'], production_orders: ['production_id', 'id']},
   production_orders: {products: ['product_id', 'id']},
   recipes: {recipe_items: ['id', 'recipe_id', true]},
-  sales: {parties: ['customer_id', 'id']}
+  sales: {parties: ['customer_id', 'id']},
+  loans: {accounts: ['account_id', 'id']},
+  loan_payments: {loans: ['loan_id', 'id'], accounts: ['account_id', 'id']}
 };
 
 const LDB = {
@@ -1691,6 +1693,197 @@ const LDB = {
       return {data: {capital_inicial_usd: cap, caja_usd: this.r2(cajaUsd), inv_usd: this.r2(invUsd), cxc_usd: this.r2(cxcUsd), cxp_usd: this.r2(cxpUsd)}, error: null};
     }
 
+
+    // ---- PRÉSTAMOS DEL NEGOCIO (Recibidos de bancos/terceros y Otorgados desde caja) ----
+    if (fnName === 'registrar_prestamo') {
+      const lid = this.nextId('loans');
+      const kind = P.p_kind === 'otorgado' ? 'otorgado' : 'recibido';
+      const principal = this.r2(Math.max(0, Number(P.p_principal_usd || 0)));
+      const alreadyPaid = this.r2(Math.min(principal, Math.max(0, Number(P.p_already_paid_usd || 0))));
+      if (!(principal > 0)) return {data: null, error: new Error('El monto del préstamo debe ser mayor que cero')};
+      const lender = String(P.p_lender_name || '').trim() || (kind === 'recibido' ? 'Préstamo bancario' : 'Préstamo otorgado');
+      const moveCash = !!P.p_move_cash && !!P.p_account_id;
+      let initAmt = 0, initCur = null;
+      if (moveCash) {
+        const acc = accById(P.p_account_id);
+        if (!acc) return {data: null, error: new Error('Cuenta no encontrada')};
+        initCur = acc.currency || 'USD';
+        const netCap = Math.max(0, principal - alreadyPaid);
+        initAmt = initCur === 'VES' ? this.r2(netCap * rate) : this.r2(netCap);
+        const signed = kind === 'recibido' ? initAmt : -initAmt;
+        await this.addAccMove(acc.id, signed, 'prestamo', (kind === 'recibido' ? 'Desembolso préstamo: ' : 'Préstamo otorgado: ') + lender);
+      }
+      const rem = this.r2(principal - alreadyPaid);
+      const row = {
+        id: lid,
+        kind,
+        lender_name: lender,
+        phone: P.p_phone ? String(P.p_phone).trim() : null,
+        principal_usd: principal,
+        paid_principal_usd: alreadyPaid,
+        paid_interest_usd: 0,
+        installment_usd: this.r2(Math.max(0, Number(P.p_installment_usd || 0))),
+        total_installments: Math.max(0, parseInt(P.p_total_installments || 0, 10) || 0),
+        paid_installments: Math.max(0, parseInt(P.p_paid_installments || 0, 10) || 0),
+        frequency: P.p_frequency || 'mensual',
+        start_date: P.p_start_date || today,
+        next_due_date: rem <= 0.01 ? null : (P.p_next_due_date || null),
+        account_id: P.p_account_id ? Number(P.p_account_id) : null,
+        moved_cash_on_create: moveCash,
+        initial_cash_amount: initAmt,
+        initial_cash_currency: initCur,
+        status: rem <= 0.01 ? 'pagado' : 'activo',
+        notes: P.p_notes ? String(P.p_notes).trim() : null,
+        created_at: now
+      };
+      const loans = this.mem.loans || [];
+      loans.unshift(row);
+      await this.saveTable('loans', loans);
+      await this.addAudit('INSERT', 'loans', lid, null, row);
+      return {data: lid, error: null};
+    }
+
+    if (fnName === 'registrar_cuota_prestamo') {
+      const lid = Number(P.p_loan_id);
+      const loan = (this.mem.loans || []).find(x => Number(x.id) === lid);
+      if (!loan || loan.status === 'anulado') return {data: null, error: new Error('Préstamo no encontrado o anulado')};
+      const acc = accById(P.p_account_id);
+      if (!acc) return {data: null, error: new Error('Selecciona una cuenta válida')};
+
+      const capUsd = this.r2(Math.max(0, Number(P.p_principal_usd || 0)));
+      const intUsd = this.r2(Math.max(0, Number(P.p_interest_usd || 0)));
+      const totUsd = this.r2(capUsd + intUsd);
+      if (!(totUsd > 0)) return {data: null, error: new Error('Indica el monto de abono a capital y/o intereses')};
+
+      const remBefore = this.r2(Math.max(0, Number(loan.principal_usd || 0) - Number(loan.paid_principal_usd || 0)));
+      if (capUsd > remBefore + 0.02) {
+        return {data: null, error: new Error(`El abono a capital (${capUsd}) supera el saldo pendiente (${remBefore}). Coloca el excedente en Intereses si aplica.`)};
+      }
+
+      const cur = acc.currency || 'USD';
+      const amtOrig = cur === 'VES' ? this.r2(totUsd * rate) : totUsd;
+      const payDate = P.p_date || today;
+      const payId = this.nextId('loan_payments');
+
+      // Movimiento real de dinero en la cuenta
+      const signedCash = loan.kind === 'recibido' ? -amtOrig : amtOrig;
+      const mvNote = (loan.kind === 'recibido' ? 'Cuota préstamo: ' : 'Cobro préstamo: ') + loan.lender_name + (P.p_reference ? ' (Ref: ' + P.p_reference + ')' : '');
+      await this.addAccMove(acc.id, signedCash, 'prestamo', mvNote);
+
+      // Si es préstamo recibido con intereses, registrar SOLO el interés como gasto financiero (sin descontar caja dos veces)
+      let expenseId = null;
+      if (loan.kind === 'recibido' && intUsd > 0.004) {
+        const etypes = this.mem.expense_types || [];
+        let intType = etypes.find(t => /inter[eé]s/i.test(String(t.name || '')) && t.active !== false);
+        if (!intType) {
+          intType = {id: this.nextId('expense_types'), name: 'Intereses de préstamos', is_fixed: false, in_sales_cost: false, active: true};
+          etypes.push(intType);
+          await this.saveTable('expense_types', etypes, false);
+        }
+        expenseId = this.nextId('expenses');
+        const exps = this.mem.expenses || [];
+        exps.unshift({
+          id: expenseId,
+          expense_type_id: intType.id,
+          description: `Intereses préstamo #${lid} (${loan.lender_name})`,
+          account_id: null,
+          currency: 'USD',
+          amount: intUsd,
+          amount_usd: intUsd,
+          exchange_rate: rate,
+          expense_date: payDate,
+          status: 'registrado',
+          loan_id: lid,
+          loan_payment_id: payId,
+          created_at: now
+        });
+        await this.saveTable('expenses', exps, false);
+      }
+
+      const payRow = {
+        id: payId,
+        loan_id: lid,
+        payment_date: payDate,
+        account_id: acc.id,
+        currency: cur,
+        exchange_rate: rate,
+        principal_usd: capUsd,
+        interest_usd: intUsd,
+        total_usd: totUsd,
+        amount_orig: amtOrig,
+        expense_id: expenseId,
+        reference: P.p_reference ? String(P.p_reference).trim() : null,
+        note: P.p_note ? String(P.p_note).trim() : null,
+        status: 'activo',
+        created_at: now
+      };
+      const lp = this.mem.loan_payments || [];
+      lp.unshift(payRow);
+      await this.saveTable('loan_payments', lp, false);
+
+      loan.paid_principal_usd = this.r2(Math.min(Number(loan.principal_usd || 0), Number(loan.paid_principal_usd || 0) + capUsd));
+      loan.paid_interest_usd = this.r2(Number(loan.paid_interest_usd || 0) + intUsd);
+      loan.paid_installments = (Number(loan.paid_installments) || 0) + 1;
+      const remAfter = this.r2(Math.max(0, Number(loan.principal_usd || 0) - loan.paid_principal_usd));
+      if (remAfter <= 0.01) {
+        loan.status = 'pagado';
+        loan.next_due_date = null;
+      } else {
+        loan.status = 'activo';
+        if (P.p_next_due_date !== undefined) loan.next_due_date = P.p_next_due_date || null;
+      }
+      await this.saveTable('loans', this.mem.loans);
+      await this.addAudit('INSERT', 'loan_payments', payId, null, {loan_id: lid, principal_usd: capUsd, interest_usd: intUsd});
+      return {data: {payment_id: payId, remaining_usd: remAfter, status: loan.status}, error: null};
+    }
+
+    if (fnName === 'anular_cuota_prestamo') {
+      const pid = Number(P.p_id);
+      const p = (this.mem.loan_payments || []).find(x => Number(x.id) === pid);
+      if (!p || p.status === 'anulado') return {data: true, error: null};
+      const loan = (this.mem.loans || []).find(x => Number(x.id) === Number(p.loan_id));
+      p.status = 'anulado';
+      await this.saveTable('loan_payments', this.mem.loan_payments, false);
+
+      if (p.account_id && Number(p.amount_orig || 0) > 0) {
+        const revSigned = loan?.kind === 'recibido' ? Number(p.amount_orig) : -Number(p.amount_orig);
+        await this.addAccMove(p.account_id, revSigned, 'anulacion', 'Anulación cuota préstamo #' + (p.loan_id || ''));
+      }
+      if (p.expense_id) {
+        const ex = (this.mem.expenses || []).find(x => Number(x.id) === Number(p.expense_id));
+        if (ex) { ex.status = 'anulado'; await this.saveTable('expenses', this.mem.expenses, false); }
+      }
+      if (loan) {
+        loan.paid_principal_usd = this.r2(Math.max(0, Number(loan.paid_principal_usd || 0) - Number(p.principal_usd || 0)));
+        loan.paid_interest_usd = this.r2(Math.max(0, Number(loan.paid_interest_usd || 0) - Number(p.interest_usd || 0)));
+        loan.paid_installments = Math.max(0, (Number(loan.paid_installments) || 0) - 1);
+        if (loan.status === 'pagado') loan.status = 'activo';
+        await this.saveTable('loans', this.mem.loans);
+      }
+      return {data: true, error: null};
+    }
+
+    if (fnName === 'anular_prestamo') {
+      const lid = Number(P.p_id);
+      const loan = (this.mem.loans || []).find(x => Number(x.id) === lid);
+      if (!loan || loan.status === 'anulado') return {data: true, error: null};
+      // Revertir todas las cuotas activas primero
+      const activePays = (this.mem.loan_payments || []).filter(p => Number(p.loan_id) === lid && p.status !== 'anulado');
+      for (const p of activePays) {
+        await this.execRpc('anular_cuota_prestamo', {p_id: p.id});
+      }
+      // Revertir desembolso inicial si movió dinero de una cuenta
+      if (loan.moved_cash_on_create && loan.account_id && Number(loan.initial_cash_amount || 0) > 0) {
+        const revInit = loan.kind === 'recibido' ? -Number(loan.initial_cash_amount) : Number(loan.initial_cash_amount);
+        await this.addAccMove(loan.account_id, revInit, 'anulacion', 'Anulación préstamo #' + lid + ' (' + loan.lender_name + ')');
+      }
+      loan.status = 'anulado';
+      loan.next_due_date = null;
+      await this.saveTable('loans', this.mem.loans);
+      await this.addAudit('UPDATE', 'loans', lid, {status: 'activo'}, {status: 'anulado'});
+      return {data: true, error: null};
+    }
+
     // ---- BORRAR SOLO DATOS DE EJEMPLO ----
     if (fnName === 'borrar_ejemplos') {
       const isDemoName = (n) => /\(ejemplo\)/i.test(String(n || ''));
@@ -1737,7 +1930,7 @@ const LDB = {
         return {data: true, error: null};
       }
 
-      const movTables = ['sales', 'sale_items', 'sale_returns', 'sale_return_items', 'purchases', 'purchase_items', 'payments', 'expenses', 'account_movements', 'inventory_movements', 'inventory_adjustments', 'production_orders', 'production_items', 'quotes', 'quote_items', 'orders', 'order_items', 'employee_advances', 'payroll_runs', 'payroll_items', 'cash_closings', 'audit_log'];
+      const movTables = ['sales', 'sale_items', 'sale_returns', 'sale_return_items', 'purchases', 'purchase_items', 'payments', 'expenses', 'account_movements', 'inventory_movements', 'inventory_adjustments', 'production_orders', 'production_items', 'quotes', 'quote_items', 'orders', 'order_items', 'employee_advances', 'payroll_runs', 'payroll_items', 'cash_closings', 'loans', 'loan_payments', 'audit_log'];
       for (const t of movTables) { this.mem[t] = []; this.seqs[t] = 0; await this.idbPut('tables', [], t); }
       (this.mem.accounts || []).forEach(a => { a.opening_balance = 0; });
 

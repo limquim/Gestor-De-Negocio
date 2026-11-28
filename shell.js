@@ -135,6 +135,9 @@ views.finanzas = page('Finanzas', async () => {
     subs.cierre = 'Cierre de caja'; fns.cierre = viewCierreCaja;
     subs.gastos = 'Gastos'; fns.gastos = viewGastos;
   }
+  if (staffCan('finanzas_cuentas') && hasMod('loans')) {
+    subs.prestamos = 'Préstamos'; fns.prestamos = viewPrestamos;
+  }
   await withSubs('fin', subs, fns)();
 });
 views.contabilidad = page('Reportes', viewReportes);

@@ -82,7 +82,8 @@ async function viewReportes() {
     return isNaN(d.getTime()) ? s.slice(0, 10) : d.toLocaleDateString('en-CA', {timeZone: 'America/Caracas'});
   };
 
-  const [r, histBs, accs, stock, mv, allPays, set, catSales, prodsCat, catsList] = await Promise.all([
+  const loansOn = typeof hasMod === 'function' && hasMod('loans');
+  const [r, histBs, accs, stock, mv, allPays, set, catSales, prodsCat, catsList, loansList] = await Promise.all([
     q(db.rpc('reporte_resumen', {p_from: from, p_to: to})),
     calcHistoricalBs(from, to),
     q(db.from('cuentas_saldo').select('name,balance,currency').eq('active', true).order('id')),
@@ -92,8 +93,11 @@ async function viewReportes() {
     q(db.from('settings').select('business_name,business_phone').eq('id', 1).single()).catch(() => ({})),
     q(db.from('sales').select('id,subtotal_usd,discount_usd,status').gte('sale_date', from).lte('sale_date', to).neq('status', 'anulada')),
     q(db.from('products').select('id,category_id,avg_cost_usd,manual_cost_usd')),
-    q(db.from('product_categories').select('id,name'))
+    q(db.from('product_categories').select('id,name')),
+    loansOn ? db.from('loans').select('kind,principal_usd,paid_principal_usd,status').eq('status', 'activo').then(x => x.error ? [] : (x.data || [])) : Promise.resolve([])
   ]);
+  const loansPayUsd = (loansList || []).filter(l => l.kind === 'recibido').reduce((s, l) => s + Math.max(0, Number(l.principal_usd || 0) - Number(l.paid_principal_usd || 0)), 0);
+  const loansRecUsd = (loansList || []).filter(l => l.kind === 'otorgado').reduce((s, l) => s + Math.max(0, Number(l.principal_usd || 0) - Number(l.paid_principal_usd || 0)), 0);
 
   // Calcular ventas y utilidad agrupadas por categoría de producto
   const catNameById = new Map(catsList.map(c => [Number(c.id), c.name]));
@@ -166,7 +170,7 @@ async function viewReportes() {
   const loss5 = posVesUsd > 0 ? posVesUsd - (posVesUsd / 1.05) : 0;
   const loss10 = posVesUsd > 0 ? posVesUsd - (posVesUsd / 1.10) : 0;
 
-  const MV = {cobro: 'Cobros', anulacion: 'Anulaciones', pago: 'Pagos de compras', gasto: 'Gastos', transferencia: 'Transferencias', ajuste: 'Ajustes', aporte: 'Aportes de capital', retiro: 'Retiros del dueño', nomina: 'Nómina', adelanto: 'Adelantos', reembolso: 'Reembolsos'}, mvA = {};
+  const MV = {cobro: 'Cobros', anulacion: 'Anulaciones', pago: 'Pagos de compras', gasto: 'Gastos', transferencia: 'Transferencias', ajuste: 'Ajustes', aporte: 'Aportes de capital', retiro: 'Retiros del dueño', nomina: 'Nómina', adelanto: 'Adelantos', reembolso: 'Reembolsos', prestamo: 'Préstamos'}, mvA = {};
   mv.forEach(m => { const n = m.accounts?.name || '?', a = mvA[n] || (mvA[n] = {cur: m.accounts?.currency, k: {}, net: 0}), k = MV[m.kind] || m.kind; a.k[k] = (a.k[k] || 0) + +m.amount; a.net += +m.amount; });
   const cajaMov = `<div class="card"><h2>Movimiento de caja del período</h2>${Object.entries(mvA).map(([n, a]) => `<div class="mvb"><b>${esc(n)}</b>${Object.entries(a.k).map(([k, v]) => L(k, (v >= 0 ? '+' : '') + money(v, a.cur))).join('')}${L('Variación', money(a.net, a.cur), 'tot ' + sg(a.net))}</div>`).join('') || '<p class="mut">Sin movimientos de dinero en este período.</p>'}</div>`;
   const B = (lab, val, max, right) => `<div class="bl"><div class="rl" style="border:0;padding:.2rem 0"><span>${esc(lab)}</span><b>${right}</b></div><div class="bar w"><i style="width:${max > 0 ? Math.max(2, val / max * 100) : 0}%"></i></div></div>`;
@@ -216,8 +220,8 @@ async function viewReportes() {
 
   ${cajaMov}
 
-  <div class="card"><h2>Posición del negocio</h2>${L('Dinero en cuentas', U(caja))}${L('Inventario (a costo)', U(inv))}${L('Por cobrar a clientes', U(r.por_cobrar))}${L('Por pagar a proveedores', '-' + U(r.por_pagar))}
-    ${L('Capital del negocio', U(caja + inv + r.por_cobrar - r.por_pagar), 'tot ' + sg(caja + inv + r.por_cobrar - r.por_pagar))}</div>
+  <div class="card"><h2>Posición del negocio</h2>${L('Dinero en cuentas', U(caja))}${L('Inventario (a costo)', U(inv))}${L('Por cobrar a clientes', U(r.por_cobrar))}${loansRecUsd > 0.01 ? L('Préstamos otorgados (por cobrar)', U(loansRecUsd)) : ''}${L('Por pagar a proveedores', '-' + U(r.por_pagar))}${loansPayUsd > 0.01 ? L('Préstamos bancarios / por pagar', '-' + U(loansPayUsd)) : ''}
+    ${L('Capital del negocio', U(caja + inv + r.por_cobrar + loansRecUsd - r.por_pagar - loansPayUsd), 'tot ' + sg(caja + inv + r.por_cobrar + loansRecUsd - r.por_pagar - loansPayUsd))}</div>
   <div class="card"><h2>Gastos por tipo</h2>${r.gastos_por_tipo.map(x => B(x.tipo + (x.fijo ? ' (fijo)' : ''), +x.total, maxG, U(+x.total))).join('') || '<p class="mut">Sin gastos en este período.</p>'}
     ${pe ? `<p class="mut">Punto de equilibrio: para cubrir tus gastos fijos (${U(fijos)}) con tu margen de ${fmt(mb, 0)}% necesitas vender unos <b>${U(pe)}</b> en este período.</p>` : ''}</div>
   <div class="card"><h2>Rentabilidad por categoría</h2>${byCat.map(x => {
@@ -251,9 +255,11 @@ async function viewReportes() {
       '*POSICIÓN HOY*',
       S.bimoneda !== false ? `• En ${curLabel()}: ${fmtCur(cajaUsdReal)} | En ${secSym()}: ${fmtSec(cajaVesReal)} (${pctUsd}% ${curLabel()} / ${pctVes}% ${secSym()})` : `• En caja/bancos: ${fmtCur(caja)}`,
       `• Inventario: ${U(inv)} | Por cobrar: ${U(r.por_cobrar)} | Por pagar: ${U(r.por_pagar)}`,
-      `• Capital del negocio: ${U(caja + inv + r.por_cobrar - r.por_pagar)}`
+      loansPayUsd > 0.01 ? `• Préstamos por pagar: -${U(loansPayUsd)}` : '',
+      loansRecUsd > 0.01 ? `• Préstamos por cobrar: ${U(loansRecUsd)}` : '',
+      `• Capital del negocio: ${U(caja + inv + r.por_cobrar + loansRecUsd - r.por_pagar - loansPayUsd)}`
     ];
-    window.open(`https://wa.me/${waDigits(set?.business_phone || '')}?text=${encodeURIComponent(lines.join('\n'))}`, '_blank');
+    window.open(`https://wa.me/${waDigits(set?.business_phone || '')}?text=${encodeURIComponent(lines.filter(Boolean).join('\n'))}`, '_blank');
   };
   $('#rpCsv').onclick = () => run(async () => {
     const rows = await q(db.from('ventas_resumen').select('id,sale_date,doc_type,status,customer,total_usd,exchange_rate,paid_usd').gte('sale_date', from).lte('sale_date', to).order('id'));
@@ -276,7 +282,8 @@ async function viewReportes() {
 async function alertasHtml() {
   const hoy = caracasDate(), curYm = hoy.slice(0, 7), curDay = parseInt(hoy.slice(8, 10), 10) || 1;
   const ordersOn = typeof hasMod === 'function' && hasMod('orders');
-  const [venc, prods, stockRaw, rate, accs, enp, recs, ords] = await Promise.all([
+  const loansOn = typeof hasMod === 'function' && hasMod('loans');
+  const [venc, prods, stockRaw, rate, accs, enp, recs, ords, actLoans] = await Promise.all([
     q(db.from('ventas_resumen').select('id').eq('status', 'pendiente').lt('due_date', hoy)),
     db.from('products').select('id,sale_price_usd,avg_cost_usd,track_inventory,is_combo,expiry_date').eq('active', true).eq('is_service', false).then(r => r.error ? q(db.from('products').select('id,sale_price_usd,avg_cost_usd').eq('active', true).eq('is_service', false)) : r.data),
     q(db.from('stock_actual').select('product_id,bajo_minimo')),
@@ -284,7 +291,8 @@ async function alertasHtml() {
     q(db.from('cuentas_saldo').select('name,balance').eq('active', true)),
     q(db.from('production_orders').select('id').eq('status', 'en_proceso')),
     db.from('recurring_expenses').select('id,name,due_day,last_paid_ym').eq('active', true).then(r => r.error ? [] : (r.data || [])),
-    ordersOn ? db.from('orders').select('id,delivery_date,status').then(r => r.error ? [] : (r.data || [])) : Promise.resolve([])
+    ordersOn ? db.from('orders').select('id,delivery_date,status').then(r => r.error ? [] : (r.data || [])) : Promise.resolve([]),
+    loansOn ? db.from('loans').select('id,lender_name,next_due_date,status').eq('status', 'activo').then(r => r.error ? [] : (r.data || [])) : Promise.resolve([])
   ]);
   const untrSet = new Set(prods.filter(p => p.track_inventory === false || p.is_combo).map(p => Number(p.id)));
   const stock = stockRaw.filter(x => !untrSet.has(Number(x.product_id)));
@@ -306,6 +314,10 @@ async function alertasHtml() {
   if (venc.length) A.push(['ventas', `${venc.length} ${venc.length === 1 ? 'venta vencida' : 'ventas vencidas'} por cobrar`, '', "SUB.ven='cobrar'"]);
   if (dueRec.length && ['admin', 'contador'].includes(S.role || 'admin')) {
     A.push(['finanzas', `${dueRec.length} ${dueRec.length === 1 ? 'gasto fijo por vencer o vencido' : 'gastos fijos por vencer o vencidos'} este mes`, '', "SUB.fin='gastos'"]);
+  }
+  const dueLoans = loansOn && typeof loanDueInfo === 'function' ? (actLoans || []).filter(l => { const d = loanDueInfo(l); return d && d.state !== 'ok'; }) : [];
+  if (dueLoans.length && ['admin', 'contador'].includes(S.role || 'admin')) {
+    A.push(['finanzas', `${dueLoans.length} ${dueLoans.length === 1 ? 'cuota de préstamo vencida o próxima' : 'cuotas de préstamos vencidas o próximas'}`, '', "SUB.fin='prestamos'"]);
   }
   if (expiredCnt) A.push(['inventario', `${expiredCnt} ${expiredCnt === 1 ? 'producto vencido' : 'productos vencidos'} en inventario`, '', "SUB.inv='stock';INV.exp=true"]);
   if (soonExpCnt) A.push(['inventario', `${soonExpCnt} ${soonExpCnt === 1 ? 'producto próximo' : 'productos próximos'} a vencer (≤15 días)`, '', "SUB.inv='stock';INV.exp=true"]);

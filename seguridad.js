@@ -543,7 +543,7 @@ async function viewConsultaPrecios() {
 }
 
 // ---------- Bitácora local ----------
-const TBL = {sales: 'la venta', sale_returns: 'la devolución', purchases: 'la compra', expenses: 'el gasto', products: 'el producto', accounts: 'la cuenta', settings: 'la configuración', payroll_runs: 'la nómina', employees: 'el empleado', employee_advances: 'el adelanto', cash_closings: 'el cierre de caja', payment_methods: 'el método de pago', inventory_adjustments: 'el ajuste masivo', recurring_expenses: 'el gasto fijo', parties: 'el contacto'};
+const TBL = {sales: 'la venta', sale_returns: 'la devolución', purchases: 'la compra', expenses: 'el gasto', products: 'el producto', accounts: 'la cuenta', settings: 'la configuración', payroll_runs: 'la nómina', employees: 'el empleado', employee_advances: 'el adelanto', cash_closings: 'el cierre de caja', payment_methods: 'el método de pago', inventory_adjustments: 'el ajuste masivo', recurring_expenses: 'el gasto fijo', parties: 'el contacto', loans: 'el préstamo', loan_payments: 'la cuota de préstamo'};
 const FLD = {status: 'estado', sale_price_usd: 'precio', manual_cost_usd: 'costo manual', name: 'nombre', active: 'activo', total_usd: 'total', business_name: 'nombre del negocio', cost_method: 'método de costo', opening_balance: 'saldo inicial', payment_details: 'datos de pago', is_default: 'cuenta principal', monthly_sales_goal_usd: 'meta mensual', max_discount_percent: 'tope de descuento', block_negative_stock: 'bloquear sin stock', salary_usd: 'sueldo'};
 const av = (v) => v === null || v === undefined ? 'vacío' : typeof v === 'boolean' ? (v ? 'sí' : 'no') : typeof v === 'number' ? fmt(v) : String(v).slice(0, 30);
 

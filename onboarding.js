@@ -11,7 +11,8 @@ const DEFAULT_MODS = {
   payroll: false,
   catalog: true,
   labels: false,
-  rawbt: false
+  rawbt: false,
+  loans: false
 };
 
 const MOD_CATALOG = [
@@ -25,6 +26,7 @@ const MOD_CATALOG = [
   {k: 'labels', name: 'Etiquetas y códigos de barras', desc: 'Opcional: genera etiquetas de precio y códigos Code 128 para hoja A4 o rollo térmico'},
   {k: 'rawbt', name: 'Impresión térmica Bluetooth (RawBT)', desc: 'Opcional: botón de impresión directa en 1 toque para impresoras térmicas de 58mm/80mm en Android'},
   {k: 'marketing', name: 'Marketing y seguimiento', desc: 'Clientes VIP, reactivación de inactivos y campañas por WhatsApp'},
+  {k: 'loans', name: 'Préstamos bancarios y de caja', desc: 'Opcional: lleva cuotas de créditos bancarios/familiares o dinero prestado separando capital e intereses'},
   {k: 'payroll', name: 'Nómina y empleados', desc: 'Sueldos, adelantos y recibos de pago de tu personal'}
 ];
 
@@ -32,22 +34,22 @@ const BIZ_PROFILES = {
   tienda: {
     name: 'Tienda, Comercio o Bodega',
     desc: 'Compras y vendes productos terminados. Incluye inventario, catálogo, compras, escáner y caja.',
-    mods: {inventory: true, purchases: true, production: false, planning: false, quotes: true, orders: false, marketing: true, payroll: false, catalog: true, labels: false, rawbt: false}
+    mods: {inventory: true, purchases: true, production: false, planning: false, quotes: true, orders: false, marketing: true, payroll: false, catalog: true, labels: false, rawbt: false, loans: false}
   },
   fabricante: {
     name: 'Fabricante, Repostería o Taller',
     desc: 'Elaboras tus propios productos con recetas o fórmulas y gestionas pedidos por encargo.',
-    mods: {inventory: true, purchases: true, production: true, planning: true, quotes: true, orders: true, marketing: true, payroll: false, catalog: true, labels: false, rawbt: false}
+    mods: {inventory: true, purchases: true, production: true, planning: true, quotes: true, orders: true, marketing: true, payroll: false, catalog: true, labels: false, rawbt: false, loans: false}
   },
   servicios: {
     name: 'Servicios o Independiente',
     desc: 'Barbería, técnico, delivery, diseño, asesorías. Enfocado en cobros, cotizaciones, gastos y clientes.',
-    mods: {inventory: false, purchases: false, production: false, planning: false, quotes: true, orders: false, marketing: true, payroll: false, catalog: false, labels: false, rawbt: false}
+    mods: {inventory: false, purchases: false, production: false, planning: false, quotes: true, orders: false, marketing: true, payroll: false, catalog: false, labels: false, rawbt: false, loans: false}
   },
   personalizado: {
     name: 'Personalizado',
     desc: 'Tú eliges exactamente qué módulos activar desde el primer momento.',
-    mods: {inventory: true, purchases: true, production: true, planning: false, quotes: true, orders: false, marketing: true, payroll: false, catalog: true, labels: false, rawbt: false}
+    mods: {inventory: true, purchases: true, production: true, planning: false, quotes: true, orders: false, marketing: true, payroll: false, catalog: true, labels: false, rawbt: false, loans: false}
   }
 };
 
@@ -501,7 +503,7 @@ function openTutorial(startStep = 0) {
       icon: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
       desc: 'Mantén tus números protegidos y tus datos seguros ante cualquier cambio de teléfono.',
       tips: [
-        '<b>Más &gt; Finanzas:</b> registra gastos, controla tus cuentas y haz tu <b>Cierre de caja</b> diario.',
+        '<b>Más &gt; Finanzas:</b> registra gastos, controla tus cuentas, haz tu <b>Cierre de caja</b> diario y, si tienes créditos bancarios, activa <b>Préstamos</b> en Módulos.',
         '<b>Modo Empleado (candado arriba):</b> crea un PIN de dueño para ocultar costos, ganancias y ajustes cuando atienda un vendedor.',
         '<b>Respaldo en Google Drive:</b> conéctalo en <b>Configuración &gt; Respaldo y Google Drive</b> para guardar copias automáticas gratis.'
       ],
