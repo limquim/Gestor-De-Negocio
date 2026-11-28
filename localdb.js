@@ -381,7 +381,7 @@ const LDB = {
         stockMap[pid] = (stockMap[pid] || 0) + Number(m.quantity || 0);
       });
       return prods
-        .filter(p => p.active !== false && !p.is_service && p.track_inventory !== false)
+        .filter(p => p.active !== false && !p.is_service && !p.is_combo && p.track_inventory !== false)
         .map(p => {
           const cat = cats.get(Number(p.category_id));
           const st = this.r3(stockMap[Number(p.id)] || 0);
@@ -400,7 +400,8 @@ const LDB = {
             avg_cost_usd: cost,
             sale_price_usd: Number(p.sale_price_usd || 0),
             valor_usd: this.r2(Math.max(st, 0) * cost),
-            bajo_minimo: minSt > 0 && st <= minSt
+            bajo_minimo: minSt > 0 && st <= minSt,
+            expiry_date: p.expiry_date || null
           };
         });
     }
@@ -685,11 +686,26 @@ const LDB = {
   },
 
   // ---------- Utilidades de inventario, costos y caja ----------
+  getComboCost(prod) {
+    if (!prod || !prod.is_combo || !Array.isArray(prod.combo_items) || !prod.combo_items.length) {
+      return Number(prod?.auto_cost_usd ?? prod?.avg_cost_usd ?? prod?.manual_cost_usd ?? 0);
+    }
+    const prods = this.mem.products || [];
+    let total = 0;
+    for (const ci of prod.combo_items) {
+      const cp = prods.find(x => Number(x.id) === Number(ci.product_id));
+      const uc = Number(cp?.auto_cost_usd ?? cp?.avg_cost_usd ?? cp?.manual_cost_usd ?? 0);
+      total += uc * Number(ci.quantity || 0);
+    }
+    return this.r4(total);
+  },
+
   async recalcularCostos(onlyPid = null) {
     const method = (this.mem.settings?.[0]?.cost_method) || 'avg';
     const prods = this.mem.products || [];
     const moves = [...(this.mem.inventory_movements || [])].sort((a, b) => Number(a.id) - Number(b.id));
     for (const p of prods) {
+      if (p.is_combo) continue;
       if (onlyPid != null && Number(p.id) !== Number(onlyPid)) continue;
       const inMoves = moves.filter(m => Number(m.product_id) === Number(p.id) && Number(m.quantity) > 0 && m.unit_cost_usd != null && Number(m.unit_cost_usd) >= 0 && ['compra', 'produccion_entrada', 'ajuste'].includes(m.movement_type));
       if (!inMoves.length) {
@@ -712,13 +728,20 @@ const LDB = {
       p.avg_cost_usd = this.r4(autoC);
       p.last_cost_usd = this.r4(lastC);
     }
+    for (const p of prods) {
+      if (!p.is_combo) continue;
+      const cc = this.getComboCost(p);
+      p.manual_cost_usd = cc;
+      p.avg_cost_usd = cc;
+      p.auto_cost_usd = null;
+    }
     await this.saveTable('products', prods, false);
   },
 
   async addInvMove(productId, delta, unitCost, movementType, refType, refId, notes, recalcCost = false) {
     const pid = Number(productId);
     const prod = (this.mem.products || []).find(p => Number(p.id) === pid);
-    if (prod && (prod.track_inventory === false || prod.is_service)) return;
+    if (prod && (prod.track_inventory === false || prod.is_service || prod.is_combo)) return;
     const moves = this.mem.inventory_movements || [];
     moves.push({
       id: this.nextId('inventory_movements'),
@@ -762,16 +785,28 @@ const LDB = {
       for (const raw of arr) {
         if (t === 'inventory_movements') {
           const pr = (this.mem.products || []).find(p => Number(p.id) === Number(raw.product_id));
-          if (pr && (pr.track_inventory === false || pr.is_service)) continue;
+          if (pr && (pr.track_inventory === false || pr.is_service || pr.is_combo)) continue;
         }
         const id = raw.id != null ? Number(raw.id) : this.nextId(t);
         if (id > (this.seqs[t] || 0)) this.seqs[t] = id;
         const rec = {active: true, created_at: now, ...raw, id};
         if (t === 'products') {
-          rec.track_inventory = rec.is_service ? false : (rec.track_inventory !== false);
-          rec.manual_cost_usd = Number(rec.manual_cost_usd ?? rec.avg_cost_usd ?? 0);
-          rec.avg_cost_usd = Number(rec.avg_cost_usd ?? rec.manual_cost_usd ?? 0);
-          rec.auto_cost_usd = rec.auto_cost_usd ?? null;
+          rec.is_combo = !!rec.is_combo;
+          rec.combo_items = rec.is_combo && Array.isArray(rec.combo_items)
+            ? rec.combo_items.map(ci => ({product_id: Number(ci.product_id), quantity: Number(ci.quantity || 0)})).filter(ci => ci.product_id && ci.quantity > 0)
+            : [];
+          rec.track_inventory = (rec.is_service || rec.is_combo) ? false : (rec.track_inventory !== false);
+          rec.expiry_date = (!rec.is_service && !rec.is_combo && rec.expiry_date) ? String(rec.expiry_date) : null;
+          if (rec.is_combo) {
+            const cc = this.getComboCost(rec);
+            rec.manual_cost_usd = cc;
+            rec.avg_cost_usd = cc;
+            rec.auto_cost_usd = null;
+          } else {
+            rec.manual_cost_usd = Number(rec.manual_cost_usd ?? rec.avg_cost_usd ?? 0);
+            rec.avg_cost_usd = Number(rec.avg_cost_usd ?? rec.manual_cost_usd ?? 0);
+            rec.auto_cost_usd = rec.auto_cost_usd ?? null;
+          }
         }
         rows.push(rec);
         inserted.push(rec);
@@ -793,8 +828,24 @@ const LDB = {
         if (spec.filters.every(f => this.matchFilter(r, f))) {
           const oldSnap = {...r};
           Object.assign(r, spec.payload);
-          if (t === 'products' && r.auto_cost_usd == null && spec.payload.manual_cost_usd !== undefined) {
-            r.avg_cost_usd = Number(r.manual_cost_usd || 0);
+          if (t === 'products') {
+            if (r.is_combo) {
+              r.combo_items = Array.isArray(r.combo_items)
+                ? r.combo_items.map(ci => ({product_id: Number(ci.product_id), quantity: Number(ci.quantity || 0)})).filter(ci => ci.product_id && ci.quantity > 0)
+                : [];
+              r.is_service = false;
+              r.track_inventory = false;
+              r.expiry_date = null;
+              const cc = this.getComboCost(r);
+              r.manual_cost_usd = cc;
+              r.avg_cost_usd = cc;
+              r.auto_cost_usd = null;
+            } else {
+              if (r.is_service) r.expiry_date = null;
+              if (r.auto_cost_usd == null && spec.payload.manual_cost_usd !== undefined) {
+                r.avg_cost_usd = Number(r.manual_cost_usd || 0);
+              }
+            }
           }
           updated.push(r);
           if (['products', 'accounts', 'settings', 'employees'].includes(t)) {
@@ -947,9 +998,21 @@ const LDB = {
         const pct = docType === 'factura' ? (hasExplicitIva ? Math.max(0, Number(P.p_iva_percent || 0)) : Number(tx?.percent || 0)) : 0;
         const ls = Number(it.quantity) * Number(it.unit_price_usd);
         sub += ls; rawTax += ls * pct / 100;
-        const ucost = Number(pr?.avg_cost_usd ?? pr?.manual_cost_usd ?? 0);
-        newItems.push({id: this.nextId('sale_items'), sale_id: saleId, product_id: Number(it.product_id), quantity: Number(it.quantity), unit_price_usd: Number(it.unit_price_usd), unit_cost_usd: ucost, tax_percent: pct});
-        await this.addInvMove(it.product_id, -Number(it.quantity), ucost, 'venta', 'sale', saleId, null);
+        const isCombo = !!(pr?.is_combo && Array.isArray(pr.combo_items) && pr.combo_items.length);
+        const ucost = isCombo ? this.getComboCost(pr) : Number(pr?.auto_cost_usd ?? pr?.avg_cost_usd ?? pr?.manual_cost_usd ?? 0);
+        const itemRow = {id: this.nextId('sale_items'), sale_id: saleId, product_id: Number(it.product_id), quantity: Number(it.quantity), unit_price_usd: Number(it.unit_price_usd), unit_cost_usd: ucost, tax_percent: pct};
+        if (isCombo) {
+          itemRow.combo_snapshot = pr.combo_items.map(ci => ({product_id: Number(ci.product_id), quantity: Number(ci.quantity)}));
+          for (const ci of itemRow.combo_snapshot) {
+            const cp = prodById(ci.product_id);
+            const cCost = Number(cp?.auto_cost_usd ?? cp?.avg_cost_usd ?? cp?.manual_cost_usd ?? 0);
+            const cQty = this.r3(Number(it.quantity) * Number(ci.quantity));
+            await this.addInvMove(ci.product_id, -cQty, cCost, 'venta', 'sale', saleId, 'Combo: ' + (pr?.name || ('#' + it.product_id)));
+          }
+        } else {
+          await this.addInvMove(it.product_id, -Number(it.quantity), ucost, 'venta', 'sale', saleId, null);
+        }
+        newItems.push(itemRow);
       }
       const disc = Math.min(Number(P.p_discount_usd || 0), sub);
       const tax = sub > 0 ? this.r2(rawTax * (sub - disc) / sub) : 0;
@@ -989,7 +1052,20 @@ const LDB = {
         s.status = 'anulada';
         await this.saveTable('sales', this.mem.sales);
         for (const it of (this.mem.sale_items || []).filter(x => Number(x.sale_id) === id)) {
-          await this.addInvMove(it.product_id, Number(it.quantity), it.unit_cost_usd, 'devolucion', 'sale', id, 'Anulación venta #' + id);
+          const pr = prodById(it.product_id);
+          const compList = (Array.isArray(it.combo_snapshot) && it.combo_snapshot.length)
+            ? it.combo_snapshot
+            : (pr?.is_combo && Array.isArray(pr.combo_items) && pr.combo_items.length ? pr.combo_items : null);
+          if (compList) {
+            for (const ci of compList) {
+              const cp = prodById(ci.product_id);
+              const cCost = Number(cp?.auto_cost_usd ?? cp?.avg_cost_usd ?? cp?.manual_cost_usd ?? 0);
+              const cQty = this.r3(Number(it.quantity) * Number(ci.quantity));
+              await this.addInvMove(ci.product_id, cQty, cCost, 'devolucion', 'sale', id, 'Anulación venta #' + id + ' (Combo: ' + (pr?.name || ('#' + it.product_id)) + ')');
+            }
+          } else {
+            await this.addInvMove(it.product_id, Number(it.quantity), it.unit_cost_usd, 'devolucion', 'sale', id, 'Anulación venta #' + id);
+          }
         }
         for (const py of (this.mem.payments || []).filter(x => Number(x.sale_id) === id)) {
           await this.addAccMove(py.account_id, -Number(py.amount), 'anulacion', 'Anulación venta #' + id);
@@ -1052,8 +1128,25 @@ const LDB = {
         const si = sItems.find(x => Number(x.product_id) === Number(it.product_id));
         const up = Number(si?.unit_price_usd || 0), uc = Number(si?.unit_cost_usd || 0), pct = Number(si?.tax_percent || 0);
         totalUsd += Number(it.quantity) * up * ratio * (1 + pct / 100);
-        rItems.push({id: this.nextId('sale_return_items'), return_id: retId, product_id: Number(it.product_id), quantity: Number(it.quantity), unit_price_usd: up, unit_cost_usd: uc, restock: !!it.restock});
-        if (it.restock) await this.addInvMove(it.product_id, Number(it.quantity), uc, 'devolucion', 'sale', sid, 'Devolución #' + retId);
+        const pr = prodById(it.product_id);
+        const compList = (Array.isArray(si?.combo_snapshot) && si.combo_snapshot.length)
+          ? si.combo_snapshot
+          : (pr?.is_combo && Array.isArray(pr.combo_items) && pr.combo_items.length ? pr.combo_items : null);
+        const rRow = {id: this.nextId('sale_return_items'), return_id: retId, product_id: Number(it.product_id), quantity: Number(it.quantity), unit_price_usd: up, unit_cost_usd: uc, restock: !!it.restock};
+        if (compList) rRow.combo_snapshot = compList.map(ci => ({product_id: Number(ci.product_id), quantity: Number(ci.quantity)}));
+        rItems.push(rRow);
+        if (it.restock) {
+          if (compList) {
+            for (const ci of compList) {
+              const cp = prodById(ci.product_id);
+              const cCost = Number(cp?.auto_cost_usd ?? cp?.avg_cost_usd ?? cp?.manual_cost_usd ?? 0);
+              const cQty = this.r3(Number(it.quantity) * Number(ci.quantity));
+              await this.addInvMove(ci.product_id, cQty, cCost, 'devolucion', 'sale', sid, 'Devolución #' + retId + ' (Combo: ' + (pr?.name || ('#' + it.product_id)) + ')');
+            }
+          } else {
+            await this.addInvMove(it.product_id, Number(it.quantity), uc, 'devolucion', 'sale', sid, 'Devolución #' + retId);
+          }
+        }
       }
       const savedRefunds = [];
       for (const rf of (P.p_refund || [])) {
@@ -1078,7 +1171,20 @@ const LDB = {
         r.status = 'anulada';
         await this.saveTable('sale_returns', this.mem.sale_returns);
         for (const it of (this.mem.sale_return_items || []).filter(x => Number(x.return_id) === id && x.restock)) {
-          await this.addInvMove(it.product_id, -Number(it.quantity), it.unit_cost_usd, 'ajuste', 'sale', r.sale_id, 'Anulación devolución #' + id);
+          const pr = prodById(it.product_id);
+          const compList = (Array.isArray(it.combo_snapshot) && it.combo_snapshot.length)
+            ? it.combo_snapshot
+            : (pr?.is_combo && Array.isArray(pr.combo_items) && pr.combo_items.length ? pr.combo_items : null);
+          if (compList) {
+            for (const ci of compList) {
+              const cp = prodById(ci.product_id);
+              const cCost = Number(cp?.auto_cost_usd ?? cp?.avg_cost_usd ?? cp?.manual_cost_usd ?? 0);
+              const cQty = this.r3(Number(it.quantity) * Number(ci.quantity));
+              await this.addInvMove(ci.product_id, -cQty, cCost, 'ajuste', 'sale', r.sale_id, 'Anulación devolución #' + id + ' (Combo: ' + (pr?.name || ('#' + it.product_id)) + ')');
+            }
+          } else {
+            await this.addInvMove(it.product_id, -Number(it.quantity), it.unit_cost_usd, 'ajuste', 'sale', r.sale_id, 'Anulación devolución #' + id);
+          }
         }
         for (const rf of (r.refunds || [])) {
           await this.addAccMove(rf.account_id, Math.abs(Number(rf.amount)), 'anulacion', 'Anulación devolución #' + id);

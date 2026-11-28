@@ -1,5 +1,5 @@
-// Service Worker — Gestor Emprendedor v10 (100% Local-First)
-const CACHE_NAME = 'gestor-emprendedor-v10';
+// Service Worker — Gestor Emprendedor v11 (100% Local-First)
+const CACHE_NAME = 'gestor-emprendedor-v11';
 const CORE_ASSETS = [
   './',
   './index.html',

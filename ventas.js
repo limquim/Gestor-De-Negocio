@@ -14,7 +14,7 @@ function priceWithList(basePrice, listObj) {
 
 async function vData() {
   const [products, stock, custs, accs, lists, taxes, recentItems] = await Promise.all([
-    db.from('products').select('id,name,sku,unit,sale_price_usd,is_service,track_inventory,taxes(percent)').eq('active', true).order('name')
+    db.from('products').select('id,name,sku,unit,sale_price_usd,is_service,track_inventory,is_combo,combo_items,expiry_date,taxes(percent)').eq('active', true).order('name')
       .then(r => r.error ? q(db.from('products').select('id,name,sku,unit,sale_price_usd,is_service,taxes(percent)').eq('active', true).order('name')) : r.data),
     q(db.from('stock_actual').select('product_id,stock')),
     db.from('parties').select('id,name,phone,price_list_id').eq('is_customer', true).eq('active', true).order('name')
@@ -78,12 +78,35 @@ async function viewVenta() {
   const dup = V.dup; V.dup = null;
   const prePid = V.prePid; V.prePid = null;
   const D = await vData(), old = V.edit ? await saleDetail(V.edit) : null, qd = fq ? await quoteDetail(fq) : null;
-  if (old) old.items.forEach(i => { D.st[i.product_id] = (D.st[i.product_id] || 0) + +i.quantity; });   // el stock vuelve a contar lo ya vendido
   const pm = Object.fromEntries(D.products.map(p => [p.id, p]));
+  if (old) {
+    old.items.forEach(i => {
+      const pr = pm[i.product_id];
+      if (pr?.is_combo && Array.isArray(pr.combo_items) && pr.combo_items.length) {
+        pr.combo_items.forEach(ci => { D.st[ci.product_id] = (D.st[ci.product_id] || 0) + (+i.quantity * +ci.quantity); });
+      } else {
+        D.st[i.product_id] = (D.st[i.product_id] || 0) + +i.quantity;
+      }
+    });
+  }
+  const comboAvailLocal = (p) => (typeof comboAvail === 'function') ? comboAvail(p, D.st, pm) : null;
+  const comboDescLocal = (p) => (typeof comboSummaryText === 'function') ? comboSummaryText(p, pm) : '';
+  const expWarnLocal = (p) => {
+    if (!p?.expiry_date || typeof expiryBadge !== 'function') return '';
+    const eb = expiryBadge(p.expiry_date, true);
+    if (!eb || eb.state === 'ok') return '';
+    return ` · <span class="${eb.cls}">${esc(eb.text)}</span>`;
+  };
   const curPriceList = () => D.lists.find(l => String(l.id) === String($('#vList')?.value || '')) || null;
   const line = (pid, qv, pr) => {
     const p = pm[pid], base = +p?.sale_price_usd || 0, adj = priceWithList(base, curPriceList());
-    return {pid, name: p?.name, unit: p?.unit, qty: qv, price: pr ?? adj, price0: base, svc: !!p?.is_service, untr: p?.track_inventory === false, pct: Number(p?.taxes?.percent || 0)};
+    return {
+      pid, name: p?.name, unit: p?.unit, qty: qv, price: pr ?? adj, price0: base,
+      svc: !!p?.is_service, untr: p?.track_inventory === false,
+      combo: !!p?.is_combo, citems: Array.isArray(p?.combo_items) ? p.combo_items : [],
+      expiry_date: p?.expiry_date || null,
+      pct: Number(p?.taxes?.percent || 0)
+    };
   };
   const srcOrder = old || qd || dup;
   V.cart = srcOrder ? srcOrder.items.filter(i => pm[i.product_id]).map(i => line(i.product_id, +i.quantity, dup ? null : +i.unit_price_usd)) : (prePid && pm[prePid] ? [line(prePid, 1)] : []);
@@ -111,7 +134,6 @@ async function viewVenta() {
   <div class="card"><h2>Total</h2><div id="vTot"></div></div>
   <div class="card"><h2>Pagos</h2>
     ${D.accs.length ? `<div class="stack" style="gap:.35rem;margin-bottom:.65rem"><small class="mut">Cobro rápido (pago completo en 1 toque):</small><div class="chips" id="vQuickPay">${D.accs.slice(0, 5).map(a => `<button type="button" data-qacc="${a.id}">${esc(a.name)} (${a.currency === 'VES' ? esc(secSym()) : esc(curLabel())})</button>`).join('')}</div></div>` : ''}
-    ${D.accs.some(a => a.currency !== 'VES') ? `<div class="stack" style="gap:.35rem;margin-bottom:.65rem"><small class="mut">Billete recibido en efectivo (calcula vuelto automático):</small><div class="chips" id="vBills">${[5, 10, 20, 50, 100].map(b => `<button type="button" data-bill="${b}">${fmtCur(b, 0)}</button>`).join('')}</div></div>` : ''}
     <div id="vPays"></div><div class="row"><button class="btn ghost" type="button" id="vAddPay">+ Agregar pago parcial / mixto</button></div>
     <div id="vBal" style="margin:.65rem 0"></div><label id="vDueW" class="hidden">Fecha límite del saldo<input id="vDue" type="date"></label></div>
   <label>Nota<input id="vNotes"></label>
@@ -160,9 +182,7 @@ async function viewVenta() {
     const overDisc = maxDisc > 0 && discPct > maxDisc + 0.05 && (S.role || 'admin') !== 'admin';
     const showBs = S.bimoneda !== false && t.rate > 0;
     $('#vTot').innerHTML = `Subtotal: ${fmtCur(t.sub)}${t.disc ? ' | Descuento: -' + fmtCur(t.disc) + ' (' + fmt(discPct, 1) + '%)' : ''}${t.ivaOn ? ' | IVA (' + qty(t.ivaPct) + '%): ' + fmtCur(t.tax) : ''}${overDisc ? `<br><span class="warn">Supera el tope máximo permitido de descuento (${qty(maxDisc)}%)</span>` : ''}<br><span class="big">${fmtCur(t.total)}</span>${showBs ? `<br><span class="mut">${fmtSec(t.total * t.rate)}</span>` : ''}`;
-    $('#vBal').innerHTML = bal < -0.01
-      ? `<div class="gain pos" style="margin:0"><span>Vuelto a entregar al cliente</span><b>${fmtCur(-bal)}</b>${showBs ? `<small>${fmtSec(-bal * t.rate)} a la tasa actual · Pagado: ${fmtCur(paid)}</small>` : `<small>Pagado: ${fmtCur(paid)}</small>`}</div>`
-      : `Pagado: <b>${fmtCur(paid)}</b> | ` + (bal > 0.01 ? `<span class="warn">Queda a crédito: <b>${fmtCur(bal)}</b>${showBs ? ' (' + fmtSec(bal * t.rate) + ')' : ''}</span>` : '<span class="in"><b>Pago completo</b></span>');
+    $('#vBal').innerHTML = `Pagado: <b>${fmtCur(paid)}</b> | ` + (bal > 0.01 ? `<span class="warn">Queda a crédito: <b>${fmtCur(bal)}</b>${showBs ? ' (' + fmtSec(bal * t.rate) + ')' : ''}</span>` : bal < -0.01 ? `<span class="in">Vuelto: <b>${fmtCur(-bal)}</b></span>` : '<span class="in"><b>Pago completo</b></span>');
     $('#vDueW').classList.toggle('hidden', !(bal > 0.01));
     if (bal > 0.01 && !dueTouched && !$('#vDue').value && Number(rules.default_credit_days || 0) > 0 && typeof addDaysISO === 'function') {
       $('#vDue').value = addDaysISO(caracasDate(), rules.default_credit_days);
@@ -175,8 +195,23 @@ async function viewVenta() {
     return {...t, paid, bal};
   };
   const drawCart = () => {
-    $('#vCart').innerHTML = V.cart.map((c, i) => `<div class="pl" data-i="${i}"><div><b>${esc(c.name)}</b><small>${c.svc ? 'Servicio (sin inventario)' : c.untr ? 'Insumo sin inventario' : 'Disponible: ' + qty(D.st[c.pid] || 0) + ' ' + esc(c.unit)}</small><small class="lt"></small>${c.svc ? `<button class="lnk" data-free="${i}">${c.price > 0 ? 'Asumirlo yo (no cobrar)' : 'Cobrarlo al cliente'}</button>` : ''}<button class="lnk bad" data-rm="${i}">Quitar</button></div>
-      <div class="stack" style="gap:.3rem"><label>Cant.<div class="aj-step"><button type="button" class="aj-sb" data-qdec="${i}" aria-label="Restar 1">&minus;</button><input data-f="qty" type="number" step="0.001" min="0.001" value="${c.qty}" style="width:4rem"><button type="button" class="aj-sb" data-qinc="${i}" aria-label="Sumar 1">+</button></div></label><label>Precio (${esc(curLabel())})<input data-f="price" type="number" step="0.01" min="0" value="${c.price}" ${lockSellerPrice ? 'disabled' : ''}></label></div></div>`).join('') || '<p class="mut">Busca y agrega productos.</p>';
+    $('#vCart').innerHTML = V.cart.map((c, i) => {
+      const pr = pm[c.pid];
+      let subTxt = '';
+      if (c.combo) {
+        const av = comboAvailLocal(pr);
+        const desc = comboDescLocal(pr);
+        subTxt = `<span class="badge ok" style="font-size:.7rem;padding:.05rem .35rem">Combo</span> ${av === null ? 'Sin control de stock' : 'Armables: ' + qty(av)}${desc ? ' · ' + esc(desc) : ''}`;
+      } else if (c.svc) {
+        subTxt = 'Servicio (sin inventario)';
+      } else if (c.untr) {
+        subTxt = 'Insumo sin inventario';
+      } else {
+        subTxt = 'Disponible: ' + qty(D.st[c.pid] || 0) + ' ' + esc(c.unit) + expWarnLocal(pr);
+      }
+      return `<div class="pl" data-i="${i}"><div><b>${esc(c.name)}</b><small>${subTxt}</small><small class="lt"></small>${c.svc ? `<button class="lnk" data-free="${i}">${c.price > 0 ? 'Asumirlo yo (no cobrar)' : 'Cobrarlo al cliente'}</button>` : ''}<button class="lnk bad" data-rm="${i}">Quitar</button></div>
+      <div class="stack" style="gap:.3rem"><label>Cant.<div class="aj-step"><button type="button" class="aj-sb" data-qdec="${i}" aria-label="Restar 1">&minus;</button><input data-f="qty" type="number" step="0.001" min="0.001" value="${c.qty}" style="width:4rem"><button type="button" class="aj-sb" data-qinc="${i}" aria-label="Sumar 1">+</button></div></label><label>Precio (${esc(curLabel())})<input data-f="price" type="number" step="0.01" min="0" value="${c.price}" ${lockSellerPrice ? 'disabled' : ''}></label></div></div>`;
+    }).join('') || '<p class="mut">Busca y agrega productos.</p>';
     totals();
   };
   const drawPays = () => {
@@ -213,7 +248,18 @@ async function viewVenta() {
     const t = e.target.value.trim().toLowerCase(), pl = curPriceList();
     $('#vRes').innerHTML = t ? (D.products.filter(p => (p.name + ' ' + (p.sku || '')).toLowerCase().includes(t)).slice(0, 6).map(p => {
       const pr = priceWithList(p.sale_price_usd, pl);
-      return `<button class="item" data-add="${p.id}"><span><b>${esc(p.name)}</b><small>${fmtCur(pr)}${pl ? ' (' + esc(pl.name) + ')' : ''} | ${p.is_service ? 'Servicio' : p.track_inventory === false ? 'Sin inventario' : 'Disponible: ' + qty(D.st[p.id] || 0) + ' ' + esc(p.unit)}</small></span><span class="mut">+</span></button>`;
+      let stInfo = '';
+      if (p.is_combo) {
+        const av = comboAvailLocal(p);
+        stInfo = `Combo${av === null ? '' : ' · Armables: ' + qty(av)}`;
+      } else if (p.is_service) {
+        stInfo = 'Servicio';
+      } else if (p.track_inventory === false) {
+        stInfo = 'Sin inventario';
+      } else {
+        stInfo = 'Disponible: ' + qty(D.st[p.id] || 0) + ' ' + esc(p.unit) + expWarnLocal(p);
+      }
+      return `<button class="item" data-add="${p.id}"><span><b>${esc(p.name)}</b>${p.is_combo ? ' <span class="badge ok" style="font-size:.7rem;padding:.05rem .35rem">Combo</span>' : ''}<small>${fmtCur(pr)}${pl ? ' (' + esc(pl.name) + ')' : ''} | ${stInfo}</small></span><span class="mut">+</span></button>`;
     }).join('') || '<p class="mut">Sin resultados.</p>') : '';
   };
   const addProdByCode = (code) => {
@@ -290,17 +336,6 @@ async function viewVenta() {
       toast(`Pago completo cargado en ${a.name}`);
     };
   }
-  if ($('#vBills')) {
-    $('#vBills').onclick = (e) => {
-      const b = e.target.closest('[data-bill]'); if (!b) return;
-      if (!V.cart.length) return toast('Agrega productos primero', true);
-      const cashAcc = D.accs.find(a => a.currency !== 'VES' && (!a.methods?.length || a.methods.includes('efectivo'))) || D.accs.find(a => a.currency !== 'VES') || D.accs[0];
-      if (!cashAcc) return;
-      const billAmt = Number(b.dataset.bill || 0);
-      V.pays = [{acc: cashAcc.id, method: 'efectivo', amount: billAmt, ref: ''}];
-      drawPays();
-    };
-  }
   $('#vAddPay').onclick = () => {
     const t = totals(), a = D.accs[0]; if (!a) return toast('No hay cuentas de pago configuradas', true);
     V.pays.push({acc: a.id, method: Object.keys(accMethods(a))[0], amount: t.bal > 0 ? Math.round(t.bal * (a.currency === 'USD' ? 1 : t.rate) * 100) / 100 : 0, ref: ''}); drawPays();
@@ -325,12 +360,26 @@ async function viewVenta() {
     if (Number(rules.max_discount_percent || 0) > 0 && discPctGo > Number(rules.max_discount_percent) + 0.05 && (S.role || 'admin') !== 'admin') {
       throw new Error(`El descuento (${fmt(discPctGo, 1)}%) supera el máximo permitido (${qty(rules.max_discount_percent)}%).`);
     }
-    const lacking = V.cart.filter(c => !c.svc && !c.untr && c.qty > (D.st[c.pid] || 0));
+    const reqMap = {};
+    V.cart.forEach(c => {
+      if (c.combo && Array.isArray(c.citems) && c.citems.length) {
+        c.citems.forEach(ci => {
+          const cp = pm[ci.product_id];
+          if (!cp || cp.is_service || cp.track_inventory === false) return;
+          reqMap[ci.product_id] = (reqMap[ci.product_id] || 0) + (Number(c.qty || 0) * Number(ci.quantity || 0));
+        });
+      } else if (!c.svc && !c.untr) {
+        reqMap[c.pid] = (reqMap[c.pid] || 0) + Number(c.qty || 0);
+      }
+    });
+    const lacking = Object.entries(reqMap)
+      .map(([pid, need]) => ({pid: Number(pid), name: pm[pid]?.name || ('#' + pid), need, avail: Number(D.st[pid] || 0)}))
+      .filter(x => x.need > x.avail + 1e-6);
     if (lacking.length) {
       if (rules.block_negative_stock) {
-        throw new Error('Stock insuficiente para: ' + lacking.map(c => `${c.name} (disp: ${qty(D.st[c.pid] || 0)})`).join(', ') + '. Regla activa en Configuración.');
+        throw new Error('Stock insuficiente para: ' + lacking.map(c => `${c.name} (req: ${qty(c.need)}, disp: ${qty(c.avail)})`).join(', ') + '. Regla activa en Configuración.');
       }
-      if (!confirm('Hay productos con inventario insuficiente. ¿Registrar la venta de todos modos?')) return;
+      if (!confirm('Hay productos con inventario insuficiente (' + lacking.map(c => c.name).join(', ') + '). ¿Registrar la venta de todos modos?')) return;
     }
     const id = await q(db.rpc('registrar_venta', {p_id: V.edit, p_sale_date: $('#vDate').value || caracasDate(), p_customer_id: +$('#vCust').value || null, p_doc_type: t.ivaOn ? 'factura' : 'nota_entrega', p_iva_percent: t.ivaOn ? t.ivaPct : 0, p_rate: t.rate, p_discount_usd: t.disc,
       p_due_date: $('#vDue').value || null, p_notes: $('#vNotes').value.trim() || null,

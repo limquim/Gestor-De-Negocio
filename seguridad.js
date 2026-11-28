@@ -485,10 +485,11 @@ async function viewModoEmpleado() {
 // Vista de solo consulta de precios y stock para Modo Empleado (cuando inventario_full está desmarcado)
 async function viewConsultaPrecios() {
   const [prods, stockRows] = await Promise.all([
-    q(db.from('products').select('id,sku,name,unit,sale_price_usd,is_service,track_inventory,image_url,product_categories(name)').eq('active', true).order('name')),
+    q(db.from('products').select('id,sku,name,unit,sale_price_usd,is_service,is_combo,combo_items,expiry_date,track_inventory,image_url,product_categories(name)').eq('active', true).order('name')),
     q(db.from('stock_actual').select('product_id,stock'))
   ]);
   const stMap = Object.fromEntries(stockRows.map(s => [s.product_id, Number(s.stock || 0)]));
+  const pm = Object.fromEntries(prods.map(p => [p.id, p]));
   $('#view').innerHTML = `
     <div class="card stack" style="margin-bottom:.8rem">
       <div class="scan-row">
@@ -502,13 +503,21 @@ async function viewConsultaPrecios() {
     const t = ($('#cpSearch').value || '').trim().toLowerCase();
     const list = prods.filter(p => !t || (p.name + ' ' + (p.sku || '') + ' ' + (p.product_categories?.name || '')).toLowerCase().includes(t));
     $('#cpList').innerHTML = list.map(p => {
-      const st = stMap[p.id] || 0;
-      const stTxt = p.is_service ? 'Servicio' : p.track_inventory === false ? 'Disponible' : (st > 0 ? `Disp: ${qty(st)} ${esc(p.unit)}` : 'Agotado');
-      const stCls = p.is_service || p.track_inventory === false || st > 0 ? 'in' : 'bad';
+      let stTxt = '', stCls = 'in';
+      if (p.is_combo) {
+        const av = typeof comboAvail === 'function' ? comboAvail(p, stMap, pm) : 0;
+        stTxt = av === null ? 'Combo disponible' : (av > 0 ? `Combo · Armables: ${qty(av)}` : 'Combo sin stock');
+        stCls = (av === null || av > 0) ? 'in' : 'bad';
+      } else {
+        const st = stMap[p.id] || 0;
+        stTxt = p.is_service ? 'Servicio' : p.track_inventory === false ? 'Disponible' : (st > 0 ? `Disp: ${qty(st)} ${esc(p.unit)}` : 'Agotado');
+        stCls = p.is_service || p.track_inventory === false || st > 0 ? 'in' : 'bad';
+      }
+      const eb = (!p.is_combo && !p.is_service && p.expiry_date && typeof expiryBadge === 'function') ? expiryBadge(p.expiry_date, true) : null;
       return `<div class="item">
         <span style="flex:1">
-          <b>${esc(p.name)}</b>
-          <small>${esc(p.sku || 'Sin código')} · ${esc(p.product_categories?.name || 'General')} · <span class="${stCls}">${stTxt}</span></small>
+          <b>${esc(p.name)}</b>${p.is_combo ? ' <span class="badge ok" style="font-size:.7rem;padding:.05rem .35rem">Combo</span>' : ''}
+          <small>${esc(p.sku || 'Sin código')} · ${esc(p.product_categories?.name || 'General')} · <span class="${stCls}">${stTxt}</span>${eb && eb.state !== 'ok' ? ` · <span class="${eb.cls}">${esc(eb.text)}</span>` : ''}</small>
         </span>
         <span class="n">
           <b>${fmtCur(p.sale_price_usd)}</b>

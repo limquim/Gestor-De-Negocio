@@ -4,7 +4,7 @@ const r2 = (n) => Math.round(n * 100) / 100;
 
 async function cData() {
   const [products, sups, accs, taxes] = await Promise.all([
-    q(db.from('products').select('id,name,sku,unit,avg_cost_usd,last_cost_usd').eq('active', true).order('name')),
+    q(db.from('products').select('id,name,sku,unit,avg_cost_usd,last_cost_usd,is_combo').eq('active', true).order('name')).then(list => list.filter(p => !p.is_combo)),
     q(db.from('parties').select('id,name,phone').eq('is_supplier', true).eq('active', true).order('name')),
     loadActiveAccounts(),
     db.from('taxes').select('percent').eq('active', true).then(r => r.error ? [] : (r.data || []))

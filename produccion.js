@@ -3,8 +3,9 @@ const isUntracked = (p) => !!(p && (p.track_inventory === false || p.is_service)
 
 async function prData() {
   const [products, recipes, stock, units] = await Promise.all([
-    db.from('products').select('id,name,unit,avg_cost_usd,sale_price_usd,is_service,track_inventory').eq('active', true).order('name')
-      .then(r => r.error ? q(db.from('products').select('id,name,unit,avg_cost_usd,sale_price_usd,is_service').eq('active', true).order('name')) : r.data),
+    db.from('products').select('id,name,unit,avg_cost_usd,sale_price_usd,is_service,is_combo,track_inventory').eq('active', true).order('name')
+      .then(r => r.error ? q(db.from('products').select('id,name,unit,avg_cost_usd,sale_price_usd,is_service').eq('active', true).order('name')) : r.data)
+      .then(list => list.filter(p => !p.is_combo)),
     q(db.from('recipes').select('*, recipe_items(product_id, quantity)').eq('active', true).order('name')),
     q(db.from('stock_actual').select('product_id,stock')),
     db.from('units').select('symbol,name,kind,factor_to_base').eq('active', true).order('factor_to_base', {ascending: false}).then(r => r.error ? [] : (r.data || []))

@@ -38,7 +38,7 @@ const loadImg = (u) => imgCache[u] || (imgCache[u] = new Promise(r => {
 async function catData() {
   const [rowsRaw, prods, lists, cats, set, presets, untrSet, payTxt] = await Promise.all([
     q(db.from('stock_actual').select('product_id,sku,name,category_id,category,unit,stock,sale_price_usd').order('name')),
-    db.from('products').select('id,sku,name,category_id,unit,sale_price_usd,is_service,track_inventory,image_url,product_categories(name),taxes(percent)').eq('active', true).order('name')
+    db.from('products').select('id,sku,name,category_id,unit,sale_price_usd,is_service,is_combo,combo_items,track_inventory,image_url,product_categories(name),taxes(percent)').eq('active', true).order('name')
       .then(r => r.error ? q(db.from('products').select('id,image_url,is_service,taxes(percent)').eq('active', true)) : r.data),
     q(db.from('price_lists').select('id,name,adjust_percent').eq('active', true).order('name')),
     q(db.from('product_categories').select('id,name').eq('active', true).order('name')),
@@ -49,13 +49,34 @@ async function catData() {
   ]);
 
   const pm = Object.fromEntries(prods.map(p => [p.id, p]));
+  const stMap = Object.fromEntries(rowsRaw.map(r => [r.product_id, Number(r.stock || 0)]));
   const rows = rowsRaw.filter(r => !untrSet.has(Number(r.product_id))).map(r => {
     const p = pm[r.product_id] || {};
     return {...r, image_url: p.image_url || null, tax: Number(p.taxes?.percent || 0), is_service: false};
   });
 
-  // Agregar servicios activos como opción aparte para quienes quieran incluir delivery / instalaciones
+  // Incluir combos activos con disponibilidad calculada según stock de sus productos
   const inRows = new Set(rows.map(r => Number(r.product_id)));
+  prods.filter(p => p.is_combo && !inRows.has(Number(p.id))).forEach(p => {
+    const av = typeof comboAvail === 'function' ? comboAvail(p, stMap, pm) : 0;
+    rows.push({
+      product_id: p.id,
+      sku: p.sku || null,
+      name: p.name,
+      category_id: p.category_id || null,
+      category: p.product_categories?.name || 'Combos',
+      unit: 'combo',
+      stock: av === null ? 999999 : av,
+      sale_price_usd: Number(p.sale_price_usd || 0),
+      image_url: p.image_url || null,
+      tax: Number(p.taxes?.percent || 0),
+      is_service: false,
+      is_combo: true
+    });
+    inRows.add(Number(p.id));
+  });
+
+  // Agregar servicios activos como opción aparte para quienes quieran incluir delivery / instalaciones
   const services = prods.filter(p => p.is_service && !inRows.has(Number(p.id))).map(p => ({
     product_id: p.id,
     sku: p.sku || null,

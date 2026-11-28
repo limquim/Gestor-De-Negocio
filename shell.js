@@ -100,8 +100,8 @@ views.inventario = page('Inventario', async () => {
     await viewProductos2();
     return;
   }
-  const subs = {stock: 'Existencias', productos: 'Productos', precios: 'Precios', catalogo: 'Catálogo', ajuste: 'Ajuste masivo'};
-  const fns = {stock: viewInventario2, productos: viewProductos2, precios: viewPreciosMasivo, catalogo: viewCatalogo, ajuste: viewAjusteMasivo};
+  const subs = {stock: 'Existencias', productos: 'Productos', combos: 'Combos', precios: 'Precios', catalogo: 'Catálogo', ajuste: 'Ajuste masivo'};
+  const fns = {stock: viewInventario2, productos: viewProductos2, combos: viewCombos, precios: viewPreciosMasivo, catalogo: viewCatalogo, ajuste: viewAjusteMasivo};
   if (!hasMod('catalog')) delete subs.catalogo;
   await withSubs('inv', subs, fns)();
 }, false);

@@ -1,16 +1,68 @@
 // Inventario v2: resumen, filtros, kardex por producto, conteo físico y ajustes valorados
-const INV = {rows: [], q: '', type: 'all', low: false};
+const INV = {rows: [], q: '', type: 'all', low: false, exp: false};
 const REF = {purchase: 'Compra', sale: 'Venta', production: 'Producción', apertura: 'Apertura', ajuste_masivo: 'Ajuste masivo'};
 const refLabel = (m) => m.ref_type ? (REF[m.ref_type] ? `${REF[m.ref_type]}${m.ref_id ? ' #' + m.ref_id : ''}` : `${m.ref_type}${m.ref_id ? ' #' + m.ref_id : ''}`) : '-';
 const fdate = (d) => new Date(d).toLocaleString('es-VE', {dateStyle: 'short', timeStyle: 'short'});
 
+// Evalúa fecha de vencimiento opcional (devuelve null si el producto no maneja vencimiento)
+function expiryBadge(isoDate, compact = false) {
+  if (!isoDate) return null;
+  const hoy = typeof caracasDate === 'function' ? caracasDate() : new Date().toISOString().slice(0, 10);
+  const d1 = new Date(hoy + 'T12:00:00');
+  const d2 = new Date(String(isoDate).slice(0, 10) + 'T12:00:00');
+  if (isNaN(d2.getTime())) return null;
+  const diff = Math.round((d2 - d1) / 86400000);
+  const lblDate = typeof dmy === 'function' ? dmy(String(isoDate).slice(0, 10)) : String(isoDate).slice(0, 10);
+  if (diff < 0) return {cls: 'bad', state: 'expired', days: diff, text: compact ? `Vencido (${lblDate})` : `Vencido el ${lblDate}`};
+  if (diff === 0) return {cls: 'bad', state: 'soon', days: 0, text: `Vence hoy (${lblDate})`};
+  if (diff <= 15) return {cls: 'warn', state: 'soon', days: diff, text: `Vence en ${diff} ${diff === 1 ? 'día' : 'días'} (${lblDate})`};
+  return {cls: 'mut', state: 'ok', days: diff, text: `Vence: ${lblDate}`};
+}
 
-// Devuelve un Set con IDs de productos que NO controlan inventario (insumos libres como agua o servicios)
+// Calcula cuántos combos se pueden armar con el stock actual de sus componentes
+function comboAvail(combo, stMap, prodMap) {
+  if (!combo || !combo.is_combo || !Array.isArray(combo.combo_items) || !combo.combo_items.length) return 0;
+  let minAvail = Infinity;
+  for (const ci of combo.combo_items) {
+    const cp = prodMap ? prodMap[ci.product_id] : null;
+    if (cp && (cp.is_service || cp.track_inventory === false)) continue;
+    const req = Number(ci.quantity || 0);
+    if (!(req > 0)) continue;
+    const st = Number(stMap?.[ci.product_id] || 0);
+    minAvail = Math.min(minAvail, Math.floor((st + 1e-9) / req));
+  }
+  return minAvail === Infinity ? null : Math.max(0, minAvail);
+}
+
+// Calcula el costo total de un combo sumando el costo real de sus componentes
+function comboCost(combo, prodMap) {
+  if (!combo || !combo.is_combo || !Array.isArray(combo.combo_items) || !combo.combo_items.length) {
+    return Number(combo?.auto_cost_usd ?? combo?.avg_cost_usd ?? combo?.manual_cost_usd ?? 0);
+  }
+  let sum = 0;
+  for (const ci of combo.combo_items) {
+    const cp = prodMap ? prodMap[ci.product_id] : null;
+    const uc = Number(cp?.auto_cost_usd ?? cp?.avg_cost_usd ?? cp?.manual_cost_usd ?? 0);
+    sum += uc * Number(ci.quantity || 0);
+  }
+  return Math.round(sum * 10000) / 10000;
+}
+
+// Resume los componentes de un combo (ej: "2× Harina + 1× Aceite")
+function comboSummaryText(combo, prodMap) {
+  if (!combo || !Array.isArray(combo.combo_items) || !combo.combo_items.length) return '';
+  return combo.combo_items.map(ci => {
+    const nm = prodMap?.[ci.product_id]?.name || ('#' + ci.product_id);
+    return `${qty(ci.quantity)}× ${nm}`;
+  }).join(' + ');
+}
+
+// Devuelve un Set con IDs de productos que NO controlan inventario (insumos libres, servicios o combos)
 async function getUntrackedIds() {
   try {
-    const res = await db.from('products').select('id,is_service,track_inventory').eq('active', true);
+    const res = await db.from('products').select('id,is_service,is_combo,track_inventory').eq('active', true);
     const list = res.error ? [] : (res.data || []);
-    return new Set(list.filter(p => p.track_inventory === false || p.is_service).map(p => Number(p.id)));
+    return new Set(list.filter(p => p.track_inventory === false || p.is_service || p.is_combo).map(p => Number(p.id)));
   } catch (e) {
     return new Set();
   }
@@ -27,6 +79,9 @@ async function viewInventario2() {
   const valor = rows.reduce((a, x) => a + Number(x.valor_usd || 0), 0);
   const agotados = rows.filter(x => Number(x.stock) <= 0).length;
   const bajos = rows.filter(x => Number(x.stock) > 0 && x.bajo_minimo).length;
+  const hasAnyExpiry = rows.some(x => !!x.expiry_date);
+  const expAlert = rows.filter(x => { const eb = expiryBadge(x.expiry_date); return eb && (eb.state === 'expired' || eb.state === 'soon'); }).length;
+  if (!hasAnyExpiry) INV.exp = false;
   const cats = [...new Map(rows.filter(x => x.category_id).map(x => [x.category_id, x.category])).entries()];
   const chips = cats.map(([k, v]) => `<button data-t="${k}">${esc(v)}</button>`).join('');
   const opts = rows.map(s => `<option value="${s.product_id}">${esc(s.name)} (${esc(s.unit)}) — Stock: ${qty(s.stock)}</option>`).join('');
@@ -40,13 +95,15 @@ async function viewInventario2() {
     <div class="stat"><span>Productos activos</span><b>${rows.length}</b></div>
     <div class="stat warn"><span>Bajo el mínimo</span><b>${bajos}</b></div>
     <div class="stat bad"><span>Agotados</span><b>${agotados}</b></div>
+    ${expAlert > 0 ? `<div class="stat bad"><span>Por vencer / vencidos</span><b>${expAlert}</b></div>` : ''}
   </div>
   ${['admin', 'contador'].includes(S.role || 'admin') ? `<div class="row" style="margin:0 0 .8rem"><button class="btn ghost" data-go="apertura">Configurar inventario y saldos iniciales</button></div>` : ''}
   <div class="card">
     <div class="toolbar">
       <div class="scan-row" style="flex:1;min-width:210px"><input id="invQ" type="search" placeholder="Buscar por nombre o código"><button type="button" class="icon-btn scan-btn" id="invScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div>
       <div class="chips" id="invT"><button data-t="all" class="on">Todos</button>${chips}</div>
-      <label class="chk"><input type="checkbox" id="invLow"> Solo bajo mínimo</label>
+      <label class="chk"><input type="checkbox" id="invLow" ${INV.low ? 'checked' : ''}> Solo bajo mínimo</label>
+      ${hasAnyExpiry ? `<label class="chk"><input type="checkbox" id="invExp" ${INV.exp ? 'checked' : ''}> Por vencer / vencidos</label>` : ''}
     </div>
     <div class="scroll" id="invTable"></div>
   </div>
@@ -78,9 +135,10 @@ async function viewInventario2() {
     onCode: (code) => {
       const hit = findBySku(INV.rows, code);
       INV.q = hit ? (hit.sku || hit.name) : code;
-      INV.type = 'all'; INV.low = false;
+      INV.type = 'all'; INV.low = false; INV.exp = false;
       $('#invQ').value = INV.q;
       $('#invLow').checked = false;
+      if ($('#invExp')) $('#invExp').checked = false;
       document.querySelectorAll('#invT button').forEach(x => x.classList.toggle('on', x.dataset.t === 'all'));
       drawInvTable();
       return hit
@@ -89,6 +147,7 @@ async function viewInventario2() {
     }
   });
   $('#invLow').onchange = (e) => { INV.low = e.target.checked; drawInvTable(); };
+  if ($('#invExp')) $('#invExp').onchange = (e) => { INV.exp = e.target.checked; drawInvTable(); };
   $('#invT').onclick = (e) => {
     const b = e.target.closest('button'); if (!b) return;
     INV.type = b.dataset.t;
@@ -185,14 +244,22 @@ async function viewInventario2() {
 
 function drawInvTable() {
   const t = INV.q.toLowerCase();
-  const rows = INV.rows.filter(x => (INV.type === 'all' || String(x.category_id) === INV.type) && (!INV.low || x.bajo_minimo)
-    && (!t || (x.name + ' ' + (x.sku || '')).toLowerCase().includes(t)));
+  const rows = INV.rows.filter(x => {
+    if (INV.type !== 'all' && String(x.category_id) !== INV.type) return false;
+    if (INV.low && !x.bajo_minimo) return false;
+    if (INV.exp) {
+      const eb = expiryBadge(x.expiry_date);
+      if (!eb || (eb.state !== 'expired' && eb.state !== 'soon')) return false;
+    }
+    return !t || (x.name + ' ' + (x.sku || '')).toLowerCase().includes(t);
+  });
   const body = rows.map(x => {
     const st = Number(x.stock), mn = Number(x.min_stock);
     const state = st <= 0 ? 'out' : x.bajo_minimo ? 'low' : 'ok';
     const pct = st <= 0 ? 0 : mn > 0 ? Math.min(100, st / (mn * 2) * 100) : 100;
     const lbl = {out: 'Agotado', low: 'Bajo mínimo', ok: 'Disponible'}[state];
-    return `<tr><td>${esc(x.name)}<small>${esc(x.sku)}</small></td><td>${esc(x.category || '-')}</td>
+    const eb = expiryBadge(x.expiry_date, true);
+    return `<tr><td>${esc(x.name)}<small>${esc(x.sku)}</small>${eb ? `<small class="${eb.cls}">${esc(eb.text)}</small>` : ''}</td><td>${esc(x.category || '-')}</td>
       <td class="n">${qty(st)} ${esc(x.unit)}<div class="bar"><i class="${state}" style="width:${pct}%"></i></div></td>
       <td class="n">${qty(mn)}</td><td class="n">${fmt(x.avg_cost_usd)}</td><td class="n">${fmt(x.valor_usd)}</td>
       <td class="n">${S.rate ? fmt(x.valor_usd * S.rate) : '-'}</td><td><span class="badge ${state === 'ok' ? 'ok' : state}">${lbl}</span></td>
@@ -247,18 +314,20 @@ async function viewProductos2() {
     q(db.from('settings').select('enable_product_photos').eq('id', 1).single())
   ]);
   const stMap = Object.fromEntries(stockRows.map(s => [s.product_id, Number(s.stock || 0)]));
-  const D = {cats, units, taxes, photos: !!set.enable_product_photos};
+  const regProds = prods.filter(p => !p.is_combo);
+  const D = {cats, units, taxes, photos: !!set.enable_product_photos, allProds: regProds, stMap};
   $('#view').innerHTML = `<div class="scan-row" style="margin-bottom:.8rem"><input id="prQ" type="search" placeholder="Buscar producto o escanear código" value="${esc(PR2.q)}"><button type="button" class="icon-btn scan-btn" id="prScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div>
     <div class="list" id="prList"></div><button class="fab" id="prAdd" aria-label="Nuevo producto">+</button>`;
   const draw = () => {
     const t = PR2.q.toLowerCase();
-    $('#prList').innerHTML = prods.filter(p => !t || (p.name + ' ' + (p.sku || '')).toLowerCase().includes(t)).map(p => {
+    $('#prList').innerHTML = regProds.filter(p => !t || (p.name + ' ' + (p.sku || '')).toLowerCase().includes(t)).map(p => {
       const c = Number(p.auto_cost_usd ?? p.avg_cost_usd ?? p.manual_cost_usd ?? 0), pr = Number(p.sale_price_usd || 0);
       const mg = pr > 0 && c > 0 ? Math.round((pr - c) / pr * 100) : null;
       const stTxt = p.is_service ? 'Servicio' : p.track_inventory === false ? 'Sin inv.' : `Stock: ${qty(stMap[p.id] || 0)} ${esc(p.unit)}`;
+      const eb = expiryBadge(p.expiry_date, true);
       return `<button class="item" data-id="${p.id}">
       <span class="row0">${D.photos && p.image_url ? `<img class="thumb" src="${esc(p.image_url)}" alt="">` : ''}<span><b>${esc(p.name)}</b>
-      <small>${esc(p.sku || 'Sin código')} | ${esc(p.product_categories?.name || 'Sin categoría')} | ${stTxt}</small>
+      <small>${esc(p.sku || 'Sin código')} | ${esc(p.product_categories?.name || 'Sin categoría')} | ${stTxt}${eb ? ` | <span class="${eb.cls}">${esc(eb.text)}</span>` : ''}</small>
       <small>Precio: <b>${fmtCur(pr)}</b>${S.bimoneda !== false && S.rate ? ' (' + fmt(pr * S.rate) + ' Bs)' : ''}${c > 0 ? ' | Costo ' + fmt(c) : ''}${mg !== null ? ` | <span class="${mg < 0 ? 'bad' : 'in'}">${mg}% margen</span>` : ''}</small></span></span>
       <span class="mut">&rsaquo;</span></button>`;
     }).join('') || '<p class="mut">No hay productos. Pulsa + para crear el primero.</p>';
@@ -267,6 +336,10 @@ async function viewProductos2() {
   const handleProdScan = (code) => {
     const hit = findBySku(prods, code);
     if (hit) {
+      if (hit.is_combo) {
+        setTimeout(() => comboForm(hit, D), 260);
+        return {ok: true, msg: 'Abriendo combo: ' + hit.name};
+      }
       PR2.q = hit.sku || hit.name; $('#prQ').value = PR2.q; draw();
       setTimeout(() => prodForm(hit, D), 260);
       return {ok: true, msg: 'Abriendo: ' + hit.name};
@@ -283,7 +356,7 @@ async function viewProductos2() {
   bindEnterSku($('#prQ'), (code) => { handleProdScan(code); return true; });
   $('#prScan').onclick = () => openScanner({title: 'Buscar o crear producto', continuous: false, onCode: handleProdScan});
   $('#prAdd').onclick = () => prodForm(null, D);
-  $('#prList').onclick = (e) => { const b = e.target.closest('[data-id]'); if (b) prodForm(prods.find(p => String(p.id) === b.dataset.id), D); };
+  $('#prList').onclick = (e) => { const b = e.target.closest('[data-id]'); if (b) prodForm(regProds.find(p => String(p.id) === b.dataset.id), D); };
 }
 
 function prodForm(p, D, preSku = '') {
@@ -302,6 +375,8 @@ function prodForm(p, D, preSku = '') {
     <label class="chk"><input type="checkbox" name="no_track" ${p && p.track_inventory === false && !p.is_service ? 'checked' : ''}> Insumo sin inventario (consumo libre en fórmulas, ej: agua, gas, hielo). Puede tener costo 0 y nunca genera stock negativo.</label>
     <label class="chk"><input type="checkbox" name="is_service" ${p?.is_service ? 'checked' : ''}> Es un servicio facturable (ej: delivery). Tu costo es lo que pagas por él.</label>
     <label>Stock mínimo<input name="min" type="number" step="0.001" min="0" value="${v('min_stock', 0)}"></label>
+    <label class="chk" id="pfExpChkW"><input type="checkbox" name="has_expiry" ${p?.expiry_date ? 'checked' : ''}> Maneja fecha de vencimiento (opcional)</label>
+    <label id="pfExpW" class="${p?.expiry_date ? '' : 'hidden'}">Fecha de vencimiento<input name="expiry_date" type="date" value="${esc(v('expiry_date'))}"></label>
     <label>Impuesto<select name="tax_id">${opt(taxes, v('tax_id', defTax), 'id', t => `${t.name} (${qty(t.percent)}%)`)}</select></label>
     ${photos ? `<label>Foto<input name="photo" type="file" accept="image/*"></label>${p?.image_url ? `<img class="thumb big" src="${esc(p.image_url)}" alt=""><label class="chk"><input type="checkbox" name="rmphoto"> Quitar la foto actual</label>` : ''}` : ''}
     <p id="pMargin" class="mut"></p>
@@ -329,15 +404,31 @@ function prodForm(p, D, preSku = '') {
     $('#pMargin').innerHTML = parts.join('<br>');
     if ($('#pApplySug')) $('#pApplySug').onclick = () => { el.price.value = sug.toFixed(2); mg(); };
   };
+  const syncExpUI = () => {
+    const isSvc = el.is_service.checked;
+    if (isSvc) {
+      el.has_expiry.checked = false;
+      el.has_expiry.disabled = true;
+      $('#pfExpChkW')?.classList.add('hidden');
+    } else {
+      el.has_expiry.disabled = false;
+      $('#pfExpChkW')?.classList.remove('hidden');
+    }
+    const show = !isSvc && el.has_expiry.checked;
+    $('#pfExpW')?.classList.toggle('hidden', !show);
+    if (!show) el.expiry_date.value = '';
+  };
   const syncInvFlags = (src) => {
     if (src === 'svc' && el.is_service.checked) el.no_track.checked = false;
     if (src === 'nt' && el.no_track.checked) el.is_service.checked = false;
     const noInv = el.is_service.checked || el.no_track.checked;
     el.min.disabled = noInv;
     if (noInv) el.min.value = 0;
+    syncExpUI();
   };
   el.is_service.onchange = () => syncInvFlags('svc');
   el.no_track.onchange = () => syncInvFlags('nt');
+  el.has_expiry.onchange = syncExpUI;
   syncInvFlags();
   f.addEventListener('input', mg); mg();
   f.onsubmit = (e) => {
@@ -363,9 +454,12 @@ function prodForm(p, D, preSku = '') {
       }
       const isSvc = el.is_service.checked;
       const trackInv = !(isSvc || el.no_track.checked);
+      const hasExp = !isSvc && el.has_expiry.checked;
+      const expVal = hasExp ? (el.expiry_date.value || '') : '';
+      if (hasExp && !expVal) throw new Error('Indica la fecha de vencimiento o desmarca la opción');
       const row = {sku: el.sku.value.trim() || null, name: el.pname.value.trim(), category_id: +el.category_id.value || null, unit: el.unit.value,
         manual_cost_usd: +el.cost.value || 0, sale_price_usd: +el.price.value || 0, min_stock: trackInv ? (+el.min.value || 0) : 0,
-        is_service: isSvc, track_inventory: trackInv, tax_id: +el.tax_id.value || null, image_url};
+        is_service: isSvc, track_inventory: trackInv, expiry_date: expVal || null, tax_id: +el.tax_id.value || null, image_url};
       try {
         await q(p ? db.from('products').update(row).eq('id', p.id) : db.from('products').insert(row));
       } catch (err) {
@@ -386,6 +480,236 @@ function prodForm(p, D, preSku = '') {
   });
 }
 
+
+
+
+// ---------- Combos / Paquetes promocionales (descuentan automáticamente el stock de cada producto) ----------
+const CMB = {q: ''};
+
+async function viewCombos() {
+  const [prods, stockRows, cats, taxes, set] = await Promise.all([
+    q(db.from('products').select('*, product_categories(name), taxes(name)').eq('active', true).order('name')),
+    q(db.from('stock_actual').select('product_id,stock')),
+    q(db.from('product_categories').select('id,name').eq('active', true).order('name')),
+    q(db.from('taxes').select('id,name,percent,is_default').eq('active', true).order('name')),
+    q(db.from('settings').select('enable_product_photos').eq('id', 1).single())
+  ]);
+  const stMap = Object.fromEntries(stockRows.map(s => [s.product_id, Number(s.stock || 0)]));
+  const allProds = prods.filter(p => !p.is_combo);
+  const prodMap = Object.fromEntries(allProds.map(p => [p.id, p]));
+  const combos = prods.filter(p => p.is_combo);
+  const D = {cats, taxes, photos: !!set.enable_product_photos, allProds, prodMap, stMap};
+
+  $('#view').innerHTML = `
+    <div class="card stack" style="margin-bottom:.8rem">
+      <p class="mut" style="margin:0">Agrupa varios productos en un solo precio promocional. Al vender un combo, el sistema descuenta automáticamente el stock de cada producto que lo compone.</p>
+      <div class="scan-row">
+        <input id="cbQ" type="search" placeholder="Buscar combo o escanear código" value="${esc(CMB.q)}">
+        <button type="button" class="icon-btn scan-btn" id="cbScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button>
+      </div>
+    </div>
+    <div class="list" id="cbList"></div>
+    <button class="fab" id="cbAdd" aria-label="Nuevo combo">+</button>`;
+
+  const draw = () => {
+    const t = CMB.q.trim().toLowerCase();
+    const list = combos.filter(c => !t || (c.name + ' ' + (c.sku || '') + ' ' + comboSummaryText(c, prodMap)).toLowerCase().includes(t));
+    $('#cbList').innerHTML = list.map(c => {
+      const cost = comboCost(c, prodMap);
+      const pr = Number(c.sale_price_usd || 0);
+      const mg = pr > 0 && cost > 0 ? Math.round((pr - cost) / pr * 100) : null;
+      const sumReg = (c.combo_items || []).reduce((a, ci) => a + Number(prodMap[ci.product_id]?.sale_price_usd || 0) * Number(ci.quantity || 0), 0);
+      const savePct = sumReg > 0 && pr < sumReg ? Math.round((sumReg - pr) / sumReg * 100) : 0;
+      const avail = comboAvail(c, stMap, prodMap);
+      const availTxt = avail === null ? 'Sin control de stock' : `Armables: ${qty(avail)}`;
+      const availCls = avail === 0 ? 'bad' : 'in';
+      const desc = comboSummaryText(c, prodMap) || 'Sin productos asignados';
+      return `<button class="item" data-id="${c.id}">
+        <span class="row0">${D.photos && c.image_url ? `<img class="thumb" src="${esc(c.image_url)}" alt="">` : ''}
+          <span>
+            <b>${esc(c.name)}</b> <span class="badge ok" style="font-size:.7rem;padding:.05rem .35rem">Combo</span>
+            <small>${esc(desc)}</small>
+            <small>${esc(c.sku || 'Sin código')} | <span class="${availCls}">${availTxt}</span>${savePct > 0 ? ` | Ahorro ${savePct}% (normal ${fmtCur(sumReg)})` : ''}</small>
+            <small>Precio: <b>${fmtCur(pr)}</b>${S.bimoneda !== false && S.rate ? ' (' + fmt(pr * S.rate) + ' Bs)' : ''}${cost > 0 ? ' | Costo ' + fmt(cost) : ''}${mg !== null ? ` | <span class="${mg < 0 ? 'bad' : 'in'}">${mg}% margen</span>` : ''}</small>
+          </span>
+        </span>
+        <span class="mut">&rsaquo;</span>
+      </button>`;
+    }).join('') || '<p class="mut">Aún no hay combos creados. Pulsa + para armar tu primer combo.</p>';
+  };
+  draw();
+
+  $('#cbQ').oninput = (e) => { CMB.q = e.target.value; draw(); };
+  $('#cbScan').onclick = () => openScanner({
+    title: 'Buscar o crear combo',
+    continuous: false,
+    onCode: (code) => {
+      const hit = findBySku(combos, code);
+      if (hit) {
+        CMB.q = hit.sku || hit.name; $('#cbQ').value = CMB.q; draw();
+        setTimeout(() => comboForm(hit, D), 260);
+        return {ok: true, msg: 'Abriendo combo: ' + hit.name};
+      }
+      setTimeout(() => {
+        if (confirm(`No existe un combo con el código "${code}". ¿Crear un combo nuevo con este código?`)) comboForm(null, D, code);
+      }, 280);
+      return {ok: false, msg: 'Código nuevo: ' + code};
+    }
+  });
+  $('#cbAdd').onclick = () => comboForm(null, D);
+  $('#cbList').onclick = (e) => { const b = e.target.closest('[data-id]'); if (b) comboForm(combos.find(c => String(c.id) === b.dataset.id), D); };
+}
+
+function comboForm(combo, D, preSku = '') {
+  const {cats, taxes, photos, allProds = [], stMap = {}} = D;
+  const prodMap = D.prodMap || Object.fromEntries(allProds.map(p => [p.id, p]));
+  if (!allProds.length) { toast('Primero crea los productos individuales antes de armar un combo', true); return; }
+  const defTax = taxes.find(t => t.is_default)?.id;
+  const v = (k, d = '') => combo ? (combo[k] ?? d) : d;
+  const opt = (arr, val, key, label) => arr.map(o => `<option value="${o[key]}" ${String(o[key]) === String(val) ? 'selected' : ''}>${esc(label(o))}</option>`).join('');
+  const items = combo && Array.isArray(combo.combo_items) && combo.combo_items.length
+    ? combo.combo_items.map(ci => ({product_id: Number(ci.product_id), quantity: Number(ci.quantity || 1)}))
+    : [{product_id: Number(allProds[0].id), quantity: 1}];
+
+  openSheet(combo ? 'Editar combo' : 'Nuevo combo', `<form id="cbf" class="stack">
+    <label>Código (SKU / barras)<div class="scan-row" style="margin-top:.25rem"><input name="sku" value="${esc(v('sku', preSku))}" placeholder="Opcional: escanea o escribe código"><button type="button" class="icon-btn scan-btn" id="cbfScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div></label>
+    <label>Nombre del combo<input name="cname" value="${esc(v('name'))}" placeholder="Ej: Combo Desayuno Familiar" required></label>
+    <label>Categoría<select name="category_id">${opt(cats, v('category_id'), 'id', c => c.name)}</select></label>
+    <div class="stack" style="gap:.45rem;padding:.65rem;background:var(--bg);border:1px solid var(--line);border-radius:10px">
+      <div class="title-row"><b style="font-size:.9rem">Productos incluidos en el combo</b><button type="button" class="lnk" id="cbAddRow">+ Agregar producto</button></div>
+      <div id="cbRows" class="stack" style="gap:.5rem"></div>
+    </div>
+    <div id="cbSum" class="card" style="margin:0;padding:.7rem .85rem;background:var(--bg)"></div>
+    <label>Precio fijo de venta del combo (${esc(curLabel())})<input name="price" type="number" step="0.01" min="0" value="${v('sale_price_usd', 0)}" required></label>
+    <label>Impuesto<select name="tax_id">${opt(taxes, v('tax_id', defTax), 'id', t => `${t.name} (${qty(t.percent)}%)`)}</select></label>
+    ${photos ? `<label>Foto del combo<input name="photo" type="file" accept="image/*"></label>${combo?.image_url ? `<img class="thumb big" src="${esc(combo.image_url)}" alt=""><label class="chk"><input type="checkbox" name="rmphoto"> Quitar la foto actual</label>` : ''}` : ''}
+    <div class="row"><button class="btn" type="submit">Guardar combo</button>${combo ? '<button type="button" class="btn ghost" id="cbfDel">Desactivar</button>' : ''}</div>
+  </form>`);
+
+  const f = $('#cbf'), el = f.elements;
+  $('#cbfScan').onclick = () => openScanner({
+    title: 'Escanear código del combo',
+    continuous: false,
+    onCode: (code) => { el.sku.value = code; return {ok: true, msg: 'Código asignado: ' + code}; }
+  });
+
+  const prodOpts = (selId) => allProds.map(p => {
+    const stTxt = p.is_service ? 'Servicio' : p.track_inventory === false ? 'Sin inv.' : `Disp: ${qty(stMap[p.id] || 0)} ${p.unit}`;
+    return `<option value="${p.id}" ${Number(p.id) === Number(selId) ? 'selected' : ''}>${esc(p.name)} (${fmtCur(p.sale_price_usd)} · ${esc(stTxt)})</option>`;
+  }).join('');
+
+  const paintSummary = () => {
+    const fakeCombo = {is_combo: true, combo_items: items};
+    const cost = comboCost(fakeCombo, prodMap);
+    const sumReg = items.reduce((a, ci) => a + Number(prodMap[ci.product_id]?.sale_price_usd || 0) * Number(ci.quantity || 0), 0);
+    const pr = Number(el.price.value || 0);
+    const mg = pr > 0 ? ((pr - cost) / pr * 100) : 0;
+    const save = sumReg > 0 ? Math.max(0, sumReg - pr) : 0;
+    const avail = comboAvail(fakeCombo, stMap, prodMap);
+    const minM = Number(S.rules?.min_margin_percent || 0);
+    const lowM = minM > 0 && pr > 0 && mg < minM - 0.1;
+    $('#cbSum').innerHTML = `
+      <div class="rl" style="border:0;padding:.15rem 0"><span>Costo total de componentes</span><b>${fmtCur(cost, 4)}</b></div>
+      <div class="rl" style="border:0;padding:.15rem 0"><span>Suma de precios por separado</span><b>${fmtCur(sumReg)}</b></div>
+      <div class="rl" style="border:0;padding:.15rem 0"><span>Disponibilidad con stock actual</span><b class="${avail === 0 ? 'bad' : 'in'}">${avail === null ? 'Sin límite de stock' : qty(avail) + ' combos armables'}</b></div>
+      ${pr > 0 ? `<div class="rl" style="border:0;padding:.15rem 0"><span>Margen del combo</span><b class="${mg < 0 ? 'bad' : lowM ? 'warn' : 'in'}">${fmt(mg, 0)}% (${fmtCur(pr - cost)}/combo)</b></div>` : ''}
+      ${save > 0.005 ? `<small class="in">El cliente ahorra <b>${fmtCur(save)}</b> (${Math.round(save / sumReg * 100)}%) comprando el combo.</small>` : ''}`;
+  };
+
+  const drawRows = () => {
+    $('#cbRows').innerHTML = items.map((ci, i) => `
+      <div class="ln2" data-ci="${i}" style="align-items:end;gap:.45rem">
+        <label style="flex:1;margin:0">Producto<select data-cf="pid">${prodOpts(ci.product_id)}</select></label>
+        <div class="row0" style="gap:.35rem;align-items:end">
+          <label style="width:5.2rem;margin:0">Cant.<input data-cf="qty" type="number" step="0.001" min="0.001" value="${ci.quantity}"></label>
+          ${items.length > 1 ? `<button type="button" class="lnk bad" data-crm="${i}" title="Quitar" style="padding:.45rem .3rem">&times;</button>` : ''}
+        </div>
+      </div>`).join('');
+    paintSummary();
+  };
+  drawRows();
+
+  $('#cbAddRow').onclick = () => {
+    const used = new Set(items.map(x => Number(x.product_id)));
+    const next = allProds.find(p => !used.has(Number(p.id))) || allProds[0];
+    items.push({product_id: Number(next.id), quantity: 1});
+    drawRows();
+  };
+  $('#cbRows').addEventListener('input', (e) => {
+    const row = e.target.closest('[data-ci]'); if (!row) return;
+    const ci = items[+row.dataset.ci];
+    if (e.target.dataset.cf === 'pid') ci.product_id = Number(e.target.value);
+    if (e.target.dataset.cf === 'qty') ci.quantity = Number(e.target.value) || 0;
+    paintSummary();
+  });
+  $('#cbRows').addEventListener('change', (e) => {
+    const row = e.target.closest('[data-ci]'); if (!row) return;
+    if (e.target.dataset.cf === 'pid') { items[+row.dataset.ci].product_id = Number(e.target.value); paintSummary(); }
+  });
+  $('#cbRows').addEventListener('click', (e) => {
+    if (e.target.dataset.crm !== undefined && items.length > 1) {
+      items.splice(+e.target.dataset.crm, 1);
+      drawRows();
+    }
+  });
+  el.price.addEventListener('input', paintSummary);
+
+  f.onsubmit = (e) => {
+    e.preventDefault();
+    run(async () => {
+      const merged = new Map();
+      for (const ci of items) {
+        const pid = Number(ci.product_id), qv = Number(ci.quantity || 0);
+        if (!pid || !(qv > 0)) continue;
+        merged.set(pid, Math.round(((merged.get(pid) || 0) + qv) * 1000) / 1000);
+      }
+      const cleanItems = [...merged.entries()].map(([product_id, quantity]) => ({product_id, quantity}));
+      if (!cleanItems.length) throw new Error('Agrega al menos un producto válido con cantidad mayor que cero');
+      let image_url = combo?.image_url || null;
+      if (photos) {
+        if (el.rmphoto?.checked) image_url = null;
+        const file = el.photo?.files[0];
+        if (file) {
+          const blob = await compressImage(file), path = `p/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+          const up = await db.storage.from('product-images').upload(path, blob, {contentType: 'image/jpeg'});
+          if (up.error) {
+            if (String(up.error.message || '').includes('OFFLINE_STORAGE') || (typeof OFF !== 'undefined' && OFF.isNetError(up.error))) {
+              toast('Sin internet: se guardará el combo sin subir la foto todavía');
+            } else {
+              throw up.error;
+            }
+          } else {
+            image_url = db.storage.from('product-images').getPublicUrl(path).data.publicUrl;
+          }
+        }
+      }
+      const cc = comboCost({is_combo: true, combo_items: cleanItems}, prodMap);
+      const row = {
+        sku: el.sku.value.trim() || null,
+        name: el.cname.value.trim(),
+        category_id: +el.category_id.value || null,
+        unit: 'combo',
+        manual_cost_usd: cc,
+        avg_cost_usd: cc,
+        sale_price_usd: +el.price.value || 0,
+        min_stock: 0,
+        is_service: false,
+        track_inventory: false,
+        is_combo: true,
+        combo_items: cleanItems,
+        expiry_date: null,
+        tax_id: +el.tax_id.value || null,
+        image_url
+      };
+      await q(combo ? db.from('products').update(row).eq('id', combo.id) : db.from('products').insert(row));
+      closeSheet(); toast(combo ? 'Combo actualizado' : 'Combo creado'); render();
+    });
+  };
+  if (combo) $('#cbfDel').onclick = () => run(async () => {
+    if (!confirm('¿Desactivar este combo? Los productos individuales que lo integran no se verán afectados.')) return;
+    await q(db.from('products').update({active: false}).eq('id', combo.id)); closeSheet(); toast('Combo desactivado'); render();
+  });
+}
 
 // ---------- Actualización masiva de precios y márgenes ----------
 const PM = {
@@ -409,7 +733,7 @@ function roundPriceRule(val, mode) {
 
 async function viewPreciosMasivo() {
   const [prods, cats] = await Promise.all([
-    db.from('products').select('id,sku,name,category_id,unit,sale_price_usd,avg_cost_usd,auto_cost_usd,manual_cost_usd,is_service,track_inventory,product_categories(name)').eq('active', true).order('name')
+    db.from('products').select('id,sku,name,category_id,unit,sale_price_usd,avg_cost_usd,auto_cost_usd,manual_cost_usd,is_service,is_combo,combo_items,track_inventory,product_categories(name)').eq('active', true).order('name')
       .then(r => r.error ? q(db.from('products').select('id,sku,name,category_id,unit,sale_price_usd,avg_cost_usd,auto_cost_usd,manual_cost_usd,is_service,product_categories(name)').eq('active', true).order('name')) : r.data),
     q(db.from('product_categories').select('id,name').eq('active', true).order('name'))
   ]);
@@ -417,9 +741,10 @@ async function viewPreciosMasivo() {
   const targetMin = Number(S.rules?.min_margin_percent || 0) || 30;
   if (PM.margin === '') PM.margin = String(targetMin);
 
-  // Excluir insumos sin inventario con precio 0 a menos que ya tengan precio de venta
-  const listAll = prods.filter(p => !(p.track_inventory === false && !(Number(p.sale_price_usd) > 0)));
-  const costOfP = (p) => Number(p.auto_cost_usd ?? p.avg_cost_usd ?? p.manual_cost_usd ?? 0);
+  // Excluir insumos sin inventario con precio 0 a menos que ya tengan precio de venta (combos siempre incluidos)
+  const pmAll = Object.fromEntries(prods.map(p => [p.id, p]));
+  const listAll = prods.filter(p => p.is_combo || !(p.track_inventory === false && !(Number(p.sale_price_usd) > 0)));
+  const costOfP = (p) => p.is_combo ? comboCost(p, pmAll) : Number(p.auto_cost_usd ?? p.avg_cost_usd ?? p.manual_cost_usd ?? 0);
   const curMarginOf = (p) => {
     const pr = Number(p.sale_price_usd || 0), c = costOfP(p);
     return pr > 0 ? ((pr - c) / pr * 100) : 0;
