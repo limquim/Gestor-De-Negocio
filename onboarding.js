@@ -401,8 +401,161 @@ function showOnboarding() {
         ob.classList.add('hidden');
         toast(`¡Listo! "${ST.businessName.trim()}" está configurado`);
         await enter();
+        setTimeout(() => { if (typeof openTutorial === 'function') openTutorial(0); }, 350);
       });
     }
   };
   drawStep();
+}
+
+
+// ---------- Tutorial interactivo rápido (Guía de uso de la app) ----------
+const TUT_SEEN_KEY = 'gdn_tut_seen_v1';
+function isTutorialSeen() {
+  try { return localStorage.getItem(TUT_SEEN_KEY) === '1'; } catch (e) { return false; }
+}
+function markTutorialSeen() {
+  try { localStorage.setItem(TUT_SEEN_KEY, '1'); } catch (e) {}
+}
+function closeTutorial() {
+  markTutorialSeen();
+  const m = $('#tutModal');
+  if (m) m.classList.add('hidden');
+}
+
+function openTutorial(startStep = 0) {
+  markTutorialSeen();
+  const steps = [
+    {
+      badge: 'Primeros pasos',
+      title: 'Conoce tu Gestor Emprendedor',
+      icon: '<path d="M3 11l9-8 9 8M5 10v10h14V10"/>',
+      desc: 'Todo está organizado en la barra inferior para que encuentres cada módulo en un toque.',
+      tips: [
+        '<b>Inicio:</b> resumen de tus ventas del día, ganancias, caja y alertas importantes.',
+        '<b>Ventas:</b> factura en segundos, lleva cuentas por cobrar y comparte tickets por WhatsApp.',
+        '<b>Inventario:</b> crea tus productos, arma combos, ajusta existencias y genera tu catálogo.',
+        '<b>Barra superior:</b> consulta la tasa del día, usa el buscador rápido (lupa) o abre esta guía (?) cuando quieras.'
+      ]
+    },
+    {
+      badge: 'Paso clave',
+      title: '1. Crea tus productos y categorías',
+      icon: '<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>',
+      desc: 'Al entrar en Inventario verás directamente la pestaña Productos para registrar tu mercancía o servicios.',
+      tips: [
+        'Toca el botón <b>+ Nuevo producto</b> (arriba o abajo a la derecha).',
+        '¿Te falta una categoría? Toca el botón <b>+</b> junto a Categoría para crearla al instante sin salir del formulario.',
+        'Coloca tu <b>costo</b> y <b>precio de venta</b> para ver tu margen de ganancia automático.',
+        'Si el producto es perecedero, marca <b>Maneja fecha de vencimiento</b>; si no vence, déjalo desmarcado.'
+      ],
+      action: {label: 'Ir a Productos ahora', fn: () => { SUB.inv = 'productos'; go('inventario'); }}
+    },
+    {
+      badge: 'Control de stock',
+      title: '2. Carga tus existencias iniciales',
+      icon: '<path d="M6 7h12l-1 13H7z"/><path d="M9 7a3 3 0 016 0"/>',
+      desc: 'Una vez creados tus productos, registra cuántas unidades tienes disponibles.',
+      tips: [
+        '<b>Existencias (Inventario &gt; Existencias):</b> toca <i>Ajustar</i> en cualquier producto o usa <b>Ajuste masivo</b> para actualizar varios a la vez.',
+        '<b>Si ya venías operando:</b> usa <b>Saldos iniciales (Apertura)</b> para cargar tu inventario y caja de arranque.',
+        '<b>Cuando compres mercancía:</b> regístrala en <b>Más &gt; Compras</b> para sumar stock y actualizar el costo promedio automáticamente.'
+      ],
+      action: {label: 'Ir a Existencias', fn: () => { SUB.inv = 'stock'; go('inventario'); }}
+    },
+    {
+      badge: 'Vende más rápido',
+      title: '3. Registra ventas y envía tickets',
+      icon: '<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>',
+      desc: 'En la pestaña Ventas puedes cobrar en pocos segundos desde el teléfono o computador.',
+      tips: [
+        'Toca un <b>producto rápido</b>, búscalo por nombre o usa el ícono de cámara para <b>escanear su código de barras</b>.',
+        'Toca una cuenta en <b>Cobro rápido</b> para marcar el pago completo en 1 toque, o agrega pagos parciales/mixtos.',
+        'Si no agregas pago, la venta queda automáticamente en <b>Por cobrar (crédito)</b>.',
+        'Al guardar, envía el ticket como <b>foto o texto por WhatsApp</b> o imprímelo.'
+      ],
+      action: {label: 'Ir a Nueva venta', fn: () => { SUB.ven = 'nueva'; go('ventas'); }}
+    },
+    {
+      badge: 'Más herramientas',
+      title: '4. Combos, Precios y Catálogo',
+      icon: '<path d="M12 2l3 7h7l-5.5 4.2L18.5 21 12 16.8 5.5 21l2-7.8L2 9h7z"/>',
+      desc: 'Ahorra tiempo con promociones, ajustes de precios y catálogo listo para clientes.',
+      tips: [
+        '<b>Combos (Inventario &gt; Combos):</b> agrupa varios productos en un precio promocional; al venderse, el stock de cada producto se descuenta solo.',
+        '<b>Precios (Inventario &gt; Precios):</b> sube precios por porcentaje o fija un margen objetivo para varios productos a la vez.',
+        '<b>Catálogo:</b> genera un catálogo visual profesional para compartir por WhatsApp.'
+      ],
+      action: {label: 'Ir a Combos', fn: () => { SUB.inv = 'combos'; go('inventario'); }}
+    },
+    {
+      badge: 'Seguridad y orden',
+      title: '5. Finanzas, PIN y Respaldo en Drive',
+      icon: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>',
+      desc: 'Mantén tus números protegidos y tus datos seguros ante cualquier cambio de teléfono.',
+      tips: [
+        '<b>Más &gt; Finanzas:</b> registra gastos, controla tus cuentas y haz tu <b>Cierre de caja</b> diario.',
+        '<b>Modo Empleado (candado arriba):</b> crea un PIN de dueño para ocultar costos, ganancias y ajustes cuando atienda un vendedor.',
+        '<b>Respaldo en Google Drive:</b> conéctalo en <b>Configuración &gt; Respaldo y Google Drive</b> para guardar copias automáticas gratis.'
+      ],
+      action: (S.role !== 'vendedor') ? {label: 'Ir a Configuración', fn: () => { SUB.cfg = 'menu'; go('configuracion'); }} : null
+    }
+  ];
+
+  let idx = Math.max(0, Math.min(steps.length - 1, Number(startStep) || 0));
+  let m = $('#tutModal');
+  if (!m) {
+    m = document.createElement('div');
+    m.id = 'tutModal';
+    m.className = 'tut-modal hidden';
+    document.body.appendChild(m);
+  }
+
+  const draw = () => {
+    const st = steps[idx];
+    const isLast = idx === steps.length - 1;
+    m.innerHTML = `
+      <div class="tut-bg" data-tclose="1"></div>
+      <div class="tut-box" role="dialog" aria-modal="true" aria-label="Tutorial rápido">
+        <div class="title-row">
+          <span class="badge ok">${esc(st.badge)} · Paso ${idx + 1} de ${steps.length}</span>
+          <button type="button" class="lnk" data-tclose="1">Cerrar</button>
+        </div>
+        <div class="tut-head">
+          <div class="tut-icon"><svg class="ic" viewBox="0 0 24 24">${st.icon}</svg></div>
+          <div>
+            <h2 style="margin:0;font-size:1.18rem">${esc(st.title)}</h2>
+            <p class="mut" style="margin:.2rem 0 0;font-size:.88rem">${esc(st.desc)}</p>
+          </div>
+        </div>
+        <ul class="tut-tips">
+          ${st.tips.map(t => `<li>${t}</li>`).join('')}
+        </ul>
+        ${st.action ? `<button type="button" class="btn ghost" id="tutAct" style="width:100%">${esc(st.action.label)} &rsaquo;</button>` : ''}
+        <div class="tut-dots" id="tutDots">
+          ${steps.map((_, i) => `<button type="button" data-tdot="${i}" class="${i === idx ? 'on' : ''}" aria-label="Ir al paso ${i + 1}"></button>`).join('')}
+        </div>
+        <div class="row" style="margin:0">
+          ${idx > 0 ? '<button type="button" class="btn ghost" id="tutPrev">&lsaquo; Anterior</button>' : ''}
+          <button type="button" class="btn" id="tutNext">${isLast ? '¡Listo, empezar!' : 'Siguiente &rsaquo;'}</button>
+        </div>
+      </div>`;
+
+    m.onclick = (e) => { if (e.target.dataset.tclose) closeTutorial(); };
+    if ($('#tutPrev')) $('#tutPrev').onclick = () => { idx--; draw(); };
+    $('#tutNext').onclick = () => {
+      if (isLast) { closeTutorial(); if (tab === 'inicio') render(); }
+      else { idx++; draw(); }
+    };
+    if ($('#tutAct') && st.action) {
+      $('#tutAct').onclick = () => { closeTutorial(); st.action.fn(); };
+    }
+    $('#tutDots').onclick = (e) => {
+      const b = e.target.closest('[data-tdot]');
+      if (b) { idx = Number(b.dataset.tdot); draw(); }
+    };
+  };
+
+  draw();
+  m.classList.remove('hidden');
 }

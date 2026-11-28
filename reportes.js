@@ -305,7 +305,7 @@ async function alertasHtml() {
   }
   if (expiredCnt) A.push(['inventario', `${expiredCnt} ${expiredCnt === 1 ? 'producto vencido' : 'productos vencidos'} en inventario`, '', "SUB.inv='stock';INV.exp=true"]);
   if (soonExpCnt) A.push(['inventario', `${soonExpCnt} ${soonExpCnt === 1 ? 'producto próximo' : 'productos próximos'} a vencer (≤15 días)`, '', "SUB.inv='stock';INV.exp=true"]);
-  if (bajos) A.push(['inventario', `${bajos} ${bajos === 1 ? 'producto' : 'productos'} por reponer`]);
+  if (bajos) A.push(['inventario', `${bajos} ${bajos === 1 ? 'producto' : 'productos'} por reponer`, '', "SUB.inv='stock';INV.low=true"]);
   if (sc) A.push(['inventario', `${sc} ${sc === 1 ? 'producto sin costo' : 'productos sin costo'}: la utilidad saldrá incompleta`]);
   if (ng) A.push(['inventario', `${ng} ${ng === 1 ? 'producto' : 'productos'} con precio menor al costo`]);
   if (S.bimoneda !== false && (!rate[0] || rate[0].rate_date < hoy)) A.push(['configuracion', 'La tasa de cambio no se ha actualizado hoy', 'tasa']);

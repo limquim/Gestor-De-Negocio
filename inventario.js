@@ -316,7 +316,12 @@ async function viewProductos2() {
   const stMap = Object.fromEntries(stockRows.map(s => [s.product_id, Number(s.stock || 0)]));
   const regProds = prods.filter(p => !p.is_combo);
   const D = {cats, units, taxes, photos: !!set.enable_product_photos, allProds: regProds, stMap};
-  $('#view').innerHTML = `<div class="scan-row" style="margin-bottom:.8rem"><input id="prQ" type="search" placeholder="Buscar producto o escanear código" value="${esc(PR2.q)}"><button type="button" class="icon-btn scan-btn" id="prScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div>
+  $('#view').innerHTML = `<div class="stack" style="gap:.6rem;margin-bottom:.8rem">
+      <div class="row0" style="gap:.5rem">
+        <button type="button" class="btn" id="prAddTop" style="flex:1">+ Nuevo producto</button>
+      </div>
+      <div class="scan-row"><input id="prQ" type="search" placeholder="Buscar producto o escanear código" value="${esc(PR2.q)}"><button type="button" class="icon-btn scan-btn" id="prScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div>
+    </div>
     <div class="list" id="prList"></div><button class="fab" id="prAdd" aria-label="Nuevo producto">+</button>`;
   const draw = () => {
     const t = PR2.q.toLowerCase();
@@ -356,7 +361,56 @@ async function viewProductos2() {
   bindEnterSku($('#prQ'), (code) => { handleProdScan(code); return true; });
   $('#prScan').onclick = () => openScanner({title: 'Buscar o crear producto', continuous: false, onCode: handleProdScan});
   $('#prAdd').onclick = () => prodForm(null, D);
+  if ($('#prAddTop')) $('#prAddTop').onclick = () => prodForm(null, D);
   $('#prList').onclick = (e) => { const b = e.target.closest('[data-id]'); if (b) prodForm(regProds.find(p => String(p.id) === b.dataset.id), D); };
+}
+
+
+// Crea una categoría nueva al vuelo desde el formulario de producto o combo y la selecciona automáticamente
+function wireInlineCategoryCreator({btn, box, nameInp, regChk, saveBtn, cancelBtn, selectEl, catsArr}) {
+  if (!btn || !box || !selectEl) return;
+  const open = () => {
+    box.classList.remove('hidden');
+    nameInp.value = '';
+    if (regChk) regChk.checked = true;
+    setTimeout(() => nameInp.focus(), 40);
+  };
+  const close = () => {
+    box.classList.add('hidden');
+    nameInp.value = '';
+  };
+  btn.onclick = () => (box.classList.contains('hidden') ? open() : close());
+  cancelBtn.onclick = close;
+  const doSave = () => run(async () => {
+    const raw = (nameInp.value || '').trim();
+    if (!raw) throw new Error('Escribe el nombre de la categoría');
+    const existing = (catsArr || []).find(c => String(c.name || '').trim().toLowerCase() === raw.toLowerCase());
+    if (existing) {
+      selectEl.value = String(existing.id);
+      close();
+      toast(`Categoría "${existing.name}" seleccionada`);
+      return;
+    }
+    const created = await q(
+      db.from('product_categories')
+        .insert({name: raw, sells_regularly: regChk ? !!regChk.checked : true, active: true})
+        .select('id,name')
+        .single()
+    );
+    catsArr.push(created);
+    catsArr.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), 'es'));
+    selectEl.innerHTML = `<option value="">Sin categoría</option>` + catsArr.map(c =>
+      `<option value="${c.id}" ${String(c.id) === String(created.id) ? 'selected' : ''}>${esc(c.name)}</option>`
+    ).join('');
+    selectEl.value = String(created.id);
+    close();
+    toast(`Categoría "${created.name}" creada`);
+  });
+  saveBtn.onclick = doSave;
+  nameInp.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') { e.preventDefault(); e.stopPropagation(); doSave(); }
+    if (e.key === 'Escape') { e.preventDefault(); close(); }
+  });
 }
 
 function prodForm(p, D, preSku = '') {
@@ -366,7 +420,19 @@ function prodForm(p, D, preSku = '') {
   openSheet(p ? 'Editar producto' : 'Nuevo producto', `<form id="pf" class="stack">
     <label>Código (SKU / barras)<div class="scan-row" style="margin-top:.25rem"><input name="sku" value="${esc(v('sku', preSku))}" placeholder="Escanea o escribe el código"><button type="button" class="icon-btn scan-btn" id="pfScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div></label>
     <label>Nombre<input name="pname" value="${esc(v('name'))}" required></label>
-    <label>Categoría<select name="category_id">${opt(cats, v('category_id'), 'id', c => c.name)}</select></label>
+    <div class="row0" style="align-items:flex-end;gap:.45rem">
+      <label style="flex:1;margin:0">Categoría<select name="category_id"><option value="">Sin categoría</option>${opt(cats, v('category_id'), 'id', c => c.name)}</select></label>
+      <button type="button" class="btn ghost" id="pfNewCat" title="Crear nueva categoría" aria-label="Crear nueva categoría" style="min-width:46px;padding:.55rem .75rem">+</button>
+    </div>
+    <div id="pfCatBox" class="cat-inline stack hidden">
+      <b style="font-size:.88rem">Nueva categoría de producto</b>
+      <input id="pfCatName" type="text" placeholder="Ej: Bebidas, Limpieza, Postres..." autocomplete="off">
+      <label class="chk" style="margin:0"><input type="checkbox" id="pfCatReg" checked> Se vende con frecuencia</label>
+      <div class="row" style="margin:0">
+        <button type="button" class="btn" id="pfCatSave" style="min-height:40px;font-size:.9rem">Crear categoría</button>
+        <button type="button" class="btn ghost" id="pfCatCancel" style="min-height:40px;font-size:.9rem">Cancelar</button>
+      </div>
+    </div>
     <label>Unidad de medida<select name="unit">${opt(units, v('unit', 'und'), 'symbol', u => `${u.name} (${u.symbol})`)}</select></label>
     <label>Costo manual (${esc(curLabel())}) — el que tú pones, no cambia solo<input name="cost" type="number" step="0.0001" min="0" value="${v('manual_cost_usd', 0)}"></label>
     <label>Precio de venta (${esc(curLabel())})<input name="price" type="number" step="0.0001" min="0" value="${v('sale_price_usd', 0)}"></label>
@@ -382,6 +448,16 @@ function prodForm(p, D, preSku = '') {
     <p id="pMargin" class="mut"></p>
     <div class="row"><button class="btn" type="submit">Guardar producto</button>${p ? '<button type="button" class="btn ghost" id="pfDel">Desactivar</button>' : ''}</div></form>`);
   const f = $('#pf'), el = f.elements;
+  wireInlineCategoryCreator({
+    btn: $('#pfNewCat'),
+    box: $('#pfCatBox'),
+    nameInp: $('#pfCatName'),
+    regChk: $('#pfCatReg'),
+    saveBtn: $('#pfCatSave'),
+    cancelBtn: $('#pfCatCancel'),
+    selectEl: el.category_id,
+    catsArr: cats
+  });
   $('#pfScan').onclick = () => openScanner({
     title: 'Escanear código del producto',
     continuous: false,
@@ -574,7 +650,19 @@ function comboForm(combo, D, preSku = '') {
   openSheet(combo ? 'Editar combo' : 'Nuevo combo', `<form id="cbf" class="stack">
     <label>Código (SKU / barras)<div class="scan-row" style="margin-top:.25rem"><input name="sku" value="${esc(v('sku', preSku))}" placeholder="Opcional: escanea o escribe código"><button type="button" class="icon-btn scan-btn" id="cbfScan" title="Escanear código de barras" aria-label="Escanear código de barras">${SCAN_ICO}</button></div></label>
     <label>Nombre del combo<input name="cname" value="${esc(v('name'))}" placeholder="Ej: Combo Desayuno Familiar" required></label>
-    <label>Categoría<select name="category_id">${opt(cats, v('category_id'), 'id', c => c.name)}</select></label>
+    <div class="row0" style="align-items:flex-end;gap:.45rem">
+      <label style="flex:1;margin:0">Categoría<select name="category_id"><option value="">Sin categoría</option>${opt(cats, v('category_id'), 'id', c => c.name)}</select></label>
+      <button type="button" class="btn ghost" id="cbfNewCat" title="Crear nueva categoría" aria-label="Crear nueva categoría" style="min-width:46px;padding:.55rem .75rem">+</button>
+    </div>
+    <div id="cbfCatBox" class="cat-inline stack hidden">
+      <b style="font-size:.88rem">Nueva categoría</b>
+      <input id="cbfCatName" type="text" placeholder="Ej: Combos, Promociones..." autocomplete="off">
+      <label class="chk" style="margin:0"><input type="checkbox" id="cbfCatReg" checked> Se vende con frecuencia</label>
+      <div class="row" style="margin:0">
+        <button type="button" class="btn" id="cbfCatSave" style="min-height:40px;font-size:.9rem">Crear categoría</button>
+        <button type="button" class="btn ghost" id="cbfCatCancel" style="min-height:40px;font-size:.9rem">Cancelar</button>
+      </div>
+    </div>
     <div class="stack" style="gap:.45rem;padding:.65rem;background:var(--bg);border:1px solid var(--line);border-radius:10px">
       <div class="title-row"><b style="font-size:.9rem">Productos incluidos en el combo</b><button type="button" class="lnk" id="cbAddRow">+ Agregar producto</button></div>
       <div id="cbRows" class="stack" style="gap:.5rem"></div>
@@ -587,6 +675,16 @@ function comboForm(combo, D, preSku = '') {
   </form>`);
 
   const f = $('#cbf'), el = f.elements;
+  wireInlineCategoryCreator({
+    btn: $('#cbfNewCat'),
+    box: $('#cbfCatBox'),
+    nameInp: $('#cbfCatName'),
+    regChk: $('#cbfCatReg'),
+    saveBtn: $('#cbfCatSave'),
+    cancelBtn: $('#cbfCatCancel'),
+    selectEl: el.category_id,
+    catsArr: cats
+  });
   $('#cbfScan').onclick = () => openScanner({
     title: 'Escanear código del combo',
     continuous: false,

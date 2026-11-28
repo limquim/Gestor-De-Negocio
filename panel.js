@@ -33,13 +33,17 @@ async function viewInicio() {
       </div>
       <div class="card stack" style="margin-top:1rem">
         <p class="mut" style="margin:0">Configuración y funciones de administrador están protegidas con el PIN del dueño.</p>
-        <button type="button" class="btn ghost" id="stUnlock">Desbloquear Modo Dueño (PIN)</button>
+        <div class="row" style="margin:0">
+          <button type="button" class="btn ghost" id="stUnlock">Desbloquear Modo Dueño (PIN)</button>
+          <button type="button" class="btn ghost" id="stTut">Ver guía rápida</button>
+        </div>
       </div>`;
     $('#stSell').onclick = () => { SUB.ven = 'nueva'; go('ventas'); };
     $('#stPrices').onclick = () => go('inventario');
     if ($('#stQuote')) $('#stQuote').onclick = () => { SUB.ven = 'cotizaciones'; go('ventas'); };
     $('#stCobrar').onclick = () => { SUB.ven = 'cobrar'; go('ventas'); };
     $('#stUnlock').onclick = () => promptUnlockOwner();
+    if ($('#stTut')) $('#stTut').onclick = () => { if (typeof openTutorial === 'function') openTutorial(0); };
     return;
   }
   try {
@@ -74,6 +78,19 @@ async function viewInicio() {
   const gastoTop = mes.gastos_por_tipo.slice(0, 4), maxG = Math.max(0, ...gastoTop.map(x => +x.total));
 
   if (typeof applyRulesObj === 'function') applyRulesObj(set);
+  const showTutCard = typeof isTutorialSeen === 'function' && !isTutorialSeen();
+  const tutCard = showTutCard ? `<div class="card" style="border-left:5px solid var(--tag);padding:.9rem 1rem">
+    <div class="title-row" style="gap:.6rem;flex-wrap:wrap">
+      <div style="flex:1;min-width:190px">
+        <b style="display:block">¿Primera vez usando la app?</b>
+        <small class="mut">Aprende en 1 minuto cómo crear productos, categorías, combos y ventas.</small>
+      </div>
+      <div class="row0" style="gap:.4rem">
+        <button type="button" class="btn" id="pOpenTut" style="min-height:38px;padding:.35rem .8rem;font-size:.88rem">Ver tutorial</button>
+        <button type="button" class="lnk" id="pHideTut" style="font-size:.82rem">Ocultar</button>
+      </div>
+    </div>
+  </div>` : '';
   const showWelcome = set.apertura_completada === false;
   const welcomeCard = showWelcome ? `<div class="card" style="border-left:5px solid var(--pri)">
     <h2>¿Tu negocio ya estaba en marcha?</h2>
@@ -109,6 +126,7 @@ async function viewInicio() {
     <p class="mut" style="margin:0">${esc(set.business_name || 'Mi negocio')} | ${dmy(hoy)}${set.fecha_apertura ? ' | Inicio: ' + dmy(set.fecha_apertura) : ''}</p>
     <button class="lnk" id="pWaSum" style="font-size:.85rem">Enviar resumen</button>
   </div>
+  ${tutCard}
   ${welcomeCard}
   <div class="hero"><span>Ganancia neta del mes</span><b class="${U1 < 0 ? 'neg2' : ''}">${U(U1)}</b>
     ${S.bimoneda !== false ? `<small>${mesBs.ok ? `Bs históricos: <b>${fmt(mesBs.netaBs)} Bs</b>` : (S.rate ? fmt(U1 * S.rate) + ' Bs hoy' : '')}${mesBs.ok && S.rate ? ` · Equiv. hoy: ${fmt(U1 * S.rate)} Bs` : ''}</small>` : ''}
@@ -119,7 +137,7 @@ async function viewInicio() {
     <button class="tile main" data-go="ventas">${ico('<path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6"/>')}<span>Vender</span><small>Nueva venta</small></button>
     ${hasMod('purchases') ? `<button class="tile" data-go="compras">${ico('<path d="M6 7h12l-1 13H7z"/><path d="M9 7a3 3 0 016 0"/>')}<span>Comprar</span><small>Registrar compra</small></button>` : ''}
     ${hasMod('production') ? `<button class="tile" data-go="produccion">${ico('<path d="M9 3h6M10 3v6L4.5 19a1.5 1.5 0 001.3 2h12.4a1.5 1.5 0 001.3-2L14 9V3"/><path d="M7.5 15h9"/>')}<span>Producir</span><small>Fabricar productos</small></button>` : ''}
-    ${hasMod('inventory') ? `<button class="tile" data-go="inventario">${ico('<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>')}<span>Inventario</span><small>Existencias y precios</small></button>` : ''}
+    ${hasMod('inventory') ? `<button class="tile" data-go="inventario">${ico('<path d="M3 7l9-4 9 4v10l-9 4-9-4z"/><path d="M3 7l9 4 9-4M12 11v10"/>')}<span>Inventario</span><small>Productos, stock y combos</small></button>` : ''}
     ${!hasMod('inventory') ? `<button class="tile" data-go="finanzas">${ico('<path d="M2 7h20v12H2z"/><path d="M2 11h20"/>')}<span>Finanzas</span><small>Cuentas y gastos</small></button>` : ''}
     ${!hasMod('purchases') && hasMod('marketing') ? `<button class="tile" data-go="marketing">${ico('<path d="M4 4h16v12H5.17L4 17.17z"/>')}<span>Marketing</span><small>Clientes y WhatsApp</small></button>` : ''}
   </div>
@@ -138,9 +156,9 @@ async function viewInicio() {
   <div class="card"><h2>Mejores clientes del mes</h2>${topC.map(([n, v]) => bar(n, v, maxC, U(v))).join('') || '<p class="mut">Aún no hay ventas este mes.</p>'}</div>
   <div class="card"><h2>Gastos del mes</h2>${gastoTop.map(x => bar(x.tipo + (x.fijo ? ' (fijo)' : ''), +x.total, maxG, U(+x.total))).join('') || '<p class="mut">Sin gastos registrados este mes.</p>'}</div>
   ${hasMod('inventory') ? `<h2 class="sec">Inventario</h2>
-  <div class="stats"><button class="stat" data-go="inventario"><span>Valor del inventario</span><b>${U(inv)}</b><span>${S.rate ? fmt(inv * S.rate) + ' Bs' : ''}</span></button>
-    <button class="stat bad" data-go="inventario"><span>Por reponer</span><b>${bajos}</b><span>en el mínimo o agotados</span></button>
-    <button class="stat warn" data-go="inventario"><span>Sin vender en 30 días</span><b>${slow.length}</b><span>${U(slowV)} detenidos (sin contar materia prima)</span></button></div>` : ''}`;
+  <div class="stats"><button class="stat" data-go="inventario" onclick="SUB.inv='stock'"><span>Valor del inventario</span><b>${U(inv)}</b><span>${S.rate ? fmt(inv * S.rate) + ' Bs' : ''}</span></button>
+    <button class="stat bad" data-go="inventario" onclick="SUB.inv='stock';INV.low=true"><span>Por reponer</span><b>${bajos}</b><span>en el mínimo o agotados</span></button>
+    <button class="stat warn" data-go="inventario" onclick="SUB.inv='stock'"><span>Sin vender en 30 días</span><b>${slow.length}</b><span>${U(slowV)} detenidos (sin contar materia prima)</span></button></div>` : ''}`;
   if ($('#pWaSum') && typeof shareExecutiveSummaryWhatsApp === 'function') {
     $('#pWaSum').onclick = () => shareExecutiveSummaryWhatsApp({
       business: set.business_name || 'Mi negocio',
@@ -171,6 +189,8 @@ async function viewInicio() {
       $('#pDayInfo').innerHTML = `<b>${dmy(b.dataset.day)}</b>: <b>${U(v)}</b>${S.bimoneda !== false && S.rate ? ' (' + fmtSec(v * S.rate) + ')' : ''} · Total 14 días: ${U(quin.ingresos)}`;
     };
   }
+  if ($('#pOpenTut')) $('#pOpenTut').onclick = () => { if (typeof openTutorial === 'function') openTutorial(0); };
+  if ($('#pHideTut')) $('#pHideTut').onclick = () => { if (typeof markTutorialSeen === 'function') markTutorialSeen(); render(); };
   $('#pPend').onclick = () => { SUB.ven = 'cobrar'; go('ventas'); };
   if ($('#pPag')) $('#pPag').onclick = () => { SUB.com = 'pagar'; go('compras'); };
   if ($('#pSkipAp')) $('#pSkipAp').onclick = () => run(async () => {

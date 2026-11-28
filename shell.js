@@ -100,8 +100,8 @@ views.inventario = page('Inventario', async () => {
     await viewProductos2();
     return;
   }
-  const subs = {stock: 'Existencias', productos: 'Productos', combos: 'Combos', precios: 'Precios', catalogo: 'Catálogo', ajuste: 'Ajuste masivo'};
-  const fns = {stock: viewInventario2, productos: viewProductos2, combos: viewCombos, precios: viewPreciosMasivo, catalogo: viewCatalogo, ajuste: viewAjusteMasivo};
+  const subs = {productos: 'Productos', stock: 'Existencias', combos: 'Combos', precios: 'Precios', catalogo: 'Catálogo', ajuste: 'Ajuste masivo'};
+  const fns = {productos: viewProductos2, stock: viewInventario2, combos: viewCombos, precios: viewPreciosMasivo, catalogo: viewCatalogo, ajuste: viewAjusteMasivo};
   if (!hasMod('catalog')) delete subs.catalogo;
   await withSubs('inv', subs, fns)();
 }, false);
@@ -183,6 +183,14 @@ document.addEventListener('click', (e) => {
       return;
     }
 
+    // 1b. Si el tutorial rápido está abierto, cerrarlo primero
+    const tm = document.querySelector('#tutModal');
+    if (tm && !tm.classList.contains('hidden')) {
+      if (typeof closeTutorial === 'function') closeTutorial();
+      armGuard();
+      return;
+    }
+
     // 2. Si hay una hoja deslizable / modal abierta, cerrarla
     const sh = document.querySelector('#sheet');
     if (sh && !sh.classList.contains('hidden')) {
@@ -250,7 +258,7 @@ document.addEventListener('click', (e) => {
 // ---------- Buscador Global Instantáneo (Productos, Clientes/Proveedores y Ventas) ----------
 async function openGlobalSearch() {
   const [prods, stockRows, parties, debts, sales] = await Promise.all([
-    q(db.from('products').select('id,sku,name,unit,sale_price_usd,avg_cost_usd,is_service,track_inventory,product_categories(name)').eq('active', true).order('name')),
+    q(db.from('products').select('id,sku,name,unit,sale_price_usd,avg_cost_usd,is_service,is_combo,track_inventory,product_categories(name)').eq('active', true).order('name')),
     q(db.from('stock_actual').select('product_id,stock')),
     q(db.from('parties').select('*').eq('active', true).order('name')),
     q(db.from('deudas_clientes').select('customer_id,debt_usd')).catch(() => []),
@@ -287,7 +295,7 @@ async function openGlobalSearch() {
     if (hitP.length) {
       html += `<div class="stack" style="gap:.35rem"><small class="mut"><b>PRODUCTOS (${hitP.length})</b></small>${hitP.map(p => {
         const st = stMap[p.id] || 0;
-        const stTxt = p.is_service ? 'Servicio' : p.track_inventory === false ? 'Disponible' : `Stock: ${qty(st)} ${esc(p.unit)}`;
+        const stTxt = p.is_combo ? 'Combo' : p.is_service ? 'Servicio' : p.track_inventory === false ? 'Disponible' : `Stock: ${qty(st)} ${esc(p.unit)}`;
         return `<div class="item" style="gap:.5rem">
           <button type="button" class="lnk" data-gsp="${p.id}" style="flex:1;text-align:left;padding:0;color:var(--ink);font-weight:400">
             <b>${esc(p.name)}</b>
@@ -343,7 +351,9 @@ async function openGlobalSearch() {
       const p = prods.find(x => String(x.id) === pB.dataset.gsp);
       if (!p) return;
       if (canEditInv) {
-        PR2.q = p.name; SUB.inv = 'productos'; closeSheet(); go('inventario');
+        if (p.is_combo) { CMB.q = p.name; SUB.inv = 'combos'; }
+        else { PR2.q = p.name; SUB.inv = 'productos'; }
+        closeSheet(); go('inventario');
       } else {
         toast(`${p.name}: ${fmtCur(p.sale_price_usd)}${S.bimoneda !== false && S.rate ? ' (' + fmtSec(p.sale_price_usd * S.rate) + ')' : ''}`);
       }
@@ -360,3 +370,4 @@ async function openGlobalSearch() {
   };
 }
 if ($('#globalSearchBtn')) $('#globalSearchBtn').onclick = () => run(openGlobalSearch);
+if ($('#helpBtn')) $('#helpBtn').onclick = () => { if (typeof openTutorial === 'function') openTutorial(0); };

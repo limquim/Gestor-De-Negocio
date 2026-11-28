@@ -162,3 +162,21 @@ input[type=color]{padding:.2rem;cursor:pointer}
 /* Barra seleccionada en gráficas táctiles */
 .dayb i{cursor:pointer;transition:opacity .15s,background .15s}
 .dayb i.sel{background:var(--tag)}
+
+/* Creador rápido de categoría dentro de formularios */
+.cat-inline{padding:.75rem .85rem;background:var(--bg);border:1px dashed color-mix(in srgb,var(--pri) 55%,var(--line));border-radius:12px;gap:.55rem}
+
+/* Modal de Tutorial interactivo rápido */
+.tut-modal{position:fixed;inset:0;z-index:85;display:flex;align-items:flex-end;justify-content:center}
+.tut-bg{position:absolute;inset:0;background:rgba(0,0,0,.58);backdrop-filter:blur(2px)}
+.tut-box{position:relative;width:100%;max-height:90vh;overflow:auto;background:var(--card);border-radius:20px 20px 0 0;padding:1.15rem 1.15rem calc(1.15rem + env(safe-area-inset-bottom));display:grid;gap:.85rem;box-shadow:0 -10px 34px rgba(0,0,0,.3)}
+@media(min-width:680px){.tut-modal{align-items:center;padding:1rem}.tut-box{max-width:480px;border-radius:20px;padding:1.3rem}}
+.tut-head{display:flex;align-items:flex-start;gap:.8rem}
+.tut-icon{width:46px;height:46px;border-radius:14px;background:color-mix(in srgb,var(--pri) 14%,var(--bg));color:var(--pri);display:grid;place-items:center;flex:none}
+.tut-icon .ic{width:25px;height:25px}
+.tut-tips{margin:0;padding:0;list-style:none;display:grid;gap:.5rem}
+.tut-tips li{position:relative;padding:.55rem .75rem .55rem 1.55rem;background:var(--bg);border:1px solid var(--line);border-radius:10px;font-size:.9rem;line-height:1.42}
+.tut-tips li::before{content:"";position:absolute;left:.65rem;top:.92rem;width:7px;height:7px;border-radius:50%;background:var(--pri)}
+.tut-dots{display:flex;justify-content:center;gap:.45rem;padding:.15rem 0}
+.tut-dots button{width:10px;height:10px;border-radius:99px;border:0;padding:0;background:var(--line);cursor:pointer;transition:width .2s,background .2s}
+.tut-dots button.on{width:26px;background:var(--pri)}

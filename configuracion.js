@@ -349,6 +349,12 @@ async function viewConfiguracion() {
           pillCls: ''
         },
         {
+          k: 'tutorial', name: 'Tutorial y guía rápida',
+          desc: 'Recorrido paso a paso para crear productos, categorías, combos, ventas y respaldos',
+          pill: 'Guía',
+          pillCls: 'ok'
+        },
+        {
           k: 'acerca', name: 'App, espacio y soporte',
           desc: 'Uso de memoria local, instalación como app (PWA) y contacto de soporte',
           pill: '100% Local',
@@ -401,6 +407,10 @@ async function viewConfiguracion() {
   $('#cfgHub').onclick = (e) => {
     const b = e.target.closest('[data-cfg]');
     if (!b) return;
+    if (b.dataset.cfg === 'tutorial') {
+      if (typeof openTutorial === 'function') openTutorial(0);
+      return;
+    }
     SUB.cfg = b.dataset.cfg;
     render();
   };
